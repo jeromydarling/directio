@@ -152,6 +152,9 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
             <LinkButton to="/admin/settings/public-listing" variant="secondary">
               Public listing
             </LinkButton>
+            <LinkButton to="/admin/settings/cancellation" variant="secondary">
+              Cancellation policy
+            </LinkButton>
           </div>
         }
       />

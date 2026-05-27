@@ -38,6 +38,7 @@ export async function loader({ request, context }: Route.LoaderArgs): Promise<Fa
 
 const NAV = [
   { to: "/family", label: "Family", end: true },
+  { to: "/family/lessons", label: "Lessons" },
   { to: "/family/payments", label: "Payments" },
   { to: "/family/documents", label: "Documents" },
   { to: "/me/help", label: "Help" },

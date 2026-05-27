@@ -44,6 +44,8 @@ export default [
     route("settings/public-listing", "routes/admin.settings.public-listing.tsx"),
     route("reports/quizzes", "routes/admin.reports.quizzes.tsx"),
     route("documents", "routes/admin.documents.tsx"),
+    route("fees", "routes/admin.fees.tsx"),
+    route("settings/cancellation", "routes/admin.settings.cancellation.tsx"),
   ]),
 
   route("instructor", "routes/instructor.tsx", [
@@ -55,6 +57,7 @@ export default [
 
   route("family", "routes/family.tsx", [
     index("routes/family._index.tsx"),
+    route("lessons", "routes/family.lessons.tsx"),
     route("payments", "routes/family.payments.tsx"),
     route("documents", "routes/family.documents.tsx"),
   ]),

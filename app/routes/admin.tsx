@@ -21,6 +21,7 @@ const NAV = [
   { to: "/admin/reports/quizzes", label: "Quiz reports" },
   { to: "/admin/documents", label: "Documents" },
   { to: "/admin/payments", label: "Payments" },
+  { to: "/admin/fees", label: "Fees" },
   { to: "/admin/settings", label: "Settings" },
 ];
 
