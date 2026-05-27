@@ -24,6 +24,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       .first<{ role: string }>();
     if (!role) destination = "/onboarding";
     else if (role.role === "owner" || role.role === "admin") destination = "/admin";
+    else if (role.role === "instructor") destination = "/instructor";
     else destination = "/me";
   }
   return {

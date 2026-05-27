@@ -92,7 +92,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
       if (stmts.length > 0) {
         await env.DB.batch(stmts);
-        destination = "/me";
+        destination = instructorMatches.results.length > 0 ? "/instructor" : "/me";
       }
     }
 

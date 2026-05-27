@@ -36,6 +36,12 @@ export default [
     route("settings/btw-flow", "routes/admin.settings.btw-flow.tsx"),
   ]),
 
+  route("instructor", "routes/instructor.tsx", [
+    index("routes/instructor._index.tsx"),
+    route("upcoming", "routes/instructor.upcoming.tsx"),
+    route("past", "routes/instructor.past.tsx"),
+  ]),
+
   route("me", "routes/me.tsx", [
     index("routes/me._index.tsx"),
     route("schedule", "routes/me.schedule.tsx"),

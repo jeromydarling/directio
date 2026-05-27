@@ -60,6 +60,7 @@ export async function action({ request, context }: Route.ActionArgs) {
           .bind(u.id)
           .first<{ role: string }>();
         if (!r) destination = "/onboarding";
+        else if (r.role === "instructor") destination = "/instructor";
         else if (r.role !== "owner" && r.role !== "admin") destination = "/me";
       }
     }
