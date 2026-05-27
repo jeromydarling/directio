@@ -9,6 +9,8 @@ export default [
   route("api/auth/*", "routes/api.auth.tsx"),
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
+  route("schools/:slug", "routes/schools.$slug.tsx"),
+  route("schools/:slug/enroll", "routes/schools.$slug.enroll.tsx"),
 
   route("admin", "routes/admin.tsx", [
     index("routes/admin._index.tsx"),
@@ -38,6 +40,7 @@ export default [
     route("settings", "routes/admin.settings.tsx"),
     route("settings/payments", "routes/admin.settings.payments.tsx"),
     route("settings/btw-flow", "routes/admin.settings.btw-flow.tsx"),
+    route("settings/public-listing", "routes/admin.settings.public-listing.tsx"),
   ]),
 
   route("instructor", "routes/instructor.tsx", [

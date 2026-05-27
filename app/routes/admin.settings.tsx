@@ -149,6 +149,9 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
             <LinkButton to="/admin/settings/btw-flow" variant="secondary">
               BTW flow
             </LinkButton>
+            <LinkButton to="/admin/settings/public-listing" variant="secondary">
+              Public listing
+            </LinkButton>
           </div>
         }
       />
