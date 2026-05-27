@@ -8,7 +8,7 @@ import {
   deepCopyPackToSchool,
   removeSchoolCopyForInstall,
 } from "~/lib/curriculum.server";
-import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
+import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput } from "~/components/form";
 
 type PackRow = {
@@ -191,6 +191,7 @@ export default function AdminLibrary({ loaderData, actionData }: Route.Component
         eyebrow="Curriculum library"
         title="Content packs"
         description="Install platform curriculum and edit your copy, or build your own pack from scratch for things only your school teaches."
+        actions={<LinkButton to="/admin/library/media" variant="secondary">Media library →</LinkButton>}
       />
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />

@@ -7,6 +7,7 @@ import {
   addSchoolQuestion,
   deleteSchoolLessonAsset,
   deleteSchoolQuestion,
+  reorderSchoolAsset,
   uploadLessonFileAsset,
 } from "~/lib/curriculum.server";
 import { parseYouTubeId, youTubeEmbedUrl } from "~/lib/youtube";
@@ -285,6 +286,17 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
 
+  if (intent === "move-asset-up" || intent === "move-asset-down") {
+    const assetId = String(formData.get("assetId") ?? "");
+    if (!assetId) return data({ error: "Asset missing." }, { status: 400 });
+    await reorderSchoolAsset(env, {
+      organizationId: tenant.organization.id,
+      assetId,
+      direction: intent === "move-asset-up" ? "up" : "down",
+    });
+    return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
+  }
+
   if (intent === "delete-asset") {
     const assetId = String(formData.get("assetId") ?? "");
     if (!assetId) return data({ error: "Asset missing." }, { status: 400 });
@@ -437,12 +449,14 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
         </h2>
         {assets.length === 0 ? null : (
           <ul className="mb-4 flex flex-col gap-3">
-            {assets.map((a) => {
+            {assets.map((a, aIdx) => {
               const meta = a.metadata as { videoId?: unknown } | null;
               const videoId =
                 a.kind === "youtube" && meta && typeof meta.videoId === "string"
                   ? meta.videoId
                   : null;
+              const isFirst = aIdx === 0;
+              const isLast = aIdx === assets.length - 1;
               return (
                 <li
                   key={a.id}
@@ -465,13 +479,29 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
                         {a.url}
                       </a>
                     </div>
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="delete-asset" />
-                      <input type="hidden" name="assetId" value={a.id} />
-                      <Button type="submit" variant="ghost" disabled={submitting}>
-                        Remove
-                      </Button>
-                    </Form>
+                    <div className="flex items-center gap-2">
+                      <Form method="post" className="contents">
+                        <input type="hidden" name="intent" value="move-asset-up" />
+                        <input type="hidden" name="assetId" value={a.id} />
+                        <Button type="submit" variant="ghost" disabled={submitting || isFirst}>
+                          ↑
+                        </Button>
+                      </Form>
+                      <Form method="post" className="contents">
+                        <input type="hidden" name="intent" value="move-asset-down" />
+                        <input type="hidden" name="assetId" value={a.id} />
+                        <Button type="submit" variant="ghost" disabled={submitting || isLast}>
+                          ↓
+                        </Button>
+                      </Form>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="delete-asset" />
+                        <input type="hidden" name="assetId" value={a.id} />
+                        <Button type="submit" variant="ghost" disabled={submitting}>
+                          Remove
+                        </Button>
+                      </Form>
+                    </div>
                   </div>
                   {videoId && (
                     <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">

@@ -604,6 +604,47 @@ export async function uploadLessonFileAsset(
 }
 
 /**
+ * Reorder a school_lesson_asset by swapping ordinals with an
+ * adjacent sibling in the same lesson. Mirrors swapOrdinal but the
+ * asset table doesn't carry updatedAt, so we keep this specialised.
+ */
+export async function reorderSchoolAsset(
+  env: Env,
+  args: { organizationId: string; assetId: string; direction: "up" | "down" },
+): Promise<boolean> {
+  const me = await env.DB.prepare(
+    "SELECT id, ordinal, schoolLessonId FROM school_lesson_asset WHERE id = ? AND organizationId = ?",
+  )
+    .bind(args.assetId, args.organizationId)
+    .first<{ id: string; ordinal: number; schoolLessonId: string }>();
+  if (!me) return false;
+
+  const compareOp = args.direction === "up" ? "<" : ">";
+  const orderDir = args.direction === "up" ? "DESC" : "ASC";
+  const neighbor = await env.DB.prepare(
+    `SELECT id, ordinal FROM school_lesson_asset
+       WHERE schoolLessonId = ? AND organizationId = ? AND ordinal ${compareOp} ?
+       ORDER BY ordinal ${orderDir} LIMIT 1`,
+  )
+    .bind(me.schoolLessonId, args.organizationId, me.ordinal)
+    .first<{ id: string; ordinal: number }>();
+  if (!neighbor) return false;
+
+  await env.DB.batch([
+    env.DB.prepare("UPDATE school_lesson_asset SET ordinal = -1 WHERE id = ?").bind(me.id),
+    env.DB.prepare("UPDATE school_lesson_asset SET ordinal = ? WHERE id = ?").bind(
+      me.ordinal,
+      neighbor.id,
+    ),
+    env.DB.prepare("UPDATE school_lesson_asset SET ordinal = ? WHERE id = ?").bind(
+      neighbor.ordinal,
+      me.id,
+    ),
+  ]);
+  return true;
+}
+
+/**
  * Look up an asset by its storage key so the /assets route can
  * confirm the requester belongs to the owning org before streaming.
  */
