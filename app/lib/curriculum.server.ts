@@ -430,3 +430,56 @@ export async function deleteSchoolQuestion(
     .run();
   return (result.meta.changes ?? 0) > 0;
 }
+
+/**
+ * Add a school-owned lesson asset (YouTube video, link, etc).
+ * The kind is restricted to the values we know how to render.
+ */
+export async function addSchoolLessonAsset(
+  env: Env,
+  args: {
+    organizationId: string;
+    schoolLessonId: string;
+    kind: "youtube" | "link" | "image" | "pdf";
+    url: string;
+    caption?: string | null;
+    metadata?: Record<string, unknown> | null;
+  },
+): Promise<string> {
+  const last = await env.DB.prepare(
+    "SELECT COALESCE(MAX(ordinal), -1) AS maxOrd FROM school_lesson_asset WHERE schoolLessonId = ?",
+  )
+    .bind(args.schoolLessonId)
+    .first<{ maxOrd: number }>();
+  const ordinal = (last?.maxOrd ?? -1) + 1;
+  const id = newId();
+  await env.DB.prepare(
+    `INSERT INTO school_lesson_asset (id, organizationId, schoolLessonId, kind, url, caption, metadata, ordinal, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      id,
+      args.organizationId,
+      args.schoolLessonId,
+      args.kind,
+      args.url,
+      args.caption ?? null,
+      args.metadata ? JSON.stringify(args.metadata) : null,
+      ordinal,
+      Date.now(),
+    )
+    .run();
+  return id;
+}
+
+export async function deleteSchoolLessonAsset(
+  env: Env,
+  args: { organizationId: string; assetId: string },
+): Promise<boolean> {
+  const result = await env.DB.prepare(
+    "DELETE FROM school_lesson_asset WHERE id = ? AND organizationId = ?",
+  )
+    .bind(args.assetId, args.organizationId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}

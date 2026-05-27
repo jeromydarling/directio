@@ -2,6 +2,7 @@ import { Form, Link, useNavigation } from "react-router";
 import { marked } from "marked";
 import type { Route } from "./+types/me.learn.$lessonId";
 import { requireTenant } from "~/lib/tenant.server";
+import { youTubeEmbedUrl } from "~/lib/youtube";
 import { Card, LinkButton, Button } from "~/components/ui";
 
 type LessonRow = {
@@ -31,9 +32,25 @@ type QuestionRow = {
 
 type AdjacentRow = { id: string; title: string };
 
+type AssetRow = {
+  id: string;
+  kind: string;
+  url: string;
+  caption: string | null;
+  metadata: string | null;
+  ordinal: number;
+};
+
 type LoaderData = {
   lesson: LessonRow;
   bodyHtml: string;
+  assets: Array<{
+    id: string;
+    kind: string;
+    url: string;
+    caption: string | null;
+    videoId: string | null;
+  }>;
   quiz: QuizRow | null;
   questions: Array<{
     id: string;
@@ -125,9 +142,36 @@ export async function loader({
     .bind(params.lessonId, params.lessonId, tenant.organization.id)
     .first<AdjacentRow>();
 
+  const assetRows = await db
+    .prepare(
+      "SELECT id, kind, url, caption, metadata, ordinal FROM school_lesson_asset WHERE schoolLessonId = ? AND organizationId = ? ORDER BY ordinal",
+    )
+    .bind(params.lessonId, tenant.organization.id)
+    .all<AssetRow>();
+  const assets = assetRows.results.map((a) => {
+    let videoId: string | null = null;
+    if (a.kind === "youtube" && a.metadata) {
+      try {
+        const meta = JSON.parse(a.metadata) as { videoId?: string };
+        if (typeof meta.videoId === "string") videoId = meta.videoId;
+      } catch {
+        // ignore bad metadata
+      }
+    }
+    return { id: a.id, kind: a.kind, url: a.url, caption: a.caption, videoId };
+  });
+
   const bodyHtml = await marked.parse(lesson.body, { async: true });
 
-  return { lesson, bodyHtml, quiz: quiz ?? null, questions, prev: prev ?? null, next: next ?? null };
+  return {
+    lesson,
+    bodyHtml,
+    assets,
+    quiz: quiz ?? null,
+    questions,
+    prev: prev ?? null,
+    next: next ?? null,
+  };
 }
 
 export async function action({
@@ -180,7 +224,7 @@ export async function action({
 }
 
 export default function MeLearnLesson({ loaderData, actionData }: Route.ComponentProps) {
-  const { lesson, bodyHtml, quiz, questions, prev, next } = loaderData;
+  const { lesson, bodyHtml, assets, quiz, questions, prev, next } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const results = actionData?.results;
@@ -219,6 +263,42 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
         className="prose prose-ink max-w-none text-ink-800 dark:text-ink-100"
         dangerouslySetInnerHTML={{ __html: bodyHtml }}
       />
+
+      {assets.length > 0 && (
+        <section className="flex flex-col gap-5">
+          {assets.map((a) =>
+            a.videoId ? (
+              <figure key={a.id} className="flex flex-col gap-2">
+                <div className="aspect-video w-full overflow-hidden rounded-2xl border border-ink-200 bg-black dark:border-ink-800">
+                  <iframe
+                    src={youTubeEmbedUrl(a.videoId)}
+                    className="h-full w-full"
+                    loading="lazy"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    title={a.caption ?? "Lesson video"}
+                  />
+                </div>
+                {a.caption && (
+                  <figcaption className="text-sm text-ink-500 dark:text-ink-400">
+                    {a.caption}
+                  </figcaption>
+                )}
+              </figure>
+            ) : (
+              <a
+                key={a.id}
+                href={a.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block rounded-2xl border border-ink-200 bg-white/70 p-4 text-sm text-ink-700 transition hover:border-brand-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
+              >
+                {a.caption ?? a.url}
+              </a>
+            ),
+          )}
+        </section>
+      )}
 
       {quiz && questions.length > 0 && (
         <section className="mt-6 flex flex-col gap-4 border-t border-ink-200/60 pt-8 dark:border-ink-800/60">

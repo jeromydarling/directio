@@ -2,7 +2,13 @@ import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.library.installed.$installId.lessons.$lessonId";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
-import { addSchoolQuestion, deleteSchoolQuestion } from "~/lib/curriculum.server";
+import {
+  addSchoolLessonAsset,
+  addSchoolQuestion,
+  deleteSchoolLessonAsset,
+  deleteSchoolQuestion,
+} from "~/lib/curriculum.server";
+import { parseYouTubeId, youTubeEmbedUrl } from "~/lib/youtube";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput, TextArea, Select } from "~/components/form";
 
@@ -29,6 +35,15 @@ type QuestionRow = {
   choices: string;
   correctIndex: number;
   explanation: string | null;
+  ordinal: number;
+};
+
+type AssetRow = {
+  id: string;
+  kind: string;
+  url: string;
+  caption: string | null;
+  metadata: string | null;
   ordinal: number;
 };
 
@@ -67,7 +82,18 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     questions = rows.results;
   }
 
-  return { lesson, quiz, questions };
+  const assetRows = await db
+    .prepare(
+      "SELECT id, kind, url, caption, metadata, ordinal FROM school_lesson_asset WHERE schoolLessonId = ? AND organizationId = ? ORDER BY ordinal",
+    )
+    .bind(params.lessonId, tenant.organization.id)
+    .all<AssetRow>();
+  const assets = assetRows.results.map((a) => ({
+    ...a,
+    metadata: a.metadata ? (JSON.parse(a.metadata) as Record<string, unknown>) : null,
+  }));
+
+  return { lesson, quiz, questions, assets };
 }
 
 export async function action({ params, request, context }: Route.ActionArgs) {
@@ -190,6 +216,51 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
 
+  if (intent === "add-youtube") {
+    const url = String(formData.get("url") ?? "").trim();
+    const caption = String(formData.get("caption") ?? "").trim() || null;
+    const videoId = parseYouTubeId(url);
+    if (!videoId)
+      return data(
+        { error: "Couldn't recognize that as a YouTube link. Try copying it from the address bar." },
+        { status: 400 },
+      );
+    const assetId = await addSchoolLessonAsset(env, {
+      organizationId: tenant.organization.id,
+      schoolLessonId: params.lessonId,
+      kind: "youtube",
+      url,
+      caption,
+      metadata: { videoId },
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "lesson_asset.added",
+      entityType: "school_lesson_asset",
+      entityId: assetId,
+      payload: { kind: "youtube", videoId },
+    });
+    return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
+  }
+
+  if (intent === "delete-asset") {
+    const assetId = String(formData.get("assetId") ?? "");
+    if (!assetId) return data({ error: "Asset missing." }, { status: 400 });
+    await deleteSchoolLessonAsset(env, {
+      organizationId: tenant.organization.id,
+      assetId,
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "lesson_asset.deleted",
+      entityType: "school_lesson_asset",
+      entityId: assetId,
+    });
+    return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
+  }
+
   if (intent === "generate-audio") {
     // Stub for ElevenLabs. Real call lands in the keys-pass at the end.
     // For now we mark a placeholder URL so the UI can demonstrate audio
@@ -215,7 +286,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 }
 
 export default function LessonEditor({ loaderData, actionData }: Route.ComponentProps) {
-  const { lesson, quiz, questions } = loaderData;
+  const { lesson, quiz, questions, assets } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -316,6 +387,94 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
               </p>
             </Form>
           )}
+        </Card>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Videos &amp; resources
+        </h2>
+        {assets.length === 0 ? null : (
+          <ul className="mb-4 flex flex-col gap-3">
+            {assets.map((a) => {
+              const meta = a.metadata as { videoId?: unknown } | null;
+              const videoId =
+                a.kind === "youtube" && meta && typeof meta.videoId === "string"
+                  ? meta.videoId
+                  : null;
+              return (
+                <li
+                  key={a.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-ink-200 bg-white/70 p-4 dark:border-ink-800 dark:bg-ink-900/40"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
+                        {a.kind}
+                      </p>
+                      <p className="mt-1 truncate text-sm text-ink-700 dark:text-ink-200">
+                        {a.caption || a.url}
+                      </p>
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block truncate text-xs text-ink-500 hover:text-brand-600 dark:text-ink-400 dark:hover:text-brand-300"
+                      >
+                        {a.url}
+                      </a>
+                    </div>
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="delete-asset" />
+                      <input type="hidden" name="assetId" value={a.id} />
+                      <Button type="submit" variant="ghost" disabled={submitting}>
+                        Remove
+                      </Button>
+                    </Form>
+                  </div>
+                  {videoId && (
+                    <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">
+                      <iframe
+                        src={youTubeEmbedUrl(videoId)}
+                        className="h-full w-full"
+                        loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                        title={a.caption ?? "YouTube video"}
+                      />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <Card>
+          <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+            Add a YouTube video
+          </h3>
+          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+            Paste any YouTube URL — watch link, share link, or embed. Students see it embedded inline with the lesson.
+          </p>
+          <Form method="post" className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <input type="hidden" name="intent" value="add-youtube" />
+            <Field label="">
+              <TextInput
+                name="url"
+                type="url"
+                placeholder="https://www.youtube.com/watch?v=..."
+                required
+              />
+            </Field>
+            <Field label="">
+              <TextInput name="caption" type="text" placeholder="Caption (optional)" />
+            </Field>
+            <div className="self-end">
+              <Button type="submit" disabled={submitting}>
+                Add video
+              </Button>
+            </div>
+          </Form>
         </Card>
       </section>
 
