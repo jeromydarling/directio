@@ -52,6 +52,7 @@ export default [
     route("documents", "routes/admin.documents.tsx"),
     route("fees", "routes/admin.fees.tsx"),
     route("road-tests", "routes/admin.road-tests.tsx"),
+    route("state-coverage", "routes/admin.state-coverage.tsx"),
     route("settings/cancellation", "routes/admin.settings.cancellation.tsx"),
   ]),
 

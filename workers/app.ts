@@ -1,5 +1,8 @@
 import { createRequestHandler } from "react-router";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
+import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
+
+export { StateAuditWorkflow } from "./state-audit-workflow";
 
 declare module "react-router" {
   export interface AppLoadContext {
@@ -32,6 +35,14 @@ export default {
           await runBtwReminderSweep(env, { hoursAhead: 1 });
         } catch (err) {
           console.error("scheduled reminder sweep failed:", err);
+        }
+        try {
+          // Round-robin a few state source pages per cron tick so we
+          // cover the whole country over the course of a day without
+          // pounding any one DMV.
+          await runStateChangeMonitor(env, { batchSize: 5 });
+        } catch (err) {
+          console.error("scheduled state-change monitor failed:", err);
         }
       })(),
     );
