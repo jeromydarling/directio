@@ -7,7 +7,7 @@
  * server-only — no React, no HTML.
  */
 
-import { anthropicComplete, extractJson, type AnthropicRequest } from "./llm.server";
+import { extractJson, workersAiPrompt } from "./llm.server";
 
 export type StateAuditDiff = {
   state_code: string;
@@ -144,18 +144,31 @@ export async function runStateAudit(
   env: Env,
   input: StateAuditInput,
 ): Promise<StateAuditOutput> {
-  const req: AnthropicRequest = {
+  const res = await workersAiPrompt(env, {
     system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userPrompt(input) }],
+    prompt: userPrompt(input),
+    model: "smart",
     maxTokens: 4096,
     temperature: 0.1,
-  };
-  const res = await anthropicComplete(env, req);
-  const diff = extractJson<StateAuditDiff>(res.text);
+  });
+  let diff = extractJson<StateAuditDiff>(res.text);
   if (!diff) {
-    throw new Error(
-      `Audit ${input.stateCode}: model returned non-JSON output (${res.text.slice(0, 200)})`,
-    );
+    // One retry — sometimes the 70b model prefixes prose; remind it.
+    const retry = await workersAiPrompt(env, {
+      system: SYSTEM_PROMPT,
+      prompt:
+        userPrompt(input) +
+        "\n\nIMPORTANT: Output the JSON object directly. No preamble, no markdown, no explanation. Start with { and end with }.",
+      model: "smart",
+      maxTokens: 4096,
+      temperature: 0.05,
+    });
+    diff = extractJson<StateAuditDiff>(retry.text);
+    if (!diff) {
+      throw new Error(
+        `Audit ${input.stateCode}: model returned non-JSON output (${res.text.slice(0, 200)})`,
+      );
+    }
   }
   // Pull citations out of the diff
   const citations: StateAuditCitation[] = [];
@@ -170,8 +183,8 @@ export async function runStateAudit(
     diff,
     citations,
     modelUsed: res.modelUsed,
-    inputTokens: res.inputTokens,
-    outputTokens: res.outputTokens,
+    inputTokens: res.inputTokens ?? 0,
+    outputTokens: res.outputTokens ?? 0,
   };
 }
 

@@ -92,38 +92,73 @@ export async function anthropicComplete(
 }
 
 /**
- * Cheap classification via Workers AI. Use for high-frequency, low-stakes
- * decisions like "did this state DMV page change in a material way?"
+ * Workers AI helper. Two presets:
+ *   - "cheap"  → @cf/meta/llama-3.1-8b-instruct, for high-frequency
+ *               classifications (cron monitor, change detection)
+ *   - "smart"  → @cf/meta/llama-3.3-70b-instruct-fp8-fast, for
+ *               structured-output reasoning (state audits)
+ *
+ * Routed through AI Gateway when configured, otherwise direct.
  */
-export type WorkersAIClassifyResult = {
+export type WorkersAIResult = {
   text: string;
   modelUsed: string;
+  inputTokens?: number;
+  outputTokens?: number;
 };
 
-const WORKERS_AI_DEFAULT = "@cf/meta/llama-3.1-8b-instruct";
+const WORKERS_AI_CHEAP = "@cf/meta/llama-3.1-8b-instruct";
+const WORKERS_AI_SMART = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+function gatewayConfig(env: Env): { gateway?: { id: string } } {
+  const gw: string = env.AI_GATEWAY_NAME ?? "";
+  if (gw && !gw.startsWith("set-")) return { gateway: { id: gw } };
+  return {};
+}
 
 export async function workersAiPrompt(
   env: Env,
-  args: { prompt: string; system?: string; model?: string; maxTokens?: number },
-): Promise<WorkersAIClassifyResult> {
+  args: {
+    prompt: string;
+    system?: string;
+    model?: "cheap" | "smart" | string;
+    maxTokens?: number;
+    temperature?: number;
+  },
+): Promise<WorkersAIResult> {
   if (!env.AI) {
     throw new LlmNotConfiguredError("Workers AI binding (AI) not configured");
   }
-  const model = args.model ?? WORKERS_AI_DEFAULT;
-  // The Workers AI binding's `.run` is typed loosely; the runtime accepts
-  // either {prompt} or {messages}. We use messages because system+user
-  // separation matters for classification accuracy.
+  const model =
+    !args.model || args.model === "cheap"
+      ? WORKERS_AI_CHEAP
+      : args.model === "smart"
+        ? WORKERS_AI_SMART
+        : args.model;
   const messages = [
     ...(args.system ? [{ role: "system" as const, content: args.system }] : []),
     { role: "user" as const, content: args.prompt },
   ];
-  const result = (await env.AI.run(model as never, {
-    messages,
-    max_tokens: args.maxTokens ?? 256,
-  } as never)) as { response?: string } | string;
+  const result = (await env.AI.run(
+    model as never,
+    {
+      messages,
+      max_tokens: args.maxTokens ?? 512,
+      temperature: args.temperature ?? 0.2,
+    } as never,
+    gatewayConfig(env) as never,
+  )) as
+    | { response?: string; usage?: { prompt_tokens?: number; completion_tokens?: number } }
+    | string;
   const text =
     typeof result === "string" ? result : (result?.response ?? "");
-  return { text, modelUsed: model };
+  const usage = typeof result === "object" ? result.usage : undefined;
+  return {
+    text,
+    modelUsed: model,
+    inputTokens: usage?.prompt_tokens,
+    outputTokens: usage?.completion_tokens,
+  };
 }
 
 /**
