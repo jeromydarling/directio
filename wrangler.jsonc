@@ -28,6 +28,10 @@
     {
       "binding": "ASSETS",
       "bucket_name": "directio-dev-assets"
+    },
+    {
+      "binding": "STATE_KB_BUCKET",
+      "bucket_name": "directio-state-knowledge"
     }
   ],
 

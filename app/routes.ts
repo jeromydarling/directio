@@ -14,6 +14,7 @@ export default [
   route("onboarding", "routes/onboarding.tsx"),
   route("api/auth/*", "routes/api.auth.tsx"),
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
+  route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
   route("schools/:slug", "routes/schools.$slug.tsx"),
   route("schools/:slug/enroll", "routes/schools.$slug.enroll.tsx"),
