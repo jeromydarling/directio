@@ -1,6 +1,9 @@
 import { Link, useOutletContext } from "react-router";
 import type { Route } from "./+types/family._index";
 import { requireTenant } from "~/lib/tenant.server";
+import { getEnrollmentJourneySummary, summaryToStages } from "~/lib/journey-summary.server";
+import type { JourneyStage } from "~/lib/journey-summary.server";
+import { JourneyTimeline } from "~/components/journey-timeline";
 import { PageHeader, Card, EmptyState, LinkButton } from "~/components/ui";
 
 type KidRow = {
@@ -86,12 +89,22 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     kids = fallback.results;
   }
 
-  return { kids, hasFormalLink: linkedKids.results.length > 0 };
+  const stagesByKid: Record<string, JourneyStage[]> = {};
+  for (const k of kids) {
+    if (!k.enrollmentId) continue;
+    const summary = await getEnrollmentJourneySummary(context.cloudflare.env, {
+      enrollmentId: k.enrollmentId,
+      organizationId: tenant.organization.id,
+    });
+    if (summary) stagesByKid[k.studentId] = summaryToStages(summary);
+  }
+
+  return { kids, hasFormalLink: linkedKids.results.length > 0, stagesByKid };
 }
 
 export default function FamilyIndex({ loaderData }: Route.ComponentProps) {
   const me = useOutletContext<FamilyCtx>();
-  const { kids, hasFormalLink } = loaderData;
+  const { kids, hasFormalLink, stagesByKid } = loaderData;
 
   return (
     <div className="flex flex-col gap-8">
@@ -122,7 +135,7 @@ export default function FamilyIndex({ loaderData }: Route.ComponentProps) {
       ) : (
         <ul className="flex flex-col gap-4">
           {kids.map((k) => (
-            <KidCard key={k.studentId} kid={k} />
+            <KidCard key={k.studentId} kid={k} stages={stagesByKid[k.studentId]} />
           ))}
         </ul>
       )}
@@ -150,7 +163,7 @@ export default function FamilyIndex({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function KidCard({ kid }: { kid: KidRow }) {
+function KidCard({ kid, stages }: { kid: KidRow; stages: JourneyStage[] | undefined }) {
   const stateLabel = kid.journeyState ? (JOURNEY_LABEL[kid.journeyState] ?? kid.journeyState) : "Not enrolled";
   return (
     <Card>
@@ -174,6 +187,16 @@ function KidCard({ kid }: { kid: KidRow }) {
           {stateLabel}
         </span>
       </div>
+
+      {stages && stages.length > 0 && (
+        <div className="mt-4 border-t border-ink-200/60 pt-4 dark:border-ink-800/60">
+          <p className="mb-3 text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+            Where you are
+          </p>
+          <JourneyTimeline stages={stages} compact />
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-ink-200/60 pt-4 dark:border-ink-800/60">
         {kid.enrollmentId && (
           <Link
@@ -183,11 +206,19 @@ function KidCard({ kid }: { kid: KidRow }) {
             Payments for {kid.firstName} →
           </Link>
         )}
+        {kid.enrollmentId && (
+          <Link
+            to={`/family/certificate/${kid.enrollmentId}`}
+            className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-300"
+          >
+            Certificate
+          </Link>
+        )}
         <Link
-          to="/me/find-school"
+          to="/family/lessons"
           className="ml-auto text-sm text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-ink-50"
         >
-          Find school
+          Lessons
         </Link>
         <Link
           to="/me/help"

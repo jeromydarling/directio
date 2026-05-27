@@ -19,6 +19,7 @@ const NAV = [
   { to: "/admin/vehicles", label: "Vehicles" },
   { to: "/admin/library", label: "Curriculum" },
   { to: "/admin/reports/quizzes", label: "Quiz reports" },
+  { to: "/admin/road-tests", label: "Road tests" },
   { to: "/admin/documents", label: "Documents" },
   { to: "/admin/payments", label: "Payments" },
   { to: "/admin/fees", label: "Fees" },

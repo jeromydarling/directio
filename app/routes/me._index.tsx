@@ -1,6 +1,9 @@
 import { useOutletContext } from "react-router";
 import type { Route } from "./+types/me._index";
 import { findStudentForUser, requireTenant } from "~/lib/tenant.server";
+import { getEnrollmentJourneySummary, summaryToStages } from "~/lib/journey-summary.server";
+import type { JourneyStage } from "~/lib/journey-summary.server";
+import { JourneyTimeline } from "~/components/journey-timeline";
 import { EmptyState } from "~/components/ui";
 
 type Ctx = {
@@ -128,12 +131,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(tenant.organization.id, tenant.user.id)
     .first<{ total: number; completed: number }>();
 
+  const activeEnrollment =
+    enrollments.results.find((e) => e.status === "active") ?? enrollments.results[0];
+  let stages: JourneyStage[] = [];
+  if (activeEnrollment) {
+    const summary = await getEnrollmentJourneySummary(context.cloudflare.env, {
+      enrollmentId: activeEnrollment.id,
+      organizationId: tenant.organization.id,
+    });
+    if (summary) stages = summaryToStages(summary);
+  }
+
   return {
     hasStudent: true as const,
     enrollments: enrollments.results,
     upcoming: upcoming.results,
     continueLesson: continueRow ?? null,
     lessonStats: lessonStats ?? { total: 0, completed: 0 },
+    stages,
   };
 }
 
@@ -152,7 +167,7 @@ export default function MyJourney({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  const { enrollments, upcoming, continueLesson, lessonStats } = loaderData;
+  const { enrollments, upcoming, continueLesson, lessonStats, stages } = loaderData;
   const active = enrollments.find((e) => e.status === "active") ?? enrollments[0];
 
   return (
@@ -173,7 +188,16 @@ export default function MyJourney({ loaderData }: Route.ComponentProps) {
               {active.priceCents != null && ` · $${(active.priceCents / 100).toFixed(2)}`}
             </p>
           </div>
-          <Timeline current={active.journeyState} />
+          {stages.length > 0 ? (
+            <div className="rounded-2xl border border-ink-200 bg-white/60 p-6 dark:border-ink-800 dark:bg-ink-900/40">
+              <p className="mb-4 text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+                Your journey
+              </p>
+              <JourneyTimeline stages={stages} />
+            </div>
+          ) : (
+            <Timeline current={active.journeyState} />
+          )}
           <WhatsNext current={active.journeyState} />
           {continueLesson && (
             <ContinueLessonCard

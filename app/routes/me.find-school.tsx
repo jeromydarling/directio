@@ -2,7 +2,6 @@ import { Form, Link, data, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/me.find-school";
 import { requireTenant } from "~/lib/tenant.server";
 import {
-  MapboxNotConfiguredError,
   PerplexityNotConfiguredError,
   enrichDirectoryWithPerplexity,
   findNearbyPlaces,
@@ -10,9 +9,8 @@ import {
   ingestPlaceCandidates,
   isMapboxConfigured,
   isPerplexityConfigured,
-  type PlaceKind,
-  type PlaceRow,
 } from "~/lib/places.server";
+import type { PlaceKind, PlaceRow } from "~/lib/places";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 

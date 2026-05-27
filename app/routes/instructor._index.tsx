@@ -2,7 +2,7 @@ import { Form, data, redirect, useNavigation, useOutletContext } from "react-rou
 import type { Route } from "./+types/instructor._index";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
-import { assessNoShowFee, formatCents, getFeePolicy } from "~/lib/fees.server";
+import { assessNoShowFee, getFeePolicy } from "~/lib/fees.server";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { Field, FormError, Select, TextArea } from "~/components/form";
 

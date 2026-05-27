@@ -45,6 +45,7 @@ export default [
     route("reports/quizzes", "routes/admin.reports.quizzes.tsx"),
     route("documents", "routes/admin.documents.tsx"),
     route("fees", "routes/admin.fees.tsx"),
+    route("road-tests", "routes/admin.road-tests.tsx"),
     route("settings/cancellation", "routes/admin.settings.cancellation.tsx"),
   ]),
 
@@ -53,6 +54,7 @@ export default [
     route("upcoming", "routes/instructor.upcoming.tsx"),
     route("past", "routes/instructor.past.tsx"),
     route("availability", "routes/instructor.availability.tsx"),
+    route("practice-log", "routes/instructor.practice-log.tsx"),
   ]),
 
   route("family", "routes/family.tsx", [
@@ -60,6 +62,7 @@ export default [
     route("lessons", "routes/family.lessons.tsx"),
     route("payments", "routes/family.payments.tsx"),
     route("documents", "routes/family.documents.tsx"),
+    route("certificate/:enrollmentId", "routes/family.certificate.$enrollmentId.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [

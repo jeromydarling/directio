@@ -1,12 +1,8 @@
 import { Form, Link, data, redirect, useNavigation, useOutletContext } from "react-router";
 import type { Route } from "./+types/family.lessons";
 import { requireTenant } from "~/lib/tenant.server";
-import {
-  assessLateCancelFee,
-  formatCents,
-  getFeePolicy,
-  isInsideCancelDeadline,
-} from "~/lib/fees.server";
+import { assessLateCancelFee, getFeePolicy } from "~/lib/fees.server";
+import { formatCents, isInsideCancelDeadline } from "~/lib/fees";
 import { recordAudit } from "~/lib/audit.server";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { FormError } from "~/components/form";

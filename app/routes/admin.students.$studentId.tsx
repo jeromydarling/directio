@@ -11,6 +11,9 @@ import {
   previousJourneyState,
   type JourneyState,
 } from "~/lib/journey";
+import { getEnrollmentJourneySummary, summaryToStages } from "~/lib/journey-summary.server";
+import type { JourneyStage } from "~/lib/journey-summary.server";
+import { JourneyTimeline } from "~/components/journey-timeline";
 import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select } from "~/components/form";
 
@@ -79,7 +82,21 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     .bind(tenant.organization.id)
     .all<PackageOption>();
 
-  return { student, enrollments: enrollments.results, packages: packages.results };
+  const stagesByEnrollment: Record<string, JourneyStage[]> = {};
+  for (const e of enrollments.results) {
+    const summary = await getEnrollmentJourneySummary(context.cloudflare.env, {
+      enrollmentId: e.id,
+      organizationId: tenant.organization.id,
+    });
+    if (summary) stagesByEnrollment[e.id] = summaryToStages(summary);
+  }
+
+  return {
+    student,
+    enrollments: enrollments.results,
+    packages: packages.results,
+    stagesByEnrollment,
+  };
 }
 
 export async function action({ params, request, context }: Route.ActionArgs) {
@@ -177,7 +194,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 }
 
 export default function StudentDetail({ loaderData, actionData }: Route.ComponentProps) {
-  const { student, enrollments, packages } = loaderData;
+  const { student, enrollments, packages, stagesByEnrollment } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -210,7 +227,7 @@ export default function StudentDetail({ loaderData, actionData }: Route.Componen
         ) : (
           <ul className="flex flex-col gap-3">
             {enrollments.map((e) => (
-              <EnrollmentItem key={e.id} enrollment={e} />
+              <EnrollmentItem key={e.id} enrollment={e} stages={stagesByEnrollment[e.id]} />
             ))}
           </ul>
         )}
@@ -258,7 +275,13 @@ export default function StudentDetail({ loaderData, actionData }: Route.Componen
   );
 }
 
-function EnrollmentItem({ enrollment }: { enrollment: EnrollmentRow }) {
+function EnrollmentItem({
+  enrollment,
+  stages,
+}: {
+  enrollment: EnrollmentRow;
+  stages: JourneyStage[] | undefined;
+}) {
   const e = enrollment;
   const state = isJourneyState(e.journeyState) ? e.journeyState : null;
   const next = state ? nextJourneyState(state) : null;
@@ -266,6 +289,20 @@ function EnrollmentItem({ enrollment }: { enrollment: EnrollmentRow }) {
 
   return (
     <li className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-white/70 p-5 dark:border-ink-800 dark:bg-ink-900/40">
+      {stages && stages.length > 0 && (
+        <div className="rounded-xl border border-ink-100 bg-ink-50/60 p-3 dark:border-ink-800 dark:bg-ink-900/40">
+          <JourneyTimeline stages={stages} compact />
+          <div className="mt-2 flex gap-2 border-t border-ink-200/60 pt-2 dark:border-ink-800/60">
+            <Link
+              to={`/family/certificate/${e.id}`}
+              className="text-xs text-brand-600 hover:underline dark:text-brand-300"
+              target="_blank"
+            >
+              View / issue certificate →
+            </Link>
+          </div>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-lg font-semibold text-ink-900 dark:text-ink-50">{e.programName}</p>

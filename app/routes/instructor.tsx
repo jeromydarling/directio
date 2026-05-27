@@ -39,6 +39,7 @@ const NAV = [
   { to: "/instructor/upcoming", label: "Upcoming" },
   { to: "/instructor/past", label: "Past" },
   { to: "/instructor/availability", label: "Availability" },
+  { to: "/instructor/practice-log", label: "Practice log" },
 ];
 
 export default function InstructorLayout({ loaderData }: Route.ComponentProps) {

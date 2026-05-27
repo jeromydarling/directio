@@ -38,24 +38,8 @@ export function isMapboxConfigured(env: Env): boolean {
   return Boolean(key) && key !== "set-in-keys-pass" && key.startsWith("pk.");
 }
 
-export type PlaceKind = "state_testing" | "driving_school" | "dmv_office";
-
-export type PlaceRow = {
-  id: string;
-  kind: string;
-  name: string;
-  jurisdiction: string;
-  addressLine1: string | null;
-  city: string | null;
-  region: string | null;
-  postalCode: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  phone: string | null;
-  website: string | null;
-  notes: string | null;
-  distanceMiles?: number;
-};
+export type { PlaceKind, PlaceRow } from "./places";
+import type { PlaceKind, PlaceRow } from "./places";
 
 /**
  * Geocode a US ZIP code via Mapbox. Returns lat/lng + best-guess state code.

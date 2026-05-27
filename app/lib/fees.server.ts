@@ -6,6 +6,8 @@
  * Stripe checkout link); we do not auto-debit a saved payment method.
  */
 
+import { isInsideCancelDeadline } from "./fees";
+
 export type FeePolicy = {
   cancellationDeadlineHours: number;
   lateCancelFeeCents: number;
@@ -31,14 +33,6 @@ export async function getFeePolicy(env: Env, organizationId: string): Promise<Fe
     noShowFeeCents: row?.noShowFeeCents ?? 0,
     allowFamilyReschedule: (row?.allowFamilyReschedule ?? 1) === 1,
   };
-}
-
-export function isInsideCancelDeadline(
-  startsAt: number,
-  now: number,
-  deadlineHours: number,
-): boolean {
-  return startsAt - now < deadlineHours * 60 * 60 * 1000;
 }
 
 export async function assessLateCancelFee(
@@ -117,9 +111,4 @@ export async function assessNoShowFee(
     )
     .run();
   return { feeCents };
-}
-
-export function formatCents(cents: number): string {
-  if (!Number.isFinite(cents)) return "$0";
-  return `$${(cents / 100).toFixed(2)}`;
 }

@@ -2,7 +2,7 @@ import { Form, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.fees";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
-import { formatCents } from "~/lib/fees.server";
+import { formatCents } from "~/lib/fees";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { FormError } from "~/components/form";
 
