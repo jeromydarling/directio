@@ -23,11 +23,18 @@ export default [
     route("programs/new", "routes/admin.programs.new.tsx"),
     route("programs/:programId", "routes/admin.programs.$programId.tsx"),
     route("library", "routes/admin.library.tsx"),
+    route("library/installed/:installId", "routes/admin.library.installed.$installId.tsx"),
+    route(
+      "library/installed/:installId/lessons/:lessonId",
+      "routes/admin.library.installed.$installId.lessons.$lessonId.tsx",
+    ),
     route("settings", "routes/admin.settings.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [
     index("routes/me._index.tsx"),
     route("schedule", "routes/me.schedule.tsx"),
+    route("learn", "routes/me.learn._index.tsx"),
+    route("learn/:lessonId", "routes/me.learn.$lessonId.tsx"),
   ]),
 ] satisfies RouteConfig;

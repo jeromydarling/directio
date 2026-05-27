@@ -48,3 +48,42 @@ body {
     color-scheme: dark;
   }
 }
+
+/* Lightweight prose styles for rendered lesson markdown.
+   Tailwind Typography would be drop-in, but this avoids the dep. */
+.prose {
+  @apply text-base leading-7;
+}
+.prose h2 {
+  @apply mt-10 mb-3 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50;
+}
+.prose h3 {
+  @apply mt-8 mb-2 font-display text-xl font-semibold text-ink-900 dark:text-ink-50;
+}
+.prose p {
+  @apply my-4 text-ink-700 dark:text-ink-200;
+}
+.prose ul {
+  @apply my-4 ml-6 list-disc text-ink-700 dark:text-ink-200;
+}
+.prose ol {
+  @apply my-4 ml-6 list-decimal text-ink-700 dark:text-ink-200;
+}
+.prose li {
+  @apply my-1.5;
+}
+.prose strong {
+  @apply font-semibold text-ink-900 dark:text-ink-50;
+}
+.prose em {
+  @apply italic;
+}
+.prose code {
+  @apply rounded bg-ink-100 px-1 py-0.5 font-mono text-sm text-ink-800 dark:bg-ink-800/60 dark:text-ink-100;
+}
+.prose a {
+  @apply text-brand-600 underline underline-offset-2 hover:text-brand-700 dark:text-brand-300;
+}
+.prose blockquote {
+  @apply my-4 border-l-4 border-brand-300 pl-4 italic text-ink-600 dark:border-brand-700 dark:text-ink-300;
+}

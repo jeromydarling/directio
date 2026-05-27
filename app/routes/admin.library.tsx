@@ -3,6 +3,7 @@ import type { Route } from "./+types/admin.library";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
+import { deepCopyPackToSchool, removeSchoolCopyForInstall } from "~/lib/curriculum.server";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { FormError } from "~/components/form";
 
@@ -56,35 +57,53 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (!versionId) return data({ error: "Missing pack version." }, { status: 400 });
 
   if (intent === "install") {
+    const installId = newId();
     try {
       await env.DB.prepare(
         `INSERT INTO school_pack_install (id, organizationId, contentPackVersionId, installedAt)
          VALUES (?, ?, ?, ?)`,
       )
-        .bind(newId(), tenant.organization.id, versionId, Date.now())
+        .bind(installId, tenant.organization.id, versionId, Date.now())
         .run();
+
+      const counts = await deepCopyPackToSchool(env, {
+        organizationId: tenant.organization.id,
+        schoolPackInstallId: installId,
+        contentPackVersionId: versionId,
+      });
+
       await recordAudit(env, {
         organizationId: tenant.organization.id,
         actorUserId: tenant.user.id,
         action: "content_pack.installed",
         entityType: "content_pack_version",
         entityId: versionId,
+        payload: { installId, ...counts },
       });
     } catch (err) {
+      // Best-effort cleanup if the deep-copy failed mid-way
+      await env.DB.prepare("DELETE FROM school_pack_install WHERE id = ?").bind(installId).run();
       return data(
         { error: err instanceof Error ? err.message : "Install failed." },
         { status: 400 },
       );
     }
-    return redirect("/admin/library");
+    return redirect(`/admin/library/installed/${installId}`);
   }
 
   if (intent === "uninstall") {
-    await env.DB.prepare(
-      "DELETE FROM school_pack_install WHERE organizationId = ? AND contentPackVersionId = ?",
+    // Find the install id first so we can clean up the school copies.
+    const install = await env.DB.prepare(
+      "SELECT id FROM school_pack_install WHERE organizationId = ? AND contentPackVersionId = ?",
     )
       .bind(tenant.organization.id, versionId)
-      .run();
+      .first<{ id: string }>();
+    if (install) {
+      await removeSchoolCopyForInstall(env, install.id);
+      await env.DB.prepare("DELETE FROM school_pack_install WHERE id = ?")
+        .bind(install.id)
+        .run();
+    }
     await recordAudit(env, {
       organizationId: tenant.organization.id,
       actorUserId: tenant.user.id,
