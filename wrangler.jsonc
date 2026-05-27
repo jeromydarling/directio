@@ -41,6 +41,7 @@
     "STRIPE_WEBHOOK_SECRET": "set-in-keys-pass",
     "MAPBOX_PUBLIC_TOKEN": "set-in-keys-pass",
     "PERPLEXITY_API_KEY": "set-in-keys-pass",
-    "ELEVENLABS_API_KEY": "set-in-keys-pass"
+    "ELEVENLABS_API_KEY": "set-in-keys-pass",
+    "ANTHROPIC_API_KEY": "set-in-keys-pass"
   }
 }

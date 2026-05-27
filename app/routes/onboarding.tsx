@@ -59,7 +59,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     response.headers.forEach((value, key) => {
       if (key.toLowerCase() === "set-cookie") headers.append("Set-Cookie", value);
     });
-    return redirect("/admin", { headers });
+    return redirect("/admin/onboarding", { headers });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not create school.";
     return data({ error: message }, { status: 400 });
