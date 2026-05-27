@@ -38,6 +38,7 @@ const NAV = [
   { to: "/instructor", label: "Today", end: true },
   { to: "/instructor/upcoming", label: "Upcoming" },
   { to: "/instructor/past", label: "Past" },
+  { to: "/instructor/availability", label: "Availability" },
 ];
 
 export default function InstructorLayout({ loaderData }: Route.ComponentProps) {

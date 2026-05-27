@@ -48,6 +48,7 @@ export default [
     index("routes/instructor._index.tsx"),
     route("upcoming", "routes/instructor.upcoming.tsx"),
     route("past", "routes/instructor.past.tsx"),
+    route("availability", "routes/instructor.availability.tsx"),
   ]),
 
   route("family", "routes/family.tsx", [
