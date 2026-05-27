@@ -2,20 +2,17 @@ import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.students.$studentId";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
+import { recordAudit } from "~/lib/audit.server";
+import {
+  JOURNEY_LABEL,
+  JOURNEY_STATES,
+  isJourneyState,
+  nextJourneyState,
+  previousJourneyState,
+  type JourneyState,
+} from "~/lib/journey";
 import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select } from "~/components/form";
-
-const JOURNEY_LABEL: Record<string, string> = {
-  enrolled: "Enrolled",
-  classroom: "Classroom",
-  classroom_complete: "Classroom complete",
-  permit_eligible: "Permit eligible",
-  permit_issued: "Permit issued",
-  btw: "Behind-the-wheel",
-  btw_complete: "Behind-the-wheel complete",
-  road_test_ready: "Road test ready",
-  complete: "Complete",
-};
 
 type StudentRow = {
   id: string;
@@ -87,6 +84,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
 export async function action({ params, request, context }: Route.ActionArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
+  const env = context.cloudflare.env;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
 
@@ -94,23 +92,83 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     const packageId = String(formData.get("packageId") ?? "");
     if (!packageId) return data({ error: "Pick a package." }, { status: 400 });
 
-    const pkg = await context.cloudflare.env.DB.prepare(
+    const pkg = await env.DB.prepare(
       "SELECT id, programId FROM programPackage WHERE id = ? AND organizationId = ? AND active = 1",
     )
       .bind(packageId, tenant.organization.id)
       .first<{ id: string; programId: string }>();
     if (!pkg) return data({ error: "Package not found." }, { status: 400 });
 
+    const enrollmentId = newId();
     const now = Date.now();
-    await context.cloudflare.env.DB.prepare(
+    await env.DB.prepare(
       `INSERT INTO enrollment (id, organizationId, studentId, programId, programPackageId,
                                status, journeyState, enrolledAt, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?, 'active', 'enrolled', ?, ?, ?)`,
     )
-      .bind(newId(), tenant.organization.id, params.studentId, pkg.programId, pkg.id, now, now, now)
+      .bind(enrollmentId, tenant.organization.id, params.studentId, pkg.programId, pkg.id, now, now, now)
       .run();
 
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "enrollment.created",
+      entityType: "enrollment",
+      entityId: enrollmentId,
+      payload: { studentId: params.studentId, programId: pkg.programId, packageId: pkg.id },
+    });
+
     // TODO(payments): kick off Stripe checkout here once keys are wired.
+
+    return redirect(`/admin/students/${params.studentId}`);
+  }
+
+  if (intent === "advance" || intent === "rewind" || intent === "set-state") {
+    const enrollmentId = String(formData.get("enrollmentId") ?? "");
+    if (!enrollmentId) return data({ error: "Missing enrollment." }, { status: 400 });
+
+    const current = await env.DB.prepare(
+      "SELECT id, journeyState FROM enrollment WHERE id = ? AND organizationId = ? AND studentId = ?",
+    )
+      .bind(enrollmentId, tenant.organization.id, params.studentId)
+      .first<{ id: string; journeyState: string }>();
+    if (!current) return data({ error: "Enrollment not found." }, { status: 400 });
+    if (!isJourneyState(current.journeyState))
+      return data({ error: "Enrollment is in an unknown state." }, { status: 400 });
+
+    let target: JourneyState | null = null;
+    if (intent === "advance") target = nextJourneyState(current.journeyState);
+    else if (intent === "rewind") target = previousJourneyState(current.journeyState);
+    else {
+      const requested = String(formData.get("targetState") ?? "");
+      if (isJourneyState(requested)) target = requested;
+    }
+    if (!target) return data({ error: "Already at the boundary." }, { status: 400 });
+
+    const completedAt = target === "complete" ? Date.now() : null;
+    const now = Date.now();
+    if (completedAt !== null) {
+      await env.DB.prepare(
+        "UPDATE enrollment SET journeyState = ?, status = 'completed', completedAt = ?, updatedAt = ? WHERE id = ?",
+      )
+        .bind(target, completedAt, now, enrollmentId)
+        .run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE enrollment SET journeyState = ?, updatedAt = ? WHERE id = ?",
+      )
+        .bind(target, now, enrollmentId)
+        .run();
+    }
+
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "enrollment.state_changed",
+      entityType: "enrollment",
+      entityId: enrollmentId,
+      payload: { from: current.journeyState, to: target },
+    });
 
     return redirect(`/admin/students/${params.studentId}`);
   }
@@ -152,24 +210,7 @@ export default function StudentDetail({ loaderData, actionData }: Route.Componen
         ) : (
           <ul className="flex flex-col gap-3">
             {enrollments.map((e) => (
-              <li
-                key={e.id}
-                className="flex items-center justify-between gap-4 rounded-2xl border border-ink-200 bg-white/70 p-5 dark:border-ink-800 dark:bg-ink-900/40"
-              >
-                <div>
-                  <p className="text-lg font-semibold text-ink-900 dark:text-ink-50">
-                    {e.programName}
-                  </p>
-                  <p className="text-sm text-ink-500 dark:text-ink-400">
-                    {e.packageName ?? "no package"} ·{" "}
-                    {e.priceCents != null ? `$${(e.priceCents / 100).toFixed(2)}` : "—"} ·{" "}
-                    {new Date(e.enrolledAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">
-                  {JOURNEY_LABEL[e.journeyState] ?? e.journeyState}
-                </span>
-              </li>
+              <EnrollmentItem key={e.id} enrollment={e} />
             ))}
           </ul>
         )}
@@ -177,7 +218,7 @@ export default function StudentDetail({ loaderData, actionData }: Route.Componen
 
       <Card>
         <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-          Enroll in a program
+          Enroll in {enrollments.length === 0 ? "a" : "another"} program
         </h3>
         {packages.length === 0 ? (
           <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
@@ -214,5 +255,64 @@ export default function StudentDetail({ loaderData, actionData }: Route.Componen
         </p>
       </Card>
     </div>
+  );
+}
+
+function EnrollmentItem({ enrollment }: { enrollment: EnrollmentRow }) {
+  const e = enrollment;
+  const state = isJourneyState(e.journeyState) ? e.journeyState : null;
+  const next = state ? nextJourneyState(state) : null;
+  const prev = state ? previousJourneyState(state) : null;
+
+  return (
+    <li className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-white/70 p-5 dark:border-ink-800 dark:bg-ink-900/40">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-lg font-semibold text-ink-900 dark:text-ink-50">{e.programName}</p>
+          <p className="text-sm text-ink-500 dark:text-ink-400">
+            {e.packageName ?? "no package"} ·{" "}
+            {e.priceCents != null ? `$${(e.priceCents / 100).toFixed(2)}` : "—"} ·{" "}
+            enrolled {new Date(e.enrolledAt).toLocaleDateString()}
+          </p>
+        </div>
+        <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">
+          {JOURNEY_LABEL[(state ?? "enrolled") as keyof typeof JOURNEY_LABEL]}
+        </span>
+      </div>
+
+      {state && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-ink-200/60 pt-4 dark:border-ink-800/60">
+          <Form method="post" className="contents">
+            <input type="hidden" name="intent" value="rewind" />
+            <input type="hidden" name="enrollmentId" value={e.id} />
+            <Button type="submit" variant="secondary" disabled={!prev}>
+              ← {prev ? JOURNEY_LABEL[prev] : "Back"}
+            </Button>
+          </Form>
+          <Form method="post" className="contents">
+            <input type="hidden" name="intent" value="advance" />
+            <input type="hidden" name="enrollmentId" value={e.id} />
+            <Button type="submit" disabled={!next}>
+              {next ? `Advance to ${JOURNEY_LABEL[next]}` : "Journey complete"} →
+            </Button>
+          </Form>
+
+          <Form method="post" className="ml-auto flex items-end gap-2">
+            <input type="hidden" name="intent" value="set-state" />
+            <input type="hidden" name="enrollmentId" value={e.id} />
+            <Select name="targetState" defaultValue={state} className="text-sm">
+              {JOURNEY_STATES.map((s) => (
+                <option key={s} value={s}>
+                  {JOURNEY_LABEL[s]}
+                </option>
+              ))}
+            </Select>
+            <Button type="submit" variant="ghost">
+              Set
+            </Button>
+          </Form>
+        </div>
+      )}
+    </li>
   );
 }
