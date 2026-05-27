@@ -2,6 +2,7 @@ import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/signup";
 import { getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
+import { newId } from "~/lib/ids";
 import { AuthShell } from "~/components/auth-shell";
 
 export function meta(_: Route.MetaArgs) {
@@ -27,7 +28,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     return data({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
 
-  const auth = getAuth(context.cloudflare.env);
+  const env = context.cloudflare.env;
+  const auth = getAuth(env);
   try {
     const response = await auth.api.signUpEmail({
       body: { email, password, name },
@@ -41,7 +43,43 @@ export async function action({ request, context }: Route.ActionArgs) {
     response.headers.forEach((value, key) => {
       if (key.toLowerCase() === "set-cookie") headers.append("Set-Cookie", value);
     });
-    return redirect("/admin", { headers });
+
+    // If a school has already created a student record with this email,
+    // auto-join the user to that school as a student member. This avoids
+    // sending them through /onboarding to create their own school.
+    const newUserId = await env.DB.prepare("SELECT id FROM user WHERE email = ?")
+      .bind(email)
+      .first<{ id: string }>();
+
+    let destination = "/admin";
+    if (newUserId) {
+      const matches = await env.DB.prepare(
+        "SELECT id, organizationId FROM student WHERE email = ? AND userId IS NULL",
+      )
+        .bind(email)
+        .all<{ id: string; organizationId: string }>();
+
+      if (matches.results.length > 0) {
+        const now = Date.now();
+        const stmts = [];
+        for (const m of matches.results) {
+          stmts.push(
+            env.DB.prepare("UPDATE student SET userId = ?, updatedAt = ? WHERE id = ?").bind(
+              newUserId.id,
+              now,
+              m.id,
+            ),
+            env.DB.prepare(
+              "INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'student', ?)",
+            ).bind(newId(), m.organizationId, newUserId.id, now),
+          );
+        }
+        await env.DB.batch(stmts);
+        destination = "/me";
+      }
+    }
+
+    return redirect(destination, { headers });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not create account.";
     return data({ error: message }, { status: 400 });

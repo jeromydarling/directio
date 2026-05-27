@@ -1,9 +1,12 @@
-import { Form, Link, NavLink, Outlet } from "react-router";
+import { Form, Link, NavLink, Outlet, redirect } from "react-router";
 import type { Route } from "./+types/admin";
 import { requireTenant } from "~/lib/tenant.server";
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
+  if (tenant.role !== "owner" && tenant.role !== "admin") {
+    throw redirect("/me");
+  }
   return { tenant };
 }
 

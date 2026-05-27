@@ -13,18 +13,32 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
-  const session = await getSession(request, context.cloudflare.env);
+  const env = context.cloudflare.env;
+  const session = await getSession(request, env);
+  let destination: string | null = null;
+  if (session?.user) {
+    const role = await env.DB.prepare(
+      "SELECT role FROM member WHERE userId = ? ORDER BY createdAt ASC LIMIT 1",
+    )
+      .bind(session.user.id)
+      .first<{ role: string }>();
+    if (!role) destination = "/onboarding";
+    else if (role.role === "owner" || role.role === "admin") destination = "/admin";
+    else destination = "/me";
+  }
   return {
-    appEnv: context.cloudflare.env.APP_ENV ?? "unknown",
+    appEnv: env.APP_ENV ?? "unknown",
     signedIn: Boolean(session?.user),
+    destination,
   };
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
+  const dest = loaderData.destination ?? "/signup";
   return (
     <div className="min-h-dvh bg-ink-50 text-ink-900 dark:bg-ink-950 dark:text-ink-100">
-      <SiteHeader signedIn={loaderData.signedIn} />
-      <Hero signedIn={loaderData.signedIn} />
+      <SiteHeader signedIn={loaderData.signedIn} destination={dest} />
+      <Hero signedIn={loaderData.signedIn} destination={dest} />
       <PillarSection />
       <JourneySection />
       <FooterStrip env={loaderData.appEnv} />
@@ -32,7 +46,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function SiteHeader({ signedIn }: { signedIn: boolean }) {
+function SiteHeader({ signedIn, destination }: { signedIn: boolean; destination: string }) {
   return (
     <header className="border-b border-ink-200/60 dark:border-ink-800/60">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -51,10 +65,10 @@ function SiteHeader({ signedIn }: { signedIn: boolean }) {
         <div className="flex items-center gap-3">
           {signedIn ? (
             <a
-              href="/admin"
+              href={destination}
               className="rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
             >
-              Go to dashboard
+              Continue
             </a>
           ) : (
             <>
@@ -89,7 +103,7 @@ function Wordmark() {
   );
 }
 
-function Hero({ signedIn }: { signedIn: boolean }) {
+function Hero({ signedIn, destination }: { signedIn: boolean; destination: string }) {
   return (
     <section className="relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0 -z-10">
@@ -119,10 +133,10 @@ function Hero({ signedIn }: { signedIn: boolean }) {
 
         <div className="mt-10 flex flex-wrap items-center gap-4">
           <a
-            href={signedIn ? "/admin" : "/signup"}
+            href={destination}
             className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-6 py-3 text-base font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
           >
-            {signedIn ? "Go to dashboard" : "Get started"}
+            {signedIn ? "Continue" : "Get started"}
             <span aria-hidden>→</span>
           </a>
           <a

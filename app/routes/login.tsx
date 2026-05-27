@@ -24,7 +24,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     return data({ error: "Email and password are required." }, { status: 400 });
   }
 
-  const auth = getAuth(context.cloudflare.env);
+  const env = context.cloudflare.env;
+  const auth = getAuth(env);
   try {
     const response = await auth.api.signInEmail({
       body: { email, password },
@@ -46,7 +47,23 @@ export async function action({ request, context }: Route.ActionArgs) {
     response.headers.forEach((value, key) => {
       if (key.toLowerCase() === "set-cookie") headers.append("Set-Cookie", value);
     });
-    return redirect(next.startsWith("/") ? next : "/admin", { headers });
+
+    let destination = next.startsWith("/") ? next : "/admin";
+    if (destination === "/admin") {
+      const u = await env.DB.prepare("SELECT id FROM user WHERE email = ?")
+        .bind(email)
+        .first<{ id: string }>();
+      if (u) {
+        const r = await env.DB.prepare(
+          "SELECT role FROM member WHERE userId = ? ORDER BY createdAt ASC LIMIT 1",
+        )
+          .bind(u.id)
+          .first<{ role: string }>();
+        if (!r) destination = "/onboarding";
+        else if (r.role !== "owner" && r.role !== "admin") destination = "/me";
+      }
+    }
+    return redirect(destination, { headers });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Could not sign in with those credentials.";

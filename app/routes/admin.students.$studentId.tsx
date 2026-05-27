@@ -1,0 +1,218 @@
+import { Form, Link, data, redirect, useNavigation } from "react-router";
+import type { Route } from "./+types/admin.students.$studentId";
+import { requireTenant } from "~/lib/tenant.server";
+import { newId } from "~/lib/ids";
+import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
+import { Field, FormError, Select } from "~/components/form";
+
+const JOURNEY_LABEL: Record<string, string> = {
+  enrolled: "Enrolled",
+  classroom: "Classroom",
+  classroom_complete: "Classroom complete",
+  permit_eligible: "Permit eligible",
+  permit_issued: "Permit issued",
+  btw: "Behind-the-wheel",
+  btw_complete: "Behind-the-wheel complete",
+  road_test_ready: "Road test ready",
+  complete: "Complete",
+};
+
+type StudentRow = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  userId: string | null;
+};
+
+type EnrollmentRow = {
+  id: string;
+  programName: string;
+  packageName: string | null;
+  priceCents: number | null;
+  status: string;
+  journeyState: string;
+  enrolledAt: number;
+};
+
+type PackageOption = {
+  id: string;
+  name: string;
+  priceCents: number;
+  programId: string;
+  programName: string;
+};
+
+export async function loader({ params, request, context }: Route.LoaderArgs) {
+  const tenant = await requireTenant(request, context.cloudflare.env);
+  const db = context.cloudflare.env.DB;
+
+  const student = await db
+    .prepare(
+      "SELECT id, firstName, lastName, email, phone, dateOfBirth, userId FROM student WHERE id = ? AND organizationId = ?",
+    )
+    .bind(params.studentId, tenant.organization.id)
+    .first<StudentRow>();
+
+  if (!student) throw new Response("Student not found", { status: 404 });
+
+  const enrollments = await db
+    .prepare(
+      `SELECT e.id, p.name AS programName, pp.name AS packageName, pp.priceCents,
+              e.status, e.journeyState, e.enrolledAt
+         FROM enrollment e
+         JOIN program p ON p.id = e.programId
+         LEFT JOIN programPackage pp ON pp.id = e.programPackageId
+         WHERE e.studentId = ? AND e.organizationId = ?
+         ORDER BY e.enrolledAt DESC`,
+    )
+    .bind(params.studentId, tenant.organization.id)
+    .all<EnrollmentRow>();
+
+  const packages = await db
+    .prepare(
+      `SELECT pp.id, pp.name, pp.priceCents, pp.programId, p.name AS programName
+         FROM programPackage pp
+         JOIN program p ON p.id = pp.programId
+         WHERE pp.organizationId = ? AND pp.active = 1 AND p.active = 1
+         ORDER BY p.name, pp.priceCents`,
+    )
+    .bind(tenant.organization.id)
+    .all<PackageOption>();
+
+  return { student, enrollments: enrollments.results, packages: packages.results };
+}
+
+export async function action({ params, request, context }: Route.ActionArgs) {
+  const tenant = await requireTenant(request, context.cloudflare.env);
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "");
+
+  if (intent === "enroll") {
+    const packageId = String(formData.get("packageId") ?? "");
+    if (!packageId) return data({ error: "Pick a package." }, { status: 400 });
+
+    const pkg = await context.cloudflare.env.DB.prepare(
+      "SELECT id, programId FROM programPackage WHERE id = ? AND organizationId = ? AND active = 1",
+    )
+      .bind(packageId, tenant.organization.id)
+      .first<{ id: string; programId: string }>();
+    if (!pkg) return data({ error: "Package not found." }, { status: 400 });
+
+    const now = Date.now();
+    await context.cloudflare.env.DB.prepare(
+      `INSERT INTO enrollment (id, organizationId, studentId, programId, programPackageId,
+                               status, journeyState, enrolledAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'active', 'enrolled', ?, ?, ?)`,
+    )
+      .bind(newId(), tenant.organization.id, params.studentId, pkg.programId, pkg.id, now, now, now)
+      .run();
+
+    // TODO(payments): kick off Stripe checkout here once keys are wired.
+
+    return redirect(`/admin/students/${params.studentId}`);
+  }
+
+  return data({ error: "Unknown action." }, { status: 400 });
+}
+
+export default function StudentDetail({ loaderData, actionData }: Route.ComponentProps) {
+  const { student, enrollments, packages } = loaderData;
+  const nav = useNavigation();
+  const submitting = nav.state === "submitting";
+
+  return (
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="Student"
+        title={`${student.firstName} ${student.lastName}`}
+        description={
+          [student.email, student.phone, student.dateOfBirth]
+            .filter(Boolean)
+            .join(" · ") || undefined
+        }
+        actions={
+          <LinkButton to="/admin/students" variant="ghost">
+            ← All students
+          </LinkButton>
+        }
+      />
+
+      <section className="flex flex-col gap-4">
+        <h2 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Enrollments
+        </h2>
+        {enrollments.length === 0 ? (
+          <EmptyState
+            title="Not enrolled yet"
+            description="Pick a package below to enroll this student. Payment collection comes next."
+          />
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {enrollments.map((e) => (
+              <li
+                key={e.id}
+                className="flex items-center justify-between gap-4 rounded-2xl border border-ink-200 bg-white/70 p-5 dark:border-ink-800 dark:bg-ink-900/40"
+              >
+                <div>
+                  <p className="text-lg font-semibold text-ink-900 dark:text-ink-50">
+                    {e.programName}
+                  </p>
+                  <p className="text-sm text-ink-500 dark:text-ink-400">
+                    {e.packageName ?? "no package"} ·{" "}
+                    {e.priceCents != null ? `$${(e.priceCents / 100).toFixed(2)}` : "—"} ·{" "}
+                    {new Date(e.enrolledAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">
+                  {JOURNEY_LABEL[e.journeyState] ?? e.journeyState}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <Card>
+        <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Enroll in a program
+        </h3>
+        {packages.length === 0 ? (
+          <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
+            No active packages yet.{" "}
+            <Link to="/admin/programs" className="text-brand-600 hover:underline dark:text-brand-300">
+              Create a program and package first.
+            </Link>
+          </p>
+        ) : (
+          <Form method="post" className="mt-4 flex flex-col gap-4 md:flex-row md:items-end">
+            <input type="hidden" name="intent" value="enroll" />
+            <Field label="Package">
+              <Select name="packageId" defaultValue="" required className="min-w-[20rem]">
+                <option value="" disabled>
+                  Pick a package…
+                </option>
+                {packages.map((pk) => (
+                  <option key={pk.id} value={pk.id}>
+                    {pk.programName} — {pk.name} (${(pk.priceCents / 100).toFixed(2)})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="flex flex-col gap-2">
+              <FormError message={actionData && "error" in actionData ? actionData.error : null} />
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Enrolling…" : "Create enrollment"}
+              </Button>
+            </div>
+          </Form>
+        )}
+        <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+          Payment via Stripe is wired in a later step; enrollment is created in active state for now.
+        </p>
+      </Card>
+    </div>
+  );
+}

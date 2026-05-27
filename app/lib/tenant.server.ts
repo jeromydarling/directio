@@ -90,3 +90,36 @@ export async function requireTenant(request: Request, env: Env): Promise<ActiveT
     role: org.role,
   };
 }
+
+/**
+ * Find the student row for the current user inside the current org.
+ *
+ * Tries userId first. If nothing matches but a student exists with the
+ * user's email and no userId yet, claim it by setting student.userId.
+ * This makes the "admin adds student, student signs up later" flow
+ * self-healing without an extra invite step.
+ */
+export async function findStudentForUser(
+  env: Env,
+  user: { id: string; email: string },
+  organizationId: string,
+): Promise<{ id: string; firstName: string; lastName: string } | null> {
+  const direct = await env.DB.prepare(
+    "SELECT id, firstName, lastName FROM student WHERE userId = ? AND organizationId = ? LIMIT 1",
+  )
+    .bind(user.id, organizationId)
+    .first<{ id: string; firstName: string; lastName: string }>();
+  if (direct) return direct;
+
+  const byEmail = await env.DB.prepare(
+    "SELECT id, firstName, lastName FROM student WHERE email = ? AND organizationId = ? AND userId IS NULL LIMIT 1",
+  )
+    .bind(user.email, organizationId)
+    .first<{ id: string; firstName: string; lastName: string }>();
+  if (!byEmail) return null;
+
+  await env.DB.prepare("UPDATE student SET userId = ?, updatedAt = ? WHERE id = ?")
+    .bind(user.id, Date.now(), byEmail.id)
+    .run();
+  return byEmail;
+}

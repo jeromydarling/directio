@@ -1,51 +1,62 @@
-import { useOutletContext } from "react-router";
+import { Link } from "react-router";
 import type { Route } from "./+types/admin.students";
-import type { ActiveTenant } from "~/lib/tenant.server";
 import { requireTenant } from "~/lib/tenant.server";
+import { PageHeader, EmptyState, LinkButton } from "~/components/ui";
+
+const JOURNEY_LABEL: Record<string, string> = {
+  enrolled: "Enrolled",
+  classroom: "Classroom",
+  classroom_complete: "Classroom complete",
+  permit_eligible: "Permit eligible",
+  permit_issued: "Permit issued",
+  btw: "Behind-the-wheel",
+  btw_complete: "Behind-the-wheel complete",
+  road_test_ready: "Road test ready",
+  complete: "Complete",
+};
+
+type Row = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  journeyState: string | null;
+};
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
   const rows = await context.cloudflare.env.DB.prepare(
-    "SELECT id, firstName, lastName, email, phone, createdAt FROM student WHERE organizationId = ? ORDER BY lastName, firstName LIMIT 200",
+    `SELECT s.id, s.firstName, s.lastName, s.email, s.phone,
+            (SELECT e.journeyState FROM enrollment e
+              WHERE e.studentId = s.id AND e.status = 'active'
+              ORDER BY e.enrolledAt DESC LIMIT 1) AS journeyState
+       FROM student s
+       WHERE s.organizationId = ?
+       ORDER BY s.lastName, s.firstName
+       LIMIT 200`,
   )
     .bind(tenant.organization.id)
-    .all<{
-      id: string;
-      firstName: string;
-      lastName: string;
-      email: string | null;
-      phone: string | null;
-      createdAt: number;
-    }>();
+    .all<Row>();
   return { students: rows.results };
 }
 
 export default function AdminStudents({ loaderData }: Route.ComponentProps) {
-  useOutletContext<{ tenant: ActiveTenant }>();
   const { students } = loaderData;
-
   return (
     <div className="flex flex-col gap-8">
-      <header className="flex items-end justify-between">
-        <div>
-          <p className="text-sm font-medium uppercase tracking-wider text-brand-600 dark:text-brand-300">
-            Students
-          </p>
-          <h1 className="mt-1 font-display text-4xl font-semibold tracking-tight text-ink-900 dark:text-ink-50">
-            {students.length === 0 ? "No students yet" : `${students.length} students`}
-          </h1>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="Students"
+        title={students.length === 0 ? "No students yet" : `${students.length} students`}
+        actions={<LinkButton to="/admin/students/new">Add student</LinkButton>}
+      />
 
       {students.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-ink-200 bg-white/40 p-12 text-center dark:border-ink-800 dark:bg-ink-900/30">
-          <p className="font-display text-lg text-ink-700 dark:text-ink-200">
-            Add your first student to get started.
-          </p>
-          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
-            Student creation flow lands in a later step.
-          </p>
-        </div>
+        <EmptyState
+          title="Add your first student"
+          description="Once added, you can enroll them in a program and start scheduling their lessons."
+          action={<LinkButton to="/admin/students/new">Add student</LinkButton>}
+        />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-ink-200 bg-white/70 dark:border-ink-800 dark:bg-ink-900/40">
           <table className="w-full text-left text-sm">
@@ -54,6 +65,7 @@ export default function AdminStudents({ loaderData }: Route.ComponentProps) {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Phone</th>
+                <th className="px-4 py-3 font-medium">Journey</th>
               </tr>
             </thead>
             <tbody>
@@ -62,11 +74,21 @@ export default function AdminStudents({ loaderData }: Route.ComponentProps) {
                   key={s.id}
                   className="border-b border-ink-200/60 last:border-0 hover:bg-ink-50/60 dark:border-ink-800/60 dark:hover:bg-ink-900/60"
                 >
-                  <td className="px-4 py-3 text-ink-900 dark:text-ink-50">
-                    {s.lastName}, {s.firstName}
+                  <td className="px-4 py-3">
+                    <Link
+                      to={`/admin/students/${s.id}`}
+                      className="font-medium text-ink-900 hover:text-brand-600 dark:text-ink-50 dark:hover:text-brand-300"
+                    >
+                      {s.lastName}, {s.firstName}
+                    </Link>
                   </td>
                   <td className="px-4 py-3 text-ink-600 dark:text-ink-300">{s.email ?? "—"}</td>
                   <td className="px-4 py-3 text-ink-600 dark:text-ink-300">{s.phone ?? "—"}</td>
+                  <td className="px-4 py-3 text-ink-600 dark:text-ink-300">
+                    {s.journeyState
+                      ? (JOURNEY_LABEL[s.journeyState] ?? s.journeyState)
+                      : "Not enrolled"}
+                  </td>
                 </tr>
               ))}
             </tbody>
