@@ -46,6 +46,12 @@ export default [
     route("past", "routes/instructor.past.tsx"),
   ]),
 
+  route("family", "routes/family.tsx", [
+    index("routes/family._index.tsx"),
+    route("payments", "routes/family.payments.tsx"),
+    route("documents", "routes/family.documents.tsx"),
+  ]),
+
   route("me", "routes/me.tsx", [
     index("routes/me._index.tsx"),
     route("schedule", "routes/me.schedule.tsx"),
