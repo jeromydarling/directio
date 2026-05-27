@@ -10,13 +10,10 @@ type InstructorCtx = {
 
 export async function loader({ request, context }: Route.LoaderArgs): Promise<InstructorCtx> {
   const tenant = await requireTenant(request, context.cloudflare.env);
-  // Owners/admins can also see the instructor view (helpful for QA).
-  // Pure students/parents shouldn't be here.
   if (tenant.role === "parent" || tenant.role === "student") {
     throw redirect("/me");
   }
 
-  // Resolve the instructor row for this user (admins may have none).
   const instructor = await context.cloudflare.env.DB.prepare(
     "SELECT id, firstName, lastName FROM instructor WHERE userId = ? AND organizationId = ? LIMIT 1",
   )
@@ -35,61 +32,65 @@ export async function loader({ request, context }: Route.LoaderArgs): Promise<In
 }
 
 const NAV = [
-  { to: "/instructor", label: "Today", end: true },
-  { to: "/instructor/upcoming", label: "Upcoming" },
-  { to: "/instructor/past", label: "Past" },
-  { to: "/instructor/availability", label: "Availability" },
-  { to: "/instructor/practice-log", label: "Practice log" },
+  { to: "/instructor", label: "Today", icon: "◉", end: true },
+  { to: "/instructor/upcoming", label: "Upcoming", icon: "▶" },
+  { to: "/instructor/past", label: "Past", icon: "◀" },
+  { to: "/instructor/availability", label: "Availability", icon: "▦" },
+  { to: "/instructor/practice-log", label: "Practice log", icon: "◑" },
 ];
 
 export default function InstructorLayout({ loaderData }: Route.ComponentProps) {
   const me = loaderData;
   return (
     <div className="min-h-dvh bg-ink-50 dark:bg-ink-950">
-      <header className="border-b border-ink-200/60 dark:border-ink-800/60">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
+      <header className="sticky top-0 z-30 border-b border-ink-200/60 bg-ink-50/80 backdrop-blur-lg dark:border-ink-800/60 dark:bg-ink-950/80">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
           <Link to="/" className="group inline-flex items-baseline gap-1">
-            <span className="font-display text-xl font-semibold tracking-tight text-ink-900 dark:text-ink-50">
+            <span className="font-display text-lg font-semibold tracking-tight text-ink-900 sm:text-xl dark:text-ink-50">
               directio
             </span>
-            <span className="h-1.5 w-1.5 translate-y-[-2px] rounded-full bg-brand-500" />
-            <span className="ml-3 text-sm text-ink-500 dark:text-ink-400">
+            <span className="h-1.5 w-1.5 translate-y-[-2px] rounded-full bg-brand-500 transition-all group-hover:bg-accent-400 group-hover:shadow-[0_0_10px_var(--color-brand-500)]" />
+            <span className="ml-2 hidden truncate text-sm text-ink-500 sm:inline dark:text-ink-400">
               · Instructor · {me.organization.name}
             </span>
           </Link>
-          <div className="flex items-center gap-4">
-            <nav className="flex items-center gap-1">
-              {NAV.map((n) => (
-                <NavLink
-                  key={n.to}
-                  to={n.to}
-                  end={n.end}
-                  className={({ isActive }) =>
-                    [
-                      "rounded-full px-3 py-1.5 text-sm font-medium transition",
-                      isActive
-                        ? "bg-ink-900 text-ink-50 dark:bg-ink-50 dark:text-ink-900"
-                        : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-ink-50",
-                    ].join(" ")
-                  }
-                >
-                  {n.label}
-                </NavLink>
-              ))}
-            </nav>
-            <Form method="post" action="/logout">
-              <button
-                type="submit"
-                className="text-sm font-medium text-ink-600 transition hover:text-ink-900 dark:text-ink-300 dark:hover:text-ink-50"
-              >
-                Sign out
-              </button>
-            </Form>
-          </div>
+          <Form method="post" action="/logout">
+            <button
+              type="submit"
+              className="text-xs font-medium text-ink-600 transition hover:text-ink-900 sm:text-sm dark:text-ink-300 dark:hover:text-ink-50"
+            >
+              Sign out
+            </button>
+          </Form>
         </div>
+        <nav
+          className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 pb-2 sm:px-6"
+          style={{ scrollbarWidth: "none" }}
+        >
+          {NAV.map((n) => (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) =>
+                [
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                  isActive
+                    ? "bg-gradient-to-r from-brand-500 to-brand-600 text-white shadow-[0_4px_16px_-4px_var(--color-brand-500)]"
+                    : "text-ink-600 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-300 dark:hover:bg-ink-800/60 dark:hover:text-ink-50",
+                ].join(" ")
+              }
+            >
+              <span className="text-xs opacity-80" aria-hidden>
+                {n.icon}
+              </span>
+              {n.label}
+            </NavLink>
+          ))}
+        </nav>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <Outlet context={me} />
       </main>
     </div>
