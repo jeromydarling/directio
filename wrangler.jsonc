@@ -35,6 +35,12 @@
   "vars": {
     "APP_ENV": "development",
     "APP_URL": "http://localhost:5173",
-    "BETTER_AUTH_SECRET": "set-via-dev-vars-or-secret"
+    "BETTER_AUTH_SECRET": "set-via-dev-vars-or-secret",
+    "STRIPE_SECRET_KEY": "set-in-keys-pass",
+    "STRIPE_PUBLISHABLE_KEY": "set-in-keys-pass",
+    "STRIPE_WEBHOOK_SECRET": "set-in-keys-pass",
+    "MAPBOX_PUBLIC_TOKEN": "set-in-keys-pass",
+    "PERPLEXITY_API_KEY": "set-in-keys-pass",
+    "ELEVENLABS_API_KEY": "set-in-keys-pass"
   }
 }

@@ -7,6 +7,7 @@ export default [
   route("logout", "routes/logout.tsx"),
   route("onboarding", "routes/onboarding.tsx"),
   route("api/auth/*", "routes/api.auth.tsx"),
+  route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
 
   route("admin", "routes/admin.tsx", [
@@ -31,6 +32,7 @@ export default [
       "routes/admin.library.installed.$installId.lessons.$lessonId.tsx",
     ),
     route("settings", "routes/admin.settings.tsx"),
+    route("settings/payments", "routes/admin.settings.payments.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [
@@ -38,5 +40,6 @@ export default [
     route("schedule", "routes/me.schedule.tsx"),
     route("learn", "routes/me.learn._index.tsx"),
     route("learn/:lessonId", "routes/me.learn.$lessonId.tsx"),
+    route("checkout/:enrollmentId", "routes/me.checkout.$enrollmentId.tsx"),
   ]),
 ] satisfies RouteConfig;

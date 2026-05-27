@@ -118,8 +118,8 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       payload: { studentId: params.studentId, programId: pkg.programId, packageId: pkg.id },
     });
 
-    // TODO(payments): kick off Stripe checkout here once keys are wired.
-
+    // Note: actual Stripe Checkout happens on /me/checkout/:enrollmentId
+    // so the family is on the hook for the card, not the admin.
     return redirect(`/admin/students/${params.studentId}`);
   }
 

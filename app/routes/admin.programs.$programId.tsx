@@ -61,6 +61,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     const name = String(formData.get("name") ?? "").trim();
     const priceDollars = parseFloat(String(formData.get("price") ?? "0"));
     const btwLessons = parseInt(String(formData.get("btwLessons") ?? "0"), 10);
+    const platformFeeBps = parseInt(String(formData.get("platformFeeBps") ?? "250"), 10);
+    const installmentsAllowed = formData.get("installmentsAllowed") === "on";
+    const installmentMonths = parseInt(String(formData.get("installmentMonths") ?? "3"), 10);
+    const bnplOn = formData.get("bnpl") === "on";
 
     if (!name) return data({ error: "Package name required." }, { status: 400 });
     if (!Number.isFinite(priceDollars) || priceDollars < 0)
@@ -70,10 +74,17 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         status: 400,
       });
 
+    const paymentOptions = {
+      platformFeeBps: Math.max(0, Math.min(2000, platformFeeBps)),
+      installmentsAllowed,
+      installmentMonths: Math.max(2, Math.min(12, installmentMonths)),
+      bnpl: bnplOn ? ["affirm", "klarna"] : [],
+    };
+
     const now = Date.now();
     await context.cloudflare.env.DB.prepare(
-      `INSERT INTO programPackage (id, organizationId, programId, name, priceCents, currency, btwLessonCount, active, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, 'USD', ?, 1, ?, ?)`,
+      `INSERT INTO programPackage (id, organizationId, programId, name, priceCents, currency, btwLessonCount, paymentOptions, active, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'USD', ?, ?, 1, ?, ?)`,
     )
       .bind(
         newId(),
@@ -82,6 +93,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         name,
         Math.round(priceDollars * 100),
         btwLessons,
+        JSON.stringify(paymentOptions),
         now,
         now,
       )
@@ -169,6 +181,40 @@ export default function ProgramDetail({ loaderData, actionData }: Route.Componen
               defaultValue="6"
             />
           </Field>
+          <Field label="Platform fee (basis points)" hint="100 bps = 1%. Default 2.5%.">
+            <TextInput
+              name="platformFeeBps"
+              type="number"
+              min="0"
+              max="2000"
+              step="10"
+              defaultValue="250"
+            />
+          </Field>
+          <Field label="Installment months" hint="If installments enabled.">
+            <TextInput
+              name="installmentMonths"
+              type="number"
+              min="2"
+              max="12"
+              defaultValue="3"
+            />
+          </Field>
+          <div className="flex flex-col gap-2 self-end">
+            <label className="flex items-center gap-2 text-sm text-ink-700 dark:text-ink-200">
+              <input
+                type="checkbox"
+                name="installmentsAllowed"
+                defaultChecked
+                className="h-4 w-4 rounded border-ink-300"
+              />
+              Allow monthly installments (Stripe Subscriptions)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink-700 dark:text-ink-200">
+              <input type="checkbox" name="bnpl" className="h-4 w-4 rounded border-ink-300" />
+              Allow buy-now-pay-later (Affirm / Klarna)
+            </label>
+          </div>
           <div className="md:col-span-3">
             <FormError message={actionData && "error" in actionData ? actionData.error : null} />
             <Button type="submit" disabled={submitting} className="mt-3">

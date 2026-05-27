@@ -4,7 +4,7 @@ import type { ActiveTenant } from "~/lib/tenant.server";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
-import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
+import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select } from "~/components/form";
 
 type RulePackOption = {
@@ -138,7 +138,15 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
 
   return (
     <div className="flex flex-col gap-10">
-      <PageHeader eyebrow="Settings" title={tenant.organization.name} />
+      <PageHeader
+        eyebrow="Settings"
+        title={tenant.organization.name}
+        actions={
+          <LinkButton to="/admin/settings/payments" variant="secondary">
+            Payments →
+          </LinkButton>
+        }
+      />
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
