@@ -17,6 +17,8 @@ export default [
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
   route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
+  route("sitemap.xml", "routes/sitemap[.]xml.tsx"),
+  route("robots.txt", "routes/robots[.]txt.tsx"),
   route("schools/:slug", "routes/schools.$slug.tsx"),
   route("schools/:slug/enroll", "routes/schools.$slug.enroll.tsx"),
 
@@ -55,6 +57,7 @@ export default [
     route("fees", "routes/admin.fees.tsx"),
     route("road-tests", "routes/admin.road-tests.tsx"),
     route("state-coverage", "routes/admin.state-coverage.tsx"),
+    route("website", "routes/admin.website.tsx"),
     route("settings/cancellation", "routes/admin.settings.cancellation.tsx"),
   ]),
 
