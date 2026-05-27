@@ -142,9 +142,14 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
         eyebrow="Settings"
         title={tenant.organization.name}
         actions={
-          <LinkButton to="/admin/settings/payments" variant="secondary">
-            Payments →
-          </LinkButton>
+          <div className="flex items-center gap-2">
+            <LinkButton to="/admin/settings/payments" variant="secondary">
+              Payments
+            </LinkButton>
+            <LinkButton to="/admin/settings/btw-flow" variant="secondary">
+              BTW flow
+            </LinkButton>
+          </div>
         }
       />
 

@@ -33,6 +33,7 @@ export default [
     ),
     route("settings", "routes/admin.settings.tsx"),
     route("settings/payments", "routes/admin.settings.payments.tsx"),
+    route("settings/btw-flow", "routes/admin.settings.btw-flow.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [
@@ -41,5 +42,6 @@ export default [
     route("learn", "routes/me.learn._index.tsx"),
     route("learn/:lessonId", "routes/me.learn.$lessonId.tsx"),
     route("checkout/:enrollmentId", "routes/me.checkout.$enrollmentId.tsx"),
+    route("find-school", "routes/me.find-school.tsx"),
   ]),
 ] satisfies RouteConfig;
