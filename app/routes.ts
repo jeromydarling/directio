@@ -24,8 +24,10 @@ export default [
     route("programs", "routes/admin.programs.tsx"),
     route("programs/new", "routes/admin.programs.new.tsx"),
     route("programs/:programId", "routes/admin.programs.$programId.tsx"),
+    route("payments", "routes/admin.payments.tsx"),
     route("library", "routes/admin.library.tsx"),
     route("library/media", "routes/admin.library.media.tsx"),
+    route("library/places", "routes/admin.library.places.tsx"),
     route("library/installed/:installId", "routes/admin.library.installed.$installId.tsx"),
     route(
       "library/installed/:installId/lessons/:lessonId",

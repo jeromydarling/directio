@@ -215,3 +215,49 @@ export async function createCheckoutSession(
   })) as { id: string; url: string };
   return { sessionId: res.id, url: res.url };
 }
+
+/**
+ * Refund a charge or PaymentIntent. The connected account keeps the
+ * charge but loses the funds; directio's application_fee is
+ * refunded proportionally so the school doesn't owe money it never
+ * received. Caller passes the amount in cents; pass 0 / undefined
+ * for a full refund.
+ */
+export async function refundPayment(
+  env: Env,
+  args: {
+    accountId: string;
+    paymentIntentId?: string | null;
+    chargeId?: string | null;
+    amountCents?: number;          // omit for full refund
+    reason?: "duplicate" | "fraudulent" | "requested_by_customer";
+  },
+): Promise<{ refundId: string; status: string }> {
+  if (!args.paymentIntentId && !args.chargeId) {
+    throw new Error("refundPayment needs a paymentIntentId or chargeId.");
+  }
+  const body: Record<string, string | number> = {
+    refund_application_fee: "true",
+  };
+  if (args.paymentIntentId) body.payment_intent = args.paymentIntentId;
+  if (args.chargeId) body.charge = args.chargeId;
+  if (args.amountCents) body.amount = args.amountCents;
+  if (args.reason) body.reason = args.reason;
+  const key = requireKey(env);
+  const res = await fetch("https://api.stripe.com/v1/refunds", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Stripe-Account": args.accountId,
+    },
+    body: new URLSearchParams(
+      Object.entries(body).map(([k, v]) => [k, String(v)]),
+    ).toString(),
+  });
+  const json = (await res.json()) as { id?: string; status?: string; error?: { message?: string } };
+  if (!res.ok) {
+    throw new Error(`Stripe refund ${res.status}: ${json.error?.message ?? JSON.stringify(json)}`);
+  }
+  return { refundId: json.id ?? "", status: json.status ?? "unknown" };
+}

@@ -191,7 +191,16 @@ export default function AdminLibrary({ loaderData, actionData }: Route.Component
         eyebrow="Curriculum library"
         title="Content packs"
         description="Install platform curriculum and edit your copy, or build your own pack from scratch for things only your school teaches."
-        actions={<LinkButton to="/admin/library/media" variant="secondary">Media library →</LinkButton>}
+        actions={
+          <div className="flex items-center gap-2">
+            <LinkButton to="/admin/library/media" variant="secondary">
+              Media library
+            </LinkButton>
+            <LinkButton to="/admin/library/places" variant="secondary">
+              Place directory
+            </LinkButton>
+          </div>
+        }
       />
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
