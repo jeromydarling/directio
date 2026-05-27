@@ -7,6 +7,8 @@ import {
   addSchoolModule,
   deleteSchoolLesson,
   deleteSchoolModule,
+  reorderSchoolLesson,
+  reorderSchoolModule,
 } from "~/lib/curriculum.server";
 import { PageHeader, Card, LinkButton, Button } from "~/components/ui";
 import { Field, FormError, TextInput } from "~/components/form";
@@ -160,6 +162,28 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}`);
   }
 
+  if (intent === "move-lesson-up" || intent === "move-lesson-down") {
+    const lessonId = String(formData.get("lessonId") ?? "");
+    if (!lessonId) return data({ error: "Lesson missing." }, { status: 400 });
+    await reorderSchoolLesson(env, {
+      organizationId: tenant.organization.id,
+      lessonId,
+      direction: intent === "move-lesson-up" ? "up" : "down",
+    });
+    return redirect(`/admin/library/installed/${params.installId}`);
+  }
+
+  if (intent === "move-module-up" || intent === "move-module-down") {
+    const moduleId = String(formData.get("moduleId") ?? "");
+    if (!moduleId) return data({ error: "Module missing." }, { status: 400 });
+    await reorderSchoolModule(env, {
+      organizationId: tenant.organization.id,
+      moduleId,
+      direction: intent === "move-module-up" ? "up" : "down",
+    });
+    return redirect(`/admin/library/installed/${params.installId}`);
+  }
+
   if (intent === "delete-module") {
     const moduleId = String(formData.get("moduleId") ?? "");
     if (!moduleId) return data({ error: "Module missing." }, { status: 400 });
@@ -215,20 +239,36 @@ export default function InstalledPack({ loaderData, actionData }: Route.Componen
         </Card>
       ) : (
         <div className="flex flex-col gap-8">
-          {modules.map((m) => {
+          {modules.map((m, mIdx) => {
             const moduleLessons = lessonsByModule.get(m.moduleId) ?? [];
+            const isFirst = mIdx === 0;
+            const isLast = mIdx === modules.length - 1;
             return (
               <section key={m.moduleId}>
                 <div className="mb-3 flex items-baseline justify-between gap-4">
                   <h2 className="font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
                     {m.moduleTitle}
                   </h2>
-                  <div className="flex items-center gap-3">
-                    <p className="text-xs text-ink-500 dark:text-ink-400">
+                  <div className="flex items-center gap-2">
+                    <p className="mr-2 text-xs text-ink-500 dark:text-ink-400">
                       {m.publishedCount} / {m.lessonCount} published
                     </p>
+                    <Form method="post" className="contents">
+                      <input type="hidden" name="intent" value="move-module-up" />
+                      <input type="hidden" name="moduleId" value={m.moduleId} />
+                      <Button type="submit" variant="ghost" disabled={submitting || isFirst}>
+                        ↑
+                      </Button>
+                    </Form>
+                    <Form method="post" className="contents">
+                      <input type="hidden" name="intent" value="move-module-down" />
+                      <input type="hidden" name="moduleId" value={m.moduleId} />
+                      <Button type="submit" variant="ghost" disabled={submitting || isLast}>
+                        ↓
+                      </Button>
+                    </Form>
                     {moduleLessons.length === 0 && (
-                      <Form method="post">
+                      <Form method="post" className="contents">
                         <input type="hidden" name="intent" value="delete-module" />
                         <input type="hidden" name="moduleId" value={m.moduleId} />
                         <Button type="submit" variant="ghost" disabled={submitting}>
@@ -240,49 +280,67 @@ export default function InstalledPack({ loaderData, actionData }: Route.Componen
                 </div>
 
                 <ul className="flex flex-col gap-2">
-                  {moduleLessons.map((l) => (
-                    <li
-                      key={l.id}
-                      className="flex items-center justify-between rounded-2xl border border-ink-200 bg-white/70 p-4 dark:border-ink-800 dark:bg-ink-900/40"
-                    >
-                      <div className="flex items-center gap-4">
-                        <span className="font-display text-sm font-medium text-brand-500 dark:text-brand-300">
-                          {String(l.ordinal + 1).padStart(2, "0")}
-                        </span>
-                        <div>
-                          <Link
-                            to={`/admin/library/installed/${install.installId}/lessons/${l.id}`}
-                            className="text-base font-semibold text-ink-900 hover:text-brand-600 dark:text-ink-50 dark:hover:text-brand-300"
-                          >
-                            {l.title}
-                          </Link>
-                          <p className="text-xs text-ink-500 dark:text-ink-400">
-                            {l.estimatedSeatMinutes} min
-                            {l.audioUrl ? " · audio ready" : ""}
-                            {l.isSchoolAdded ? " · school added" : ""}
-                          </p>
+                  {moduleLessons.map((l, lIdx) => {
+                    const isFirstLesson = lIdx === 0;
+                    const isLastLesson = lIdx === moduleLessons.length - 1;
+                    return (
+                      <li
+                        key={l.id}
+                        className="flex items-center justify-between rounded-2xl border border-ink-200 bg-white/70 p-4 dark:border-ink-800 dark:bg-ink-900/40"
+                      >
+                        <div className="flex items-center gap-4">
+                          <span className="font-display text-sm font-medium text-brand-500 dark:text-brand-300">
+                            {String(l.ordinal + 1).padStart(2, "0")}
+                          </span>
+                          <div>
+                            <Link
+                              to={`/admin/library/installed/${install.installId}/lessons/${l.id}`}
+                              className="text-base font-semibold text-ink-900 hover:text-brand-600 dark:text-ink-50 dark:hover:text-brand-300"
+                            >
+                              {l.title}
+                            </Link>
+                            <p className="text-xs text-ink-500 dark:text-ink-400">
+                              {l.estimatedSeatMinutes} min
+                              {l.audioUrl ? " · audio ready" : ""}
+                              {l.isSchoolAdded ? " · school added" : ""}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={
-                            l.published
-                              ? "rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
-                              : "rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-600 dark:bg-ink-800 dark:text-ink-300"
-                          }
-                        >
-                          {l.published ? "Published" : "Draft"}
-                        </span>
-                        <Form method="post">
-                          <input type="hidden" name="intent" value="delete-lesson" />
-                          <input type="hidden" name="lessonId" value={l.id} />
-                          <Button type="submit" variant="ghost" disabled={submitting}>
-                            ×
-                          </Button>
-                        </Form>
-                      </div>
-                    </li>
-                  ))}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={
+                              l.published
+                                ? "rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
+                                : "rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                            }
+                          >
+                            {l.published ? "Published" : "Draft"}
+                          </span>
+                          <Form method="post" className="contents">
+                            <input type="hidden" name="intent" value="move-lesson-up" />
+                            <input type="hidden" name="lessonId" value={l.id} />
+                            <Button type="submit" variant="ghost" disabled={submitting || isFirstLesson}>
+                              ↑
+                            </Button>
+                          </Form>
+                          <Form method="post" className="contents">
+                            <input type="hidden" name="intent" value="move-lesson-down" />
+                            <input type="hidden" name="lessonId" value={l.id} />
+                            <Button type="submit" variant="ghost" disabled={submitting || isLastLesson}>
+                              ↓
+                            </Button>
+                          </Form>
+                          <Form method="post" className="contents">
+                            <input type="hidden" name="intent" value="delete-lesson" />
+                            <input type="hidden" name="lessonId" value={l.id} />
+                            <Button type="submit" variant="ghost" disabled={submitting}>
+                              ×
+                            </Button>
+                          </Form>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
 
                 <Form method="post" className="mt-3 flex items-end gap-2">

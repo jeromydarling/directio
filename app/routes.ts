@@ -7,6 +7,7 @@ export default [
   route("logout", "routes/logout.tsx"),
   route("onboarding", "routes/onboarding.tsx"),
   route("api/auth/*", "routes/api.auth.tsx"),
+  route("assets/*", "routes/assets.$.tsx"),
 
   route("admin", "routes/admin.tsx", [
     index("routes/admin._index.tsx"),

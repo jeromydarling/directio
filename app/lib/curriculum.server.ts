@@ -483,3 +483,148 @@ export async function deleteSchoolLessonAsset(
     .run();
   return (result.meta.changes ?? 0) > 0;
 }
+
+/**
+ * Swap ordinals between two sibling rows in the same parent.
+ * Generic enough to handle both modules and lessons via the table
+ * + parent column.
+ */
+async function swapOrdinal(
+  env: Env,
+  table: "school_module" | "school_lesson",
+  parentColumn: "schoolCourseId" | "schoolModuleId",
+  organizationId: string,
+  rowId: string,
+  direction: "up" | "down",
+): Promise<boolean> {
+  const me = await env.DB.prepare(
+    `SELECT id, ordinal, ${parentColumn} AS parentId FROM ${table} WHERE id = ? AND organizationId = ?`,
+  )
+    .bind(rowId, organizationId)
+    .first<{ id: string; ordinal: number; parentId: string }>();
+  if (!me) return false;
+
+  const compareOp = direction === "up" ? "<" : ">";
+  const orderDir = direction === "up" ? "DESC" : "ASC";
+  const neighbor = await env.DB.prepare(
+    `SELECT id, ordinal FROM ${table}
+       WHERE ${parentColumn} = ? AND organizationId = ? AND ordinal ${compareOp} ?
+       ORDER BY ordinal ${orderDir} LIMIT 1`,
+  )
+    .bind(me.parentId, organizationId, me.ordinal)
+    .first<{ id: string; ordinal: number }>();
+  if (!neighbor) return false; // already at boundary
+
+  const now = Date.now();
+  // Two-step swap via a tombstone ordinal to avoid the UNIQUE-ish behavior
+  // (we don't have a UNIQUE on (parent, ordinal) but using -1 keeps
+  // intermediate state obviously invalid).
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE ${table} SET ordinal = -1, updatedAt = ? WHERE id = ?`).bind(now, me.id),
+    env.DB.prepare(`UPDATE ${table} SET ordinal = ?, updatedAt = ? WHERE id = ?`).bind(
+      me.ordinal,
+      now,
+      neighbor.id,
+    ),
+    env.DB.prepare(`UPDATE ${table} SET ordinal = ?, updatedAt = ? WHERE id = ?`).bind(
+      neighbor.ordinal,
+      now,
+      me.id,
+    ),
+  ]);
+  return true;
+}
+
+export function reorderSchoolModule(
+  env: Env,
+  args: { organizationId: string; moduleId: string; direction: "up" | "down" },
+): Promise<boolean> {
+  return swapOrdinal(env, "school_module", "schoolCourseId", args.organizationId, args.moduleId, args.direction);
+}
+
+export function reorderSchoolLesson(
+  env: Env,
+  args: { organizationId: string; lessonId: string; direction: "up" | "down" },
+): Promise<boolean> {
+  return swapOrdinal(env, "school_lesson", "schoolModuleId", args.organizationId, args.lessonId, args.direction);
+}
+
+/**
+ * Store an uploaded file (image or PDF) in R2 and return a stable
+ * URL the client can fetch via the /assets/* route.
+ */
+export async function uploadLessonFileAsset(
+  env: Env,
+  args: {
+    organizationId: string;
+    schoolLessonId: string;
+    file: File;
+    kind: "image" | "pdf";
+    caption?: string | null;
+  },
+): Promise<{ assetId: string; url: string }> {
+  // Build a stable storage key. The asset id makes paths unguessable
+  // enough for casual privacy; the /assets route still requires auth.
+  const assetId = newId();
+  const safeName = args.file.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 96) || "file";
+  const key = `lesson-assets/${args.organizationId}/${assetId}/${safeName}`;
+
+  await env.ASSETS.put(key, args.file.stream(), {
+    httpMetadata: {
+      contentType: args.file.type || (args.kind === "image" ? "image/png" : "application/pdf"),
+    },
+  });
+
+  const url = `/assets/${key}`;
+  const last = await env.DB.prepare(
+    "SELECT COALESCE(MAX(ordinal), -1) AS maxOrd FROM school_lesson_asset WHERE schoolLessonId = ?",
+  )
+    .bind(args.schoolLessonId)
+    .first<{ maxOrd: number }>();
+  const ordinal = (last?.maxOrd ?? -1) + 1;
+
+  await env.DB.prepare(
+    `INSERT INTO school_lesson_asset (id, organizationId, schoolLessonId, kind, url, caption, metadata, ordinal, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      assetId,
+      args.organizationId,
+      args.schoolLessonId,
+      args.kind,
+      url,
+      args.caption ?? null,
+      JSON.stringify({ contentType: args.file.type, sizeBytes: args.file.size, storageKey: key }),
+      ordinal,
+      Date.now(),
+    )
+    .run();
+
+  return { assetId, url };
+}
+
+/**
+ * Look up an asset by its storage key so the /assets route can
+ * confirm the requester belongs to the owning org before streaming.
+ */
+export async function findAssetByStorageKey(
+  env: Env,
+  storageKey: string,
+): Promise<{ organizationId: string; kind: string; contentType: string | null } | null> {
+  const row = await env.DB.prepare(
+    "SELECT organizationId, kind, metadata FROM school_lesson_asset WHERE url = ? LIMIT 1",
+  )
+    .bind(`/assets/${storageKey}`)
+    .first<{ organizationId: string; kind: string; metadata: string | null }>();
+  if (!row) return null;
+  let contentType: string | null = null;
+  if (row.metadata) {
+    try {
+      const m = JSON.parse(row.metadata) as { contentType?: unknown };
+      if (typeof m.contentType === "string") contentType = m.contentType;
+    } catch {
+      // ignore
+    }
+  }
+  return { organizationId: row.organizationId, kind: row.kind, contentType };
+}

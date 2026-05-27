@@ -7,6 +7,7 @@ import {
   addSchoolQuestion,
   deleteSchoolLessonAsset,
   deleteSchoolQuestion,
+  uploadLessonFileAsset,
 } from "~/lib/curriculum.server";
 import { parseYouTubeId, youTubeEmbedUrl } from "~/lib/youtube";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
@@ -244,6 +245,46 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
 
+  if (intent === "upload-asset") {
+    const fileEntry = formData.get("file");
+    if (!(fileEntry instanceof File) || fileEntry.size === 0) {
+      return data({ error: "Pick a file to upload." }, { status: 400 });
+    }
+    const kindRaw = String(formData.get("kind") ?? "");
+    if (kindRaw !== "image" && kindRaw !== "pdf") {
+      return data({ error: "Unknown asset kind." }, { status: 400 });
+    }
+    const caption = String(formData.get("caption") ?? "").trim() || null;
+    // Soft size limit; Workers requests cap around 100 MB.
+    if (fileEntry.size > 25 * 1024 * 1024) {
+      return data({ error: "File too large (25 MB max for now)." }, { status: 400 });
+    }
+    // Soft content-type sanity check.
+    const ct = (fileEntry.type || "").toLowerCase();
+    if (kindRaw === "image" && !ct.startsWith("image/")) {
+      return data({ error: "Image upload must be an image file." }, { status: 400 });
+    }
+    if (kindRaw === "pdf" && ct && !ct.includes("pdf")) {
+      return data({ error: "PDF upload must be a PDF file." }, { status: 400 });
+    }
+    const { assetId } = await uploadLessonFileAsset(env, {
+      organizationId: tenant.organization.id,
+      schoolLessonId: params.lessonId,
+      file: fileEntry,
+      kind: kindRaw,
+      caption,
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "lesson_asset.uploaded",
+      entityType: "school_lesson_asset",
+      entityId: assetId,
+      payload: { kind: kindRaw, sizeBytes: fileEntry.size, name: fileEntry.name },
+    });
+    return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
+  }
+
   if (intent === "delete-asset") {
     const assetId = String(formData.get("assetId") ?? "");
     if (!assetId) return data({ error: "Asset missing." }, { status: 400 });
@@ -413,7 +454,7 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
                         {a.kind}
                       </p>
                       <p className="mt-1 truncate text-sm text-ink-700 dark:text-ink-200">
-                        {a.caption || a.url}
+                        {a.caption || a.url.split("/").pop() || a.url}
                       </p>
                       <a
                         href={a.url}
@@ -444,38 +485,93 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
                       />
                     </div>
                   )}
+                  {a.kind === "image" && (
+                    <img
+                      src={a.url}
+                      alt={a.caption ?? "Lesson image"}
+                      className="max-h-96 w-full rounded-xl object-contain"
+                    />
+                  )}
+                  {a.kind === "pdf" && (
+                    <embed
+                      src={a.url}
+                      type="application/pdf"
+                      className="h-96 w-full rounded-xl border border-ink-200 dark:border-ink-800"
+                    />
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
-        <Card>
-          <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-            Add a YouTube video
-          </h3>
-          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
-            Paste any YouTube URL — watch link, share link, or embed. Students see it embedded inline with the lesson.
-          </p>
-          <Form method="post" className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-            <input type="hidden" name="intent" value="add-youtube" />
-            <Field label="">
-              <TextInput
-                name="url"
-                type="url"
-                placeholder="https://www.youtube.com/watch?v=..."
-                required
-              />
-            </Field>
-            <Field label="">
-              <TextInput name="caption" type="text" placeholder="Caption (optional)" />
-            </Field>
-            <div className="self-end">
-              <Button type="submit" disabled={submitting}>
-                Add video
-              </Button>
-            </div>
-          </Form>
-        </Card>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+              Add a YouTube video
+            </h3>
+            <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+              Paste any YouTube URL — watch link, share link, or embed.
+            </p>
+            <Form method="post" className="mt-3 flex flex-col gap-3">
+              <input type="hidden" name="intent" value="add-youtube" />
+              <Field label="">
+                <TextInput
+                  name="url"
+                  type="url"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  required
+                />
+              </Field>
+              <Field label="">
+                <TextInput name="caption" type="text" placeholder="Caption (optional)" />
+              </Field>
+              <div>
+                <Button type="submit" disabled={submitting}>
+                  Add video
+                </Button>
+              </div>
+            </Form>
+          </Card>
+
+          <Card>
+            <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+              Upload an image or PDF
+            </h3>
+            <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+              Up to 25&nbsp;MB. Images render inline; PDFs are embedded with a download link.
+            </p>
+            <Form
+              method="post"
+              encType="multipart/form-data"
+              className="mt-3 flex flex-col gap-3"
+            >
+              <input type="hidden" name="intent" value="upload-asset" />
+              <Field label="Kind">
+                <Select name="kind" defaultValue="image">
+                  <option value="image">Image</option>
+                  <option value="pdf">PDF</option>
+                </Select>
+              </Field>
+              <Field label="File">
+                <input
+                  name="file"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  required
+                  className="block w-full text-sm text-ink-700 file:mr-3 file:rounded-full file:border-0 file:bg-ink-100 file:px-4 file:py-2 file:text-sm file:font-medium file:text-ink-800 hover:file:bg-ink-200 dark:text-ink-200 dark:file:bg-ink-800 dark:file:text-ink-100 dark:hover:file:bg-ink-700"
+                />
+              </Field>
+              <Field label="">
+                <TextInput name="caption" type="text" placeholder="Caption (optional)" />
+              </Field>
+              <div>
+                <Button type="submit" disabled={submitting}>
+                  Upload
+                </Button>
+              </div>
+            </Form>
+          </Card>
+        </div>
       </section>
 
       <section>

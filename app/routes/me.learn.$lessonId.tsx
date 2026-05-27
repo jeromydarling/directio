@@ -266,26 +266,67 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
 
       {assets.length > 0 && (
         <section className="flex flex-col gap-5">
-          {assets.map((a) =>
-            a.videoId ? (
-              <figure key={a.id} className="flex flex-col gap-2">
-                <div className="aspect-video w-full overflow-hidden rounded-2xl border border-ink-200 bg-black dark:border-ink-800">
-                  <iframe
-                    src={youTubeEmbedUrl(a.videoId)}
-                    className="h-full w-full"
-                    loading="lazy"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                    title={a.caption ?? "Lesson video"}
+          {assets.map((a) => {
+            if (a.videoId) {
+              return (
+                <figure key={a.id} className="flex flex-col gap-2">
+                  <div className="aspect-video w-full overflow-hidden rounded-2xl border border-ink-200 bg-black dark:border-ink-800">
+                    <iframe
+                      src={youTubeEmbedUrl(a.videoId)}
+                      className="h-full w-full"
+                      loading="lazy"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                      title={a.caption ?? "Lesson video"}
+                    />
+                  </div>
+                  {a.caption && (
+                    <figcaption className="text-sm text-ink-500 dark:text-ink-400">
+                      {a.caption}
+                    </figcaption>
+                  )}
+                </figure>
+              );
+            }
+            if (a.kind === "image") {
+              return (
+                <figure key={a.id} className="flex flex-col gap-2">
+                  <img
+                    src={a.url}
+                    alt={a.caption ?? "Lesson image"}
+                    className="w-full rounded-2xl border border-ink-200 object-contain dark:border-ink-800"
                   />
-                </div>
-                {a.caption && (
-                  <figcaption className="text-sm text-ink-500 dark:text-ink-400">
-                    {a.caption}
+                  {a.caption && (
+                    <figcaption className="text-sm text-ink-500 dark:text-ink-400">
+                      {a.caption}
+                    </figcaption>
+                  )}
+                </figure>
+              );
+            }
+            if (a.kind === "pdf") {
+              return (
+                <figure key={a.id} className="flex flex-col gap-2">
+                  <embed
+                    src={a.url}
+                    type="application/pdf"
+                    className="h-[36rem] w-full rounded-2xl border border-ink-200 dark:border-ink-800"
+                  />
+                  <figcaption className="flex items-center justify-between text-sm text-ink-500 dark:text-ink-400">
+                    <span>{a.caption ?? "Lesson PDF"}</span>
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand-600 hover:underline dark:text-brand-300"
+                    >
+                      Open PDF →
+                    </a>
                   </figcaption>
-                )}
-              </figure>
-            ) : (
+                </figure>
+              );
+            }
+            return (
               <a
                 key={a.id}
                 href={a.url}
@@ -295,8 +336,8 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
               >
                 {a.caption ?? a.url}
               </a>
-            ),
-          )}
+            );
+          })}
         </section>
       )}
 
