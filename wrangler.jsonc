@@ -9,6 +9,12 @@
     "enabled": true
   },
 
+  "triggers": {
+    "crons": [
+      "0 * * * *"
+    ]
+  },
+
   "d1_databases": [
     {
       "binding": "DB",
@@ -42,6 +48,8 @@
     "MAPBOX_PUBLIC_TOKEN": "set-in-keys-pass",
     "PERPLEXITY_API_KEY": "set-in-keys-pass",
     "ELEVENLABS_API_KEY": "set-in-keys-pass",
-    "ANTHROPIC_API_KEY": "set-in-keys-pass"
+    "ANTHROPIC_API_KEY": "set-in-keys-pass",
+    "RESEND_API_KEY": "set-in-keys-pass",
+    "RESEND_FROM": "directio <no-reply@directio.app>"
   }
 }
