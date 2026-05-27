@@ -2,11 +2,11 @@ import { Link, NavLink } from "react-router";
 import { useEffect, useState, type ReactNode } from "react";
 
 const NAV = [
+  { to: "/start-a-school", label: "Start a school" },
+  { to: "/for-schools", label: "Migrate" },
   { to: "/features", label: "Features" },
-  { to: "/for-schools", label: "For schools" },
-  { to: "/for-families", label: "For families" },
+  { to: "/for-families", label: "Family experience" },
   { to: "/states", label: "State coverage" },
-  { to: "/why", label: "Why we built it" },
   { to: "/pricing", label: "Pricing" },
 ];
 
@@ -217,8 +217,9 @@ function MarketingFooter({ env }: { env: string }) {
         <FooterColumn
           title="For"
           links={[
-            { label: "Schools", to: "/for-schools" },
-            { label: "Families", to: "/for-families" },
+            { label: "Starting a school", to: "/start-a-school" },
+            { label: "Existing schools", to: "/for-schools" },
+            { label: "Family experience", to: "/for-families" },
           ]}
         />
         <FooterColumn

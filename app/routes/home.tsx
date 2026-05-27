@@ -68,36 +68,34 @@ function Hero({ signedIn, destination }: { signedIn: boolean; destination: strin
         <Reveal>
           <p className="mb-6 inline-flex items-center gap-2 rounded-full border border-ink-200/80 bg-white/60 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-ink-600 backdrop-blur-md dark:border-ink-800/70 dark:bg-ink-900/40 dark:text-ink-300">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-500 animate-pulse" />
-            The driver education operating system
+            The driver education business, in one place
           </p>
         </Reveal>
 
         <Reveal delay={80}>
           <h1 className="font-display text-[2.75rem] font-semibold leading-[1.04] tracking-tight text-ink-900 sm:text-6xl md:text-7xl dark:text-ink-50">
-            One login.
+            Start a driving school.
             <br />
-            One timeline.
-            <br />
-            <span className="text-gradient">No mystery fees.</span>
+            Or <span className="text-gradient">fix the one you have</span>.
           </h1>
         </Reveal>
 
         <Reveal delay={160}>
           <p className="mt-8 max-w-2xl text-base leading-relaxed text-ink-600 sm:text-lg md:text-xl dark:text-ink-300">
-            directio replaces the patchwork of portals, paper forms, and surprise charges that
-            families navigate to get a driver's license. Schools run their entire operation —
-            enrollment, classroom, scheduling, permit credentials, payments — in one place that
-            knows the rules of every state.
+            directio is the entire driver-ed business in one place — classroom, scheduling,
+            payments, paperwork, the state credential, even your marketing website. If you've
+            been wanting to start a driver-ed school, we hand you the keys. If you already run
+            one and you're juggling six broken tools, we replace all of them.
           </p>
         </Reveal>
 
         <Reveal delay={240}>
           <div className="mt-10 flex flex-wrap items-center gap-3 sm:gap-4">
             <a
-              href={destination}
+              href="/start-a-school"
               className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-brand-500 px-6 py-3 text-base font-medium text-white shadow-[0_8px_28px_-6px_var(--color-brand-500)] transition-all hover:shadow-[0_16px_44px_-8px_var(--color-brand-500)] active:scale-[0.98]"
             >
-              {signedIn ? "Continue" : "Get started"}
+              I want to start a school
               <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
                 →
               </span>
@@ -106,13 +104,13 @@ function Hero({ signedIn, destination }: { signedIn: boolean; destination: strin
               href="/for-schools"
               className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-6 py-3 text-base font-medium text-ink-700 backdrop-blur-md transition hover:border-ink-300 hover:text-ink-900 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200 dark:hover:border-ink-700 dark:hover:text-ink-50"
             >
-              I run a school
+              I already run one
             </a>
             <a
-              href="/for-families"
-              className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-6 py-3 text-base font-medium text-ink-700 backdrop-blur-md transition hover:border-ink-300 hover:text-ink-900 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200 dark:hover:border-ink-700 dark:hover:text-ink-50"
+              href={destination}
+              className="inline-flex items-center gap-2 px-3 py-3 text-sm font-medium text-ink-600 transition hover:text-ink-900 dark:text-ink-300 dark:hover:text-ink-50"
             >
-              I'm a parent
+              {signedIn ? "Continue to dashboard" : "Sign in"} →
             </a>
           </div>
         </Reveal>
@@ -226,31 +224,30 @@ function ProblemSection() {
           <div>
             <Reveal>
               <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
-                The problem
+                Why this is a real business opportunity
               </p>
             </Reveal>
             <Reveal delay={80}>
               <h2 className="font-display text-3xl font-semibold leading-tight tracking-tight text-ink-900 sm:text-4xl md:text-5xl dark:text-ink-50">
-                Getting a teen licensed shouldn't require six tools and a phone tree.
+                Driver-ed is a $1B+ industry running on portals from 2009.
               </h2>
             </Reveal>
             <Reveal delay={160}>
               <div className="mt-6 space-y-4 text-base leading-relaxed text-ink-600 sm:text-lg dark:text-ink-300">
                 <p>
-                  You pay for driver's ed. The school sends you to{" "}
-                  <em className="text-rose-500 dark:text-rose-400">one portal</em> for classroom,{" "}
-                  <em className="text-rose-500 dark:text-rose-400">another</em> for the Blue
-                  Card, <em className="text-rose-500 dark:text-rose-400">a third</em> for
-                  behind-the-wheel scheduling, a paper waiver, a Stripe link via SMS, and a Google
-                  Calendar invite from the instructor's personal account.
+                  Every parent in America with a 15-year-old needs you. Every existing school
+                  is fighting the same six broken tools, the same unanswered phones, the same
+                  one-star Google reviews about "they took our money and dumped us to a paper
+                  directory."
                 </p>
                 <p>
-                  Every fee is a surprise. Every portal is the worst portal you've ever seen. The
-                  scheduler dumps you to a directory after taking your money. And nobody —
-                  including the school — can tell you what step your kid is actually on.
+                  The barrier to starting one is artificially high — not because the work is
+                  hard, but because the <em>software</em> is missing. State compliance,
+                  scheduling, payments, paperwork, a real website — every existing tool
+                  handles one slice and leaves you stitching the rest together.
                 </p>
                 <p className="font-medium text-ink-900 dark:text-ink-50">
-                  This is the industry standard. It's also unacceptable.
+                  directio is the missing software. Start a school. Or fix the one you've got.
                 </p>
               </div>
             </Reveal>
@@ -263,23 +260,23 @@ function ProblemSection() {
                 {[
                   {
                     quote:
-                      "I paid $720, then $40 for a Blue Card 'processing fee' on a different website I'd never heard of.",
-                    by: "Parent · Eagan, MN",
+                      "I've wanted to start a driving school for two years. I have my instructor cert. What I don't have is the patience to build a website, a scheduling system, and a payment processor from scratch.",
+                    by: "Aspiring owner · Bismarck, ND",
                   },
                   {
                     quote:
-                      "We can't text the school. They only answer email between 9 and noon.",
-                    by: "Parent · Apple Valley, MN",
+                      "Our 'system' is a paper calendar, four spreadsheets, and a Wix site I built in 2017. I can't onboard another instructor until I fix this.",
+                    by: "Owner · Asheville, NC",
                   },
                   {
                     quote:
-                      "Forgot the permit at home? $85 reschedule fee. Cancelled with 12 hours notice? $50.",
-                    by: "Parent · Burnsville, MN",
+                      "Every Google review starts the same way: 'They never answer the phone'. I have to fix our scheduling or we're done in 18 months.",
+                    by: "Owner · Boise, ID",
                   },
                   {
                     quote:
-                      "After we finished classroom, they handed us a paper directory and said 'good luck booking BTW'.",
-                    by: "Parent · Edina, MN",
+                      "The Blue Card portal we use takes a $40 cut. The scheduling tool we pay $300/month for can't talk to our LMS. I want one bill.",
+                    by: "Owner · Eagan, MN",
                   },
                 ].map((q, i) => (
                   <li
@@ -519,42 +516,42 @@ function FeaturesGrid() {
 
 const ROLES = [
   {
-    role: "School owner",
-    headline: "Stop juggling six tools.",
-    body: "Sign-ups, schedules, instructors, cars, payments, paperwork, certificates — all in one place. Money goes straight to your bank.",
+    role: "If you're starting a school",
+    headline: "We hand you the keys to a real business.",
+    body: "Get your instructor cert, find a car, get insurance — we'll handle everything else. Your full website, classroom, scheduler, payment processor, state credentialing, and family portal are configured in under an hour.",
     bullets: [
-      "Your school's data stays inside your school",
-      "Bring your old student list — we'll sort it out",
-      "Set your own late-cancel and no-show fees",
-      "Every important action is recorded",
+      "A branded public website (we'll AI-generate it from a few questions)",
+      "State rule pack pre-loaded for your jurisdiction",
+      "Starter curriculum you can use as-is or edit",
+      "Stripe Connect — your bank, your money, from day one",
     ],
-    cta: { label: "For schools", to: "/for-schools" },
+    cta: { label: "Start a school", to: "/start-a-school" },
     accent: "brand",
   },
   {
-    role: "Parent",
-    headline: "One login. One timeline. No surprise charges.",
-    body: "See exactly where your kid is, what the next step costs, and when it happens. Cancel or reschedule yourself — without calling the office at 9:01 AM hoping someone picks up.",
+    role: "If you already run a school",
+    headline: "Replace the six tools you're holding together with rubber bands.",
+    body: "Your classroom platform, your Blue Card processor, your scheduling tool, your payment links, your paper waivers, your Wix marketing site — all of it, in one place. Bring your student list and your existing brand; keep your customers.",
     bullets: [
-      "All your kids on one page",
-      "Cancel from your phone, fee disclosed before you confirm",
-      "Sign waivers from the bus stop",
-      "Practice log the instructor signs off on",
+      "AI-assisted import of your existing student data",
+      "Bring your own domain (Studio tier) or use ours",
+      "Your fee structure, your cancellation policy, your branding",
+      "Onboard in an hour, run on your terms thereafter",
     ],
-    cta: { label: "For families", to: "/for-families" },
+    cta: { label: "Migrate my school", to: "/for-schools" },
     accent: "accent",
   },
   {
-    role: "Instructor",
-    headline: "Built for one hand.",
-    body: "Your today view fits in your pocket. One tap to mark a no-show. Type notes for the next lesson and they're waiting for you next time.",
+    role: "What your families see",
+    headline: "The customer experience you've been wanting to offer.",
+    body: "Your families get the modern, mobile-first, one-login-for-everything experience that every parent has been begging for. It's a feature you sell — and a reason your one-star Google reviews go away.",
     bullets: [
-      "Phone-friendly today view",
-      "Publish the hours you're free to teach",
-      "Sign off on parent practice-log entries",
-      "Today, this week, last week — two taps each",
+      "One login, all the kids, full timeline",
+      "Self-serve reschedule with your fee policy applied",
+      "Sign waivers from a phone, log practice drives, download the certificate",
+      "AI help center grounded in your school's articles",
     ],
-    cta: { label: "Get started", to: "/signup" },
+    cta: { label: "See the family experience", to: "/for-families" },
     accent: "brand",
   },
 ];
@@ -566,10 +563,10 @@ function RolesSection() {
         <Reveal>
           <div className="mb-12 max-w-2xl sm:mb-16">
             <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
-              Designed for everyone in the loop
+              Who this is for
             </p>
             <h2 className="font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl md:text-5xl dark:text-ink-50">
-              Five roles. Five purpose-built portals. One database.
+              Two kinds of school owners. One platform.
             </h2>
           </div>
         </Reveal>
@@ -844,25 +841,26 @@ function Cta({ signedIn, destination }: { signedIn: boolean; destination: string
                 Ready when you are
               </p>
               <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-                Run your school like a product, not a fax machine.
+                Your driver-ed business, software included.
               </h2>
               <p className="mt-4 max-w-xl text-base text-ink-100/80 sm:text-lg">
-                Enrollment, scheduling, instructors, vehicles, BTW hours, fees, certificates,
-                state forms. One operator dashboard. One source of truth.
+                Free to start. The full classroom, scheduler, payment processor, family portal,
+                and state credentialing — out of the box, today. Upgrade to Studio for a custom
+                AI-generated marketing website that ties it all together.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <a
-                  href={destination}
+                  href={signedIn ? destination : "/start-a-school"}
                   className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-base font-medium text-ink-900 shadow-[0_8px_28px_-6px_rgba(0,0,0,0.4)] transition hover:shadow-[0_16px_44px_-8px_rgba(0,0,0,0.5)] active:scale-[0.98]"
                 >
-                  {signedIn ? "Continue" : "Start free"}
+                  {signedIn ? "Continue" : "Start a school"}
                   <span aria-hidden>→</span>
                 </a>
                 <a
                   href="/for-schools"
                   className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-base font-medium text-white backdrop-blur-md transition hover:bg-white/20"
                 >
-                  School-owner deep dive →
+                  Migrate an existing school →
                 </a>
               </div>
             </div>

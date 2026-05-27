@@ -54,17 +54,37 @@ const TIERS = [
       "Branded public page at /schools/your-slug",
     ],
     accent: "brand" as const,
+    featured: false,
+  },
+  {
+    name: "Studio",
+    headline: "Your own custom marketing website. AI-built. Your domain.",
+    price: "149",
+    priceUnit: "/ month",
+    feeNote: "All Free features included. 2% payment fee applies. Replaces your Wix/Squarespace/whatever.",
+    cta: { label: "Start with Studio", to: "/signup" },
+    features: [
+      "Everything in Free",
+      "Custom marketing website AI-generated from a 10-question intake",
+      "Bring your own domain (yourschool.com) or use ours",
+      "Site auto-syncs your programs, pricing, instructors, hours",
+      "SEO-optimized, mobile-first, fast everywhere",
+      "Update by editing in directio — the site updates itself",
+      "Custom photos: bring your own or pick from our library",
+      "Switch templates anytime — Brand, Trade, Editorial, or Bold",
+    ],
+    accent: "accent" as const,
     featured: true,
   },
   {
-    name: "Pro · deeper state coverage",
+    name: "Pro · deep state coverage",
     headline: "For when you want electronic DMV submission and bulk credentials.",
     price: "Talk to us",
     priceUnit: "",
-    feeNote: "The 2% fee is waived above $50k a month. Includes the state-specific work.",
+    feeNote: "The 2% fee is waived above $50k a month. Includes Studio + state-specific work.",
     cta: { label: "Schedule a call", to: "/signup" },
     features: [
-      "Everything in Free",
+      "Everything in Studio",
       "Electronic DMV submission for your state (where available)",
       "Issue credentials in bulk",
       "We build out the deeper state-specific work with you",
@@ -73,7 +93,7 @@ const TIERS = [
       "Single sign-on for multi-location schools",
       "Service-level agreement",
     ],
-    accent: "accent" as const,
+    accent: "brand" as const,
     featured: false,
   },
 ];
@@ -111,7 +131,7 @@ export default function Pricing({ loaderData }: Route.ComponentProps) {
 
       <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-3">
             {TIERS.map((t, i) => (
               <Reveal key={t.name} delay={i * 100}>
                 <div

@@ -5,11 +5,11 @@ import { MeshBackground, Reveal } from "~/components/motion";
 
 export function meta(_: Route.MetaArgs) {
   return [
-    { title: "For families · directio" },
+    { title: "Family experience · directio" },
     {
       name: "description",
       content:
-        "One login. One timeline. No mystery fees. The whole driver's license journey on one page — for parents, students, and the household.",
+        "The mobile-first, one-login-per-household experience your customers get when your school runs on directio. The reason your one-star Google reviews go away.",
     },
   ];
 }
@@ -59,35 +59,35 @@ function Hero({ destination, signedIn }: { destination: string; signedIn: boolea
       <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-16 sm:px-6 sm:pb-24 sm:pt-24">
         <Reveal>
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
-            For families
+            What your customers see
           </p>
         </Reveal>
         <Reveal delay={80}>
           <h1 className="max-w-3xl font-display text-4xl font-semibold leading-[1.05] tracking-tight text-ink-900 sm:text-5xl md:text-6xl dark:text-ink-50">
-            The whole driver's license,{" "}
-            <span className="text-gradient">on one page</span>.
+            The family experience{" "}
+            <span className="text-gradient">you've been wanting to offer</span>.
           </h1>
         </Reveal>
         <Reveal delay={160}>
           <p className="mt-6 max-w-2xl text-base text-ink-600 sm:text-lg md:text-xl dark:text-ink-300">
-            Your kid's classroom progress, permit credential, BTW hours, supervised practice log,
-            road test result, and completion certificate. In one place. With every fee visible
-            before it's owed.
+            One login per family. Every kid on one page. The mobile-first reschedule and
+            paperwork experience every parent has been begging for. It's a real feature you
+            sell — and the reason your one-star Google reviews go away.
           </p>
         </Reveal>
         <Reveal delay={240}>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
-              href={destination}
+              href={signedIn ? destination : "/start-a-school"}
               className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-brand-500 px-6 py-3 text-base font-medium text-white shadow-[0_8px_28px_-6px_var(--color-brand-500)] transition-all hover:shadow-[0_16px_44px_-8px_var(--color-brand-500)]"
             >
-              {signedIn ? "Continue" : "Sign in"} <span aria-hidden>→</span>
+              {signedIn ? "Continue" : "Start your school"} <span aria-hidden>→</span>
             </a>
             <a
-              href="/states"
+              href="/for-schools"
               className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-6 py-3 text-base font-medium text-ink-700 backdrop-blur-md transition hover:border-ink-300 hover:text-ink-900 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
             >
-              Is my state supported?
+              School-owner overview
             </a>
           </div>
         </Reveal>
@@ -100,24 +100,38 @@ function BeforeAfter() {
   return (
     <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
       <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+        <Reveal>
+          <div className="mb-10 max-w-2xl">
+            <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
+              The reviews driving you out of business
+            </p>
+            <h2 className="font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl md:text-5xl dark:text-ink-50">
+              The family experience your competitors offer.
+            </h2>
+            <p className="mt-4 text-base text-ink-600 sm:text-lg dark:text-ink-300">
+              This is what families say in your one-star Google reviews — and your
+              competitors'. Fix the experience and you stop losing customers to the next
+              school down the road.
+            </p>
+          </div>
+        </Reveal>
         <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
           <Reveal>
             <div className="relative h-full rounded-2xl border border-rose-200 bg-rose-50/40 p-6 sm:p-8 dark:border-rose-900/60 dark:bg-rose-950/20">
               <p className="text-xs font-medium uppercase tracking-[0.18em] text-rose-600 dark:text-rose-300">
-                The status quo
+                What families deal with at most schools
               </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl dark:text-ink-50">
-                Six tools, four surprise fees, zero clarity.
-              </h2>
+              <h3 className="mt-2 font-display text-xl font-semibold leading-tight text-ink-900 sm:text-2xl dark:text-ink-50">
+                Six portals, four surprise fees, zero clarity.
+              </h3>
               <ul className="mt-6 space-y-3 text-sm text-ink-700 sm:text-base dark:text-ink-200">
                 {[
-                  "Classroom portal A",
-                  "Blue Card processing fee on portal B",
-                  "BTW scheduling on portal C, with $85 reschedule fees you didn't know existed",
-                  "Paper waiver",
-                  "PDF parent log you fill out in a spiral notebook",
+                  "Classroom portal A, login lost",
+                  "Blue Card processing fee on portal B — sprung after enrollment",
+                  "BTW scheduling on portal C, with $85 reschedule fees nobody mentioned",
+                  "Paper waivers dropped off in person",
+                  "PDF parent log filled out in a notebook",
                   "Text messages from the instructor's personal phone",
-                  "DMV form your kid loses on the way to the road test",
                   "Office hours: M–F 9 to noon, missed calls roll to voicemail",
                 ].map((s) => (
                   <li key={s} className="flex items-start gap-2 line-through opacity-80">
@@ -132,20 +146,20 @@ function BeforeAfter() {
             <div className="relative h-full overflow-hidden rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50/60 to-accent-50/40 p-6 sm:p-8 dark:border-brand-700/60 dark:from-brand-950/40 dark:to-accent-900/20">
               <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-brand-400/30 blur-3xl" />
               <p className="text-xs font-medium uppercase tracking-[0.18em] text-brand-700 dark:text-brand-200">
-                With directio
+                What your families get with directio
               </p>
-              <h2 className="mt-2 font-display text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl dark:text-ink-50">
+              <h3 className="mt-2 font-display text-xl font-semibold leading-tight text-ink-900 sm:text-2xl dark:text-ink-50">
                 One login. One timeline. Every fee visible before it's owed.
-              </h2>
+              </h3>
               <ul className="mt-6 space-y-3 text-sm text-ink-700 sm:text-base dark:text-ink-200">
                 {[
-                  "All your kids on one /family page",
-                  "The full journey: classroom → permit → BTW → road test → certificate",
-                  "Reschedule from the bus stop — fee disclosed before you commit",
-                  "Sign waivers on your phone",
-                  "Practice log the instructor signs off on, so the state actually counts the hours",
-                  "Completion certificate you download as a PDF — yours forever",
-                  "Help center that answers permit-credential questions for your specific state",
+                  "All their kids on one page (siblings share a household)",
+                  "Full journey visible: classroom → permit → BTW → road test → certificate",
+                  "They reschedule from the bus stop — your fee policy applied automatically",
+                  "Sign your waivers on their phone, no in-person drop-off",
+                  "Practice log your instructor signs off on, so the state actually counts it",
+                  "Completion certificate they download as a PDF — your brand, their record",
+                  "AI help center that knows your school's policies and their state's rules",
                 ].map((s) => (
                   <li key={s} className="flex items-start gap-2">
                     <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
@@ -163,28 +177,28 @@ function BeforeAfter() {
 
 const PROMISES = [
   {
-    head: "Transparent fees",
-    body: "Tuition, admin/compliance, credential processing, reschedule policy. Every line item visible before you click pay. The school's late-cancel and no-show fees are part of the agreement — never a surprise.",
+    head: "Transparent fees you set",
+    body: "Tuition, admin/compliance, credential processing, your reschedule policy. Every line item visible to the family before they click pay. Your late-cancel and no-show fees are part of the agreement — never a surprise. (You collect more, families complain less.)",
   },
   {
     head: "Self-serve cancel + reschedule",
-    body: "Your kid sick on a Tuesday morning? Cancel from your phone. The school's deadline policy applies; if there's a fee, you see it before you confirm. No phone tag.",
+    body: "Mom's kid is sick on a Tuesday morning? She cancels from her phone — without calling your office. Your deadline policy applies; if there's a fee, she sees it before she confirms. Your phone stops ringing.",
   },
   {
-    head: "Multi-kid view",
-    body: "Two kids on the licensing path? One login. Each kid's timeline, payments, documents, and practice log in one place. Stop juggling spreadsheets.",
+    head: "Multi-kid household view",
+    body: "Two kids on the path? Mom logs in once and sees both timelines, both payment histories, both practice logs. Stops her from juggling — and from blaming you when she can't keep it straight.",
   },
   {
-    head: "Practice log that counts",
-    body: "Log the drive — date, minutes, night minutes, conditions. Your kid's instructor signs off. Signed entries count toward state-required supervised hours. No more paper logs the DMV rejects.",
+    head: "Practice log your instructor signs off on",
+    body: "Parents log the drive — date, minutes, night, conditions. Your instructor signs off in seconds. Signed entries count toward state-required supervised hours. No more paper logs the DMV rejects and parents blame you for.",
   },
   {
     head: "Permit credential, decoded",
-    body: "Minnesota's Blue Card, Texas's ITTD, California's classroom completion — whatever your state calls it, directio surfaces the requirement, tracks the threshold, and unlocks the credential on the timeline.",
+    body: "Your state's permit credential — Blue Card, ITTD, Driver Education Certificate — appears on the family's timeline at the exact right moment. They stop calling you to ask 'when does my kid get the thing?'.",
   },
   {
-    head: "Help that knows your school",
-    body: "AI help center grounded in your school's articles + platform docs. Ask 'when do I get the Blue Card?' and get a real answer, not a generic FAQ link.",
+    head: "AI help center grounded in your school's articles",
+    body: "Parents ask 'when do I get the Blue Card?' and get a real answer pulled from your school's help articles + your state's rules. You stop being the help desk.",
   },
 ];
 
@@ -195,11 +209,15 @@ function Promise() {
         <Reveal>
           <div className="mb-12 max-w-2xl">
             <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
-              The promise
+              What you offer
             </p>
             <h2 className="font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl md:text-5xl dark:text-ink-50">
-              What you get when your kid's school is on directio.
+              Six things every parent has been begging for.
             </h2>
+            <p className="mt-4 text-base text-ink-600 sm:text-lg dark:text-ink-300">
+              These are the features that get five-star reviews. Every one of them is a thing
+              you'll be able to advertise on your website tomorrow.
+            </p>
           </div>
         </Reveal>
         <div className="grid gap-4 md:grid-cols-2 md:gap-6">
@@ -357,24 +375,24 @@ function Student() {
 
 const FAQS = [
   {
-    q: "Do I have to sign up? Or do I just use whatever my kid's school chose?",
-    a: "If your kid's school is on directio, you sign up using the email they have on file for you and you're automatically linked as the guardian. No paperwork. If they're not on directio yet, the best thing you can do is forward them this page.",
+    q: "Can families sign up on their own?",
+    a: "Yes. When you add a family to your school (via direct entry or AI-import from your old data), they sign up with that email and are auto-linked as the guardian. No paperwork. No 'invitation' email chain.",
   },
   {
-    q: "Will I see fees before I owe them?",
-    a: "Yes. Tuition, admin/compliance, credential processing, and the school's cancellation/no-show policy are all visible before checkout. Late-cancel and no-show fees show on your /family/lessons page as 'pending' if your school's policy assesses them — never as a surprise charge on your card.",
+    q: "Do families ever see directio's branding?",
+    a: "Minimally — a small 'directio' wordmark in the footer. The header, hero, and every customer touchpoint use your school's name, logo, brand color, and font. On Studio tier with your own domain, they never see directio at all.",
   },
   {
-    q: "Can both parents log in?",
-    a: "Yes — multiple guardians per student is a first-class concept. Each parent has their own login and sees the same household + timeline.",
+    q: "What about siblings / multiple kids?",
+    a: "First-class. A parent with three kids on the path sees three timelines, three payment histories, one login. You can charge each kid separately or as a family package.",
   },
   {
-    q: "Is my kid's data safe?",
-    a: "Yes. Your kid's school never sees other schools' students and vice-versa. Every important action is recorded. Payment info goes straight to Stripe — we never store a card number.",
+    q: "Can both parents have access?",
+    a: "Yes. Multiple guardians per student is built in. Co-parents each get their own login and see the same household.",
   },
   {
-    q: "What if my state isn't fully supported?",
-    a: "All 50 states + DC are loaded. The depth varies — Minnesota and a few others are deep with the credential fully modeled; others are at the 'guided checklist' level for now. Check /states for the full breakdown.",
+    q: "What about family data privacy?",
+    a: "Your school's data lives inside your school's tenant. We never share it across schools, never sell it, and don't see it ourselves except to support you. Payments go straight to Stripe — we don't touch card numbers.",
   },
 ];
 
@@ -422,18 +440,24 @@ function Cta({ destination, signedIn }: { destination: string; signedIn: boolean
           <Reveal>
             <div className="relative max-w-2xl">
               <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-                Your kid deserves a better portal than the one your school uses now.
+                Offer your families the experience they've been wanting.
               </h2>
               <p className="mt-4 text-base text-ink-100/80 sm:text-lg">
-                If your school is already on directio, sign up with your email on file. If they're
-                not, forward this page to the front desk.
+                Free to start. Connect your bank when your first family pays. Your families
+                get the modern experience the day you flip the switch.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <a
-                  href={destination}
+                  href={signedIn ? destination : "/start-a-school"}
                   className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-base font-medium text-ink-900 shadow-[0_8px_28px_-6px_rgba(0,0,0,0.4)] transition hover:shadow-[0_16px_44px_-8px_rgba(0,0,0,0.5)]"
                 >
-                  {signedIn ? "Continue" : "Sign up"} <span aria-hidden>→</span>
+                  {signedIn ? "Continue" : "Start your school"} <span aria-hidden>→</span>
+                </a>
+                <a
+                  href="/for-schools"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-base font-medium text-white backdrop-blur-md transition hover:bg-white/20"
+                >
+                  Migrate an existing school →
                 </a>
               </div>
             </div>

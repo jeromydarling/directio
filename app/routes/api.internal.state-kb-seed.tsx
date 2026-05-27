@@ -24,7 +24,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
     return data({ error: "Use PUT." }, { status: 405 });
   }
   const env = context.cloudflare.env;
-  const expected: string = env.STATE_KB_SEED_KEY ?? "";
+  const expected: string = (env as unknown as { STATE_KB_SEED_KEY?: string }).STATE_KB_SEED_KEY ?? "";
   if (!expected || expected.startsWith("set-")) {
     return data({ error: "STATE_KB_SEED_KEY not configured." }, { status: 503 });
   }

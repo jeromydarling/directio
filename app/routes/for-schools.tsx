@@ -59,35 +59,36 @@ function Hero({ destination, signedIn }: { destination: string; signedIn: boolea
       <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-16 sm:px-6 sm:pb-24 sm:pt-24">
         <Reveal>
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
-            For school owners
+            For existing schools
           </p>
         </Reveal>
         <Reveal delay={80}>
           <h1 className="max-w-3xl font-display text-4xl font-semibold leading-[1.05] tracking-tight text-ink-900 sm:text-5xl md:text-6xl dark:text-ink-50">
-            Run your school like a product, not a{" "}
-            <span className="text-gradient">fax machine</span>.
+            Replace the six tools you're holding together with{" "}
+            <span className="text-gradient">rubber bands</span>.
           </h1>
         </Reveal>
         <Reveal delay={160}>
           <p className="mt-6 max-w-2xl text-base text-ink-600 sm:text-lg md:text-xl dark:text-ink-300">
-            Enrollment, scheduling, instructors, vehicles, BTW hours, fees, certificates, state
-            forms — one operator dashboard. Stripe Connect, audit logs on every compliance action,
-            and 50-state rule packs that already know what your jurisdiction requires.
+            Your classroom platform, your Blue Card processor, your scheduling tool, your
+            payment links, your paper waivers, your Wix marketing site — all of it, in one
+            place. Bring your student list and your existing brand; keep your customers,
+            keep your phone number, keep your name.
           </p>
         </Reveal>
         <Reveal delay={240}>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
-              href={destination}
+              href={signedIn ? destination : "/signup"}
               className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-600 to-brand-500 px-6 py-3 text-base font-medium text-white shadow-[0_8px_28px_-6px_var(--color-brand-500)] transition-all hover:shadow-[0_16px_44px_-8px_var(--color-brand-500)]"
             >
               {signedIn ? "Continue" : "Start free"} <span aria-hidden>→</span>
             </a>
             <a
-              href="/features"
+              href="/start-a-school"
               className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-6 py-3 text-base font-medium text-ink-700 backdrop-blur-md transition hover:border-ink-300 hover:text-ink-900 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
             >
-              See features
+              Starting from scratch? →
             </a>
           </div>
         </Reveal>
