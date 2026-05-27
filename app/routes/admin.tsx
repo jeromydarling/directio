@@ -18,6 +18,8 @@ const NAV = [
   { to: "/admin/instructors", label: "Instructors" },
   { to: "/admin/vehicles", label: "Vehicles" },
   { to: "/admin/library", label: "Curriculum" },
+  { to: "/admin/reports/quizzes", label: "Quiz reports" },
+  { to: "/admin/documents", label: "Documents" },
   { to: "/admin/payments", label: "Payments" },
   { to: "/admin/settings", label: "Settings" },
 ];

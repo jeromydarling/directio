@@ -1,8 +1,9 @@
 import { Form, data, redirect, useNavigation } from "react-router";
+import { useState } from "react";
 import type { Route } from "./+types/admin.schedule.new";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
-import { PageHeader, Button, LinkButton } from "~/components/ui";
+import { PageHeader, Button, LinkButton, Card } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
 type EnrollOption = {
@@ -18,6 +19,12 @@ type InstructorOption = {
 };
 
 type VehicleOption = { id: string; label: string };
+
+type AvailabilityRow = {
+  instructorId: string;
+  startsAt: number;
+  endsAt: number;
+};
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
@@ -50,10 +57,25 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(orgId)
     .all<VehicleOption>();
 
+  // Next 30 days of instructor availability windows so the UI can suggest
+  // "next available" slots and detect when the admin is booking outside them.
+  const now = Date.now();
+  const horizon = now + 30 * 24 * 60 * 60 * 1000;
+  const availability = await db
+    .prepare(
+      `SELECT instructorId, startsAt, endsAt
+         FROM instructorAvailability
+        WHERE organizationId = ? AND endsAt >= ? AND startsAt <= ?
+        ORDER BY startsAt`,
+    )
+    .bind(orgId, now, horizon)
+    .all<AvailabilityRow>();
+
   return {
     enrollments: enrollments.results,
     instructors: instructors.results,
     vehicles: vehicles.results,
+    availability: availability.results,
   };
 }
 
@@ -69,6 +91,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const startsAtRaw = String(formData.get("startsAt") ?? "").trim();
   const durationMin = parseInt(String(formData.get("durationMin") ?? "60"), 10);
   const locationLabel = String(formData.get("locationLabel") ?? "").trim() || null;
+  const overrideWindow = formData.get("overrideWindow") === "on";
 
   if (!enrollmentId) return data({ error: "Pick an enrollment." }, { status: 400 });
   if (!startsAtRaw) return data({ error: "Pick a start time." }, { status: 400 });
@@ -80,13 +103,70 @@ export async function action({ request, context }: Route.ActionArgs) {
     return data({ error: "Start time is invalid." }, { status: 400 });
   const endsAt = startsAt + durationMin * 60_000;
 
-  // Confirm the enrollment belongs to this org (defense in depth).
   const e = await env.DB.prepare(
     "SELECT id FROM enrollment WHERE id = ? AND organizationId = ?",
   )
     .bind(enrollmentId, tenant.organization.id)
     .first<{ id: string }>();
   if (!e) return data({ error: "Enrollment not found." }, { status: 400 });
+
+  // Hard block: same instructor double-booked.
+  if (instructorId) {
+    const conflict = await env.DB.prepare(
+      `SELECT id FROM appointment
+        WHERE organizationId = ? AND instructorId = ?
+          AND status IN ('scheduled', 'confirmed')
+          AND startsAt < ? AND endsAt > ?
+        LIMIT 1`,
+    )
+      .bind(tenant.organization.id, instructorId, endsAt, startsAt)
+      .first<{ id: string }>();
+    if (conflict)
+      return data(
+        { error: "That instructor is already booked during this time." },
+        { status: 409 },
+      );
+  }
+
+  // Hard block: same vehicle double-booked.
+  if (vehicleId) {
+    const vehicleConflict = await env.DB.prepare(
+      `SELECT id FROM appointment
+        WHERE organizationId = ? AND vehicleId = ?
+          AND status IN ('scheduled', 'confirmed')
+          AND startsAt < ? AND endsAt > ?
+        LIMIT 1`,
+    )
+      .bind(tenant.organization.id, vehicleId, endsAt, startsAt)
+      .first<{ id: string }>();
+    if (vehicleConflict)
+      return data(
+        { error: "That vehicle is already in use during this time." },
+        { status: 409 },
+      );
+  }
+
+  // Soft check: time should fall inside an instructor availability window.
+  // Allow override (e.g. school staff knows the instructor agreed off-platform).
+  if (instructorId && !overrideWindow) {
+    const window = await env.DB.prepare(
+      `SELECT id FROM instructorAvailability
+        WHERE organizationId = ? AND instructorId = ?
+          AND startsAt <= ? AND endsAt >= ?
+        LIMIT 1`,
+    )
+      .bind(tenant.organization.id, instructorId, startsAt, endsAt)
+      .first<{ id: string }>();
+    if (!window)
+      return data(
+        {
+          error:
+            "This time isn't inside the instructor's open availability. Check 'Book outside availability' to override.",
+          showOverride: true,
+        },
+        { status: 400 },
+      );
+  }
 
   await env.DB.prepare(
     `INSERT INTO appointment (id, organizationId, enrollmentId, instructorId, vehicleId,
@@ -112,10 +192,18 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function NewLesson({ loaderData, actionData }: Route.ComponentProps) {
-  const { enrollments, instructors, vehicles } = loaderData;
+  const { enrollments, instructors, vehicles, availability } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const defaultStart = defaultDatetimeLocal();
+  const [instructorId, setInstructorId] = useState("");
+
+  const upcomingForInstructor = instructorId
+    ? availability.filter((a) => a.instructorId === instructorId).slice(0, 6)
+    : [];
+
+  const showOverride =
+    actionData && "showOverride" in actionData && actionData.showOverride === true;
 
   return (
     <div className="flex flex-col gap-8">
@@ -156,7 +244,11 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
             </Select>
           </Field>
           <Field label="Instructor">
-            <Select name="instructorId" defaultValue="">
+            <Select
+              name="instructorId"
+              value={instructorId}
+              onChange={(e) => setInstructorId(e.currentTarget.value)}
+            >
               <option value="">— Unassigned —</option>
               {instructors.map((i) => (
                 <option key={i.id} value={i.id}>
@@ -191,6 +283,52 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
           <Field label="Location">
             <TextInput name="locationLabel" type="text" placeholder="Main office, pickup at home, etc." />
           </Field>
+
+          {instructorId && (
+            <div className="md:col-span-2">
+              <Card className="border-brand-300 bg-brand-50/40 dark:border-brand-700 dark:bg-brand-950/20">
+                <p className="text-xs uppercase tracking-wider text-brand-700 dark:text-brand-200">
+                  Instructor availability
+                </p>
+                {upcomingForInstructor.length === 0 ? (
+                  <p className="mt-2 text-sm text-ink-700 dark:text-ink-200">
+                    This instructor hasn't published any open windows in the next 30 days. Ask them
+                    to add availability or use the override below.
+                  </p>
+                ) : (
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {upcomingForInstructor.map((w, i) => (
+                      <li
+                        key={i}
+                        className="rounded-full border border-ink-200 bg-white/70 px-3 py-1 text-xs text-ink-700 dark:border-ink-800 dark:bg-ink-900/60 dark:text-ink-200"
+                      >
+                        {fmtRange(w.startsAt, w.endsAt)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </div>
+          )}
+
+          {(showOverride || instructorId) && (
+            <div className="md:col-span-2">
+              <label className="flex items-start gap-2 text-sm text-ink-700 dark:text-ink-200">
+                <input
+                  type="checkbox"
+                  name="overrideWindow"
+                  className="mt-1 h-4 w-4 rounded border-ink-300"
+                  defaultChecked={showOverride}
+                />
+                <span>
+                  <strong>Book outside the instructor's availability.</strong> Use this only when
+                  the instructor has agreed off-platform; double-bookings on the same instructor or
+                  vehicle are still blocked.
+                </span>
+              </label>
+            </div>
+          )}
+
           <div className="md:col-span-2">
             <FormError message={actionData && "error" in actionData ? actionData.error : null} />
             <Button type="submit" disabled={submitting} className="mt-3">
@@ -204,11 +342,19 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
 }
 
 function defaultDatetimeLocal(): string {
-  // Default to "next hour, rounded", in the local timezone.
   const d = new Date();
   d.setMinutes(0, 0, 0);
   d.setHours(d.getHours() + 1);
   const tz = d.getTimezoneOffset();
   const local = new Date(d.getTime() - tz * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+function fmtRange(startsAt: number, endsAt: number): string {
+  const s = new Date(startsAt);
+  const e = new Date(endsAt);
+  const day = s.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const sTime = s.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const eTime = e.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} · ${sTime}–${eTime}`;
 }

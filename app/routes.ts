@@ -42,6 +42,8 @@ export default [
     route("settings/payments", "routes/admin.settings.payments.tsx"),
     route("settings/btw-flow", "routes/admin.settings.btw-flow.tsx"),
     route("settings/public-listing", "routes/admin.settings.public-listing.tsx"),
+    route("reports/quizzes", "routes/admin.reports.quizzes.tsx"),
+    route("documents", "routes/admin.documents.tsx"),
   ]),
 
   route("instructor", "routes/instructor.tsx", [
