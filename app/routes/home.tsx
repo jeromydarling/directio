@@ -1,4 +1,5 @@
 import type { Route } from "./+types/home";
+import { getSession } from "~/lib/session.server";
 
 export function meta(_: Route.MetaArgs) {
   return [
@@ -11,17 +12,19 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export function loader({ context }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
+  const session = await getSession(request, context.cloudflare.env);
   return {
     appEnv: context.cloudflare.env.APP_ENV ?? "unknown",
+    signedIn: Boolean(session?.user),
   };
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
   return (
     <div className="min-h-dvh bg-ink-50 text-ink-900 dark:bg-ink-950 dark:text-ink-100">
-      <SiteHeader />
-      <Hero />
+      <SiteHeader signedIn={loaderData.signedIn} />
+      <Hero signedIn={loaderData.signedIn} />
       <PillarSection />
       <JourneySection />
       <FooterStrip env={loaderData.appEnv} />
@@ -29,7 +32,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function SiteHeader() {
+function SiteHeader({ signedIn }: { signedIn: boolean }) {
   return (
     <header className="border-b border-ink-200/60 dark:border-ink-800/60">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -46,18 +49,29 @@ function SiteHeader() {
           </a>
         </nav>
         <div className="flex items-center gap-3">
-          <a
-            href="/login"
-            className="text-sm font-medium text-ink-700 transition hover:text-ink-900 dark:text-ink-200 dark:hover:text-ink-50"
-          >
-            Sign in
-          </a>
-          <a
-            href="/get-started"
-            className="rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
-          >
-            Get started
-          </a>
+          {signedIn ? (
+            <a
+              href="/admin"
+              className="rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
+            >
+              Go to dashboard
+            </a>
+          ) : (
+            <>
+              <a
+                href="/login"
+                className="text-sm font-medium text-ink-700 transition hover:text-ink-900 dark:text-ink-200 dark:hover:text-ink-50"
+              >
+                Sign in
+              </a>
+              <a
+                href="/signup"
+                className="rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
+              >
+                Get started
+              </a>
+            </>
+          )}
         </div>
       </div>
     </header>
@@ -75,7 +89,7 @@ function Wordmark() {
   );
 }
 
-function Hero() {
+function Hero({ signedIn }: { signedIn: boolean }) {
   return (
     <section className="relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0 -z-10">
@@ -105,10 +119,10 @@ function Hero() {
 
         <div className="mt-10 flex flex-wrap items-center gap-4">
           <a
-            href="/get-started"
+            href={signedIn ? "/admin" : "/signup"}
             className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-6 py-3 text-base font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
           >
-            Get started
+            {signedIn ? "Go to dashboard" : "Get started"}
             <span aria-hidden>→</span>
           </a>
           <a
