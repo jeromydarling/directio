@@ -53,5 +53,6 @@ export default [
     route("learn/:lessonId", "routes/me.learn.$lessonId.tsx"),
     route("checkout/:enrollmentId", "routes/me.checkout.$enrollmentId.tsx"),
     route("find-school", "routes/me.find-school.tsx"),
+    route("help", "routes/me.help.tsx"),
   ]),
 ] satisfies RouteConfig;

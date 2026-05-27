@@ -38,6 +38,7 @@ const NAV = [
   { to: "/me/learn", label: "Lessons" },
   { to: "/me/schedule", label: "Schedule" },
   { to: "/me/find-school", label: "Find school" },
+  { to: "/me/help", label: "Help" },
 ];
 
 export default function MeLayout({ loaderData }: Route.ComponentProps) {
