@@ -46,78 +46,78 @@ type FeatureSection = {
 
 const SECTIONS: FeatureSection[] = [
   {
-    category: "Enrollment & payments",
+    category: "Sign up & pay",
     icon: "◉",
     blurb:
-      "From a public school listing to a paid enrollment, no portal-hopping. Stripe Connect handles the money so it never touches the directio account.",
+      "Families enroll without a phone call. Every fee is on the page before they agree to it. Tuition goes straight to your bank.",
     features: [
       {
-        title: "Public school catalog",
+        title: "Your own school page",
         detail:
-          "Branded marketing page at /schools/:slug. Programs and packages with transparent fee breakdowns. Anonymous browsing, gated checkout.",
+          "Branded page at /schools/your-slug. Programs, packages, every fee visible up front. Families can browse without signing up; checkout opens when they're ready.",
       },
       {
-        title: "Programs + packages",
+        title: "Programs and packages",
         detail:
-          "Programs (Teen, Adult, Refresher) bundle packages (Standard 6h BTW, Plus 10h, etc.) with per-package pricing, currency, and BTW lesson count.",
+          "Bundle your programs (Teen, Adult, Refresher) into priced packages — 'Standard 6-hour BTW', 'Plus 10 lessons', whatever your school sells.",
       },
       {
-        title: "Transparent fee breakdown",
+        title: "Every fee, visible up front",
         detail:
-          "Tuition, admin/compliance, credential processing, reschedule policy — all visible before the family agrees, all stored as line items.",
+          "Tuition, admin fee, credential cost, reschedule policy — laid out as line items before checkout. No 'oh and one more thing' surprises after the family pays.",
       },
       {
-        title: "Stripe Connect Express",
+        title: "Your bank, not ours",
         detail:
-          "Schools own their connected account. Application fee handled at the directio platform level — Stripe never settles into a directio bank.",
+          "We don't sit in the middle. Tuition flows straight from the family's card to your bank account through Stripe.",
       },
       {
-        title: "One-time, BNPL, installments",
+        title: "Pay once, pay later, or pay monthly",
         detail:
-          "Three checkout modes per package: one-time charge, Klarna/Affirm BNPL via Stripe, or recurring installment subscription. Schools pick the modes they offer.",
+          "Three checkout options per package: one-time charge, buy-now-pay-later (Klarna or Affirm), or recurring monthly installments. You pick which to offer.",
       },
       {
-        title: "Refunds with application fee handling",
+        title: "Honest refunds",
         detail:
-          "Full and partial refunds with `refund_application_fee` so the school doesn't eat the platform cut on a drop-out.",
+          "Refund a drop-out and you get the platform fee back too — you shouldn't eat the cost of a transaction that didn't stick.",
       },
     ],
   },
   {
-    category: "Classroom (LMS)",
+    category: "Online classroom",
     icon: "📖",
     blurb:
-      "A full LMS that schools install rather than build. Curriculum packs ship from the platform, schools deep-copy and edit a private version.",
+      "A full classroom you can install instead of build. Start with our lessons and quizzes, edit anything you want, leave the rest as-is.",
     features: [
       {
-        title: "Install-copy-edit curriculum",
+        title: "Starter lessons you can edit",
         detail:
-          "Platform-owned content_pack_version → deep-copied into school_module / school_lesson / school_quiz_question on install. Edits stay yours; platform updates surface as upgrade notices.",
+          "Install our curriculum once. You get your own editable copy. When we improve the originals, you get a notice — never a forced overwrite.",
       },
       {
-        title: "Modules → lessons → quizzes",
+        title: "Modules, lessons, quizzes",
         detail:
-          "Hierarchical curriculum with ordinal sorting, drag-reorder, and published/draft state per asset.",
+          "Standard hierarchy with simple drag-to-reorder. Publish or keep as draft. Each piece has its own status so you can roll changes out gradually.",
       },
       {
-        title: "Lesson assets in R2",
+        title: "Video, PDFs, images",
         detail:
-          "Per-lesson video, PDFs, and images. Streamed from R2 with tenant-scoped /assets/* gating so files never leak across schools.",
+          "Drop assets into any lesson. Files are served privately to your students — never accessible from another school's account.",
       },
       {
-        title: "YouTube embed parser",
+        title: "Paste any YouTube link",
         detail:
-          "Pastes any YouTube URL — watch?v=, youtu.be/, /embed/, /shorts/, /live/, m.youtube.com — and resolves to the canonical embed.",
+          "We figure out the format — watch URLs, short links, embeds, Shorts, live, mobile. Just paste and go.",
       },
       {
-        title: "Multiple-choice quizzes with rationales",
+        title: "Quizzes that teach",
         detail:
-          "Each question stores the right answer + a per-question rationale that surfaces after submission, not just the score.",
+          "Multiple choice with an explanation after each answer. Students don't just get a score — they learn why they got it wrong.",
       },
       {
-        title: "Quiz reports",
+        title: "See where students struggle",
         detail:
-          "Per-lesson pass rate, weakest-question table (min 3 attempts), struggling-students leaderboard, drill-in to per-question wrong-rate.",
+          "Pass rate per lesson. The questions the most students get wrong. The students falling behind. So you can fix the lesson, not blame the kid.",
       },
     ],
   },
@@ -125,70 +125,70 @@ const SECTIONS: FeatureSection[] = [
     category: "Scheduling",
     icon: "▦",
     blurb:
-      "Behind-the-wheel is the hard part: instructor availability, vehicle assignment, no double-bookings, fee policies for late cancels and no-shows.",
+      "Behind-the-wheel is the hard part. We won't let you double-book a car or an instructor, we'll warn you when you're booking outside someone's hours, and we'll send the reminders for you.",
     features: [
       {
-        title: "Instructor availability windows",
+        title: "Instructor availability",
         detail:
-          "Instructors publish open windows on /instructor/availability. Admins see them as quick-pick chips when booking. Office-led scheduling by default; per-school self-scheduling toggle planned.",
+          "Instructors publish the hours they're free to teach. When you go to book, those windows appear as quick-pick chips.",
       },
       {
-        title: "Hard double-booking prevention",
+        title: "No double-bookings",
         detail:
-          "Bookings that overlap an existing scheduled/confirmed lesson on the same instructor — or the same vehicle — return 409 and never reach the database.",
+          "Try to put the same instructor in two places at once, or the same car with two students — the system says no and tells you what's already there.",
       },
       {
-        title: "Soft availability check + override",
+        title: "Smart warnings, easy overrides",
         detail:
-          "Booking outside an instructor's published window returns a 400 with an override option. Use case: the instructor agreed off-platform.",
+          "Booking outside an instructor's posted hours? You'll see a warning with a one-checkbox override for the times you've worked it out off-platform.",
       },
       {
-        title: "Cron-driven reminders",
+        title: "Automatic reminders",
         detail:
-          "Cloudflare Cron Trigger runs hourly. Sends 24-hour and 1-hour BTW reminders via Resend. Idempotent via UNIQUE constraint on cron_run; retries never double-send.",
+          "24 hours and 1 hour before each lesson, families get a friendly email. If the system retries, nobody gets a duplicate. Hands off.",
       },
       {
-        title: "Cancellation policy",
+        title: "Your cancellation rules",
         detail:
-          "Per-school: deadline (hours), late-cancel fee, no-show fee, family self-serve toggle. Cancellations inside the deadline assess the fee automatically.",
+          "Pick your deadline, your late-cancel fee, your no-show fee, and whether families can cancel themselves. Inside-the-deadline cancellations charge the fee automatically.",
       },
       {
-        title: "No-show flow",
+        title: "One-tap no-show",
         detail:
-          "One-tap 'No-show' on the instructor today view. Fee assessed, journey state preserved, audit logged.",
+          "Student didn't show? One button on the instructor's phone marks it, charges the fee, and updates the timeline.",
       },
     ],
   },
   {
-    category: "BTW lesson runner (instructor)",
+    category: "In the car",
     icon: "🚗",
     blurb:
-      "The instructor experience is mobile-first: a today view that fits in one hand and never needs a desktop.",
+      "The instructor's view fits in one hand. Built for the front seat of a parked car, not the desktop in the office.",
     features: [
       {
-        title: "Today view",
+        title: "Today's lessons, sorted",
         detail:
-          "Today's lessons sorted by time, with student name, kind (BTW / classroom / road test prep), vehicle, location, and one-tap phone/email links.",
+          "Time, student, vehicle, pickup location, and one-tap phone or email for the parent. That's what an instructor needs to see, and nothing else.",
       },
       {
-        title: "Carry-over from last lesson",
+        title: "What to work on this time",
         detail:
-          "When the previous BTW for the same enrollment had a 'next focus' note, it shows as a Carry over banner — pre-flight context in 0 taps.",
+          "If last lesson's notes said 'needs more highway practice', you see that as a banner at the top of today's lesson. No scrolling through history.",
       },
       {
-        title: "Complete with status + notes",
+        title: "Mark the outcome",
         detail:
-          "Completed / no-show / canceled (late) / weather-hold. Lesson notes visible to admin + family; next-focus pre-fills the chain.",
+          "Completed, no-show, last-minute cancel, or weather-hold. Add lesson notes the family can see. Set 'what to work on next time' — it'll be waiting at the next lesson.",
       },
       {
-        title: "Practice-log sign-off",
+        title: "Sign off parent drives",
         detail:
-          "Parent-supervised drives queued for instructor sign-off. Signed entries count toward state-required supervised hours.",
+          "Parents log their supervised practice drives. You verify them. Only signed entries count toward state-required hours.",
       },
       {
-        title: "Past / upcoming views",
+        title: "Past and upcoming",
         detail:
-          "Quick filter to last 30 days and next 30 days; useful for instructors filling out timesheets.",
+          "Two more views — last 30 days, next 30 days. Enough for timesheets and forward planning.",
       },
     ],
   },
@@ -196,146 +196,146 @@ const SECTIONS: FeatureSection[] = [
     category: "Family experience",
     icon: "♡",
     blurb:
-      "Parents and students see the same timeline. The parent portal handles waivers, practice logs, payment history, and self-serve cancellations.",
+      "Parents and students see the same page. Cancel a lesson, sign a waiver, log a drive, download the certificate — all from a phone at the bus stop.",
     features: [
       {
-        title: "Multi-kid household view",
+        title: "All your kids, one page",
         detail:
-          "One login surfaces every kid in the family. Both formal guardianStudent links and loose email-fallback claim work, so schools that haven't built out households yet still get value.",
+          "One login. If you have two kids on the licensing path, both show up. Both timelines. Both payment histories.",
       },
       {
-        title: "Unified journey timeline",
+        title: "One timeline per kid",
         detail:
-          "Enrolled → Classroom → Permit → BTW hours → Supervised practice → Road test → Certificate. Concrete numbers (4 / 6 BTW hours) and an animated 'now' indicator.",
+          "Enrolled → classroom → permit → behind-the-wheel → supervised practice → road test → certificate. With real numbers: 4 of 6 BTW hours, 30 of 50 practice hours, etc.",
       },
       {
-        title: "Self-serve cancel + reschedule",
+        title: "Cancel yourself",
         detail:
-          "Cancel an upcoming lesson without calling the office. Fee disclosed up front based on the school's policy; assessed automatically if inside the deadline.",
+          "No more calling the office at 9:01 AM. Cancel right from /family/lessons. If you're inside the deadline, the fee is disclosed before you confirm.",
       },
       {
-        title: "Document signing + uploads",
+        title: "Sign waivers from your phone",
         detail:
-          "Sign liability waivers and parental consents with a typed name + checkbox attestation. Upload paperwork (PDF / image) to R2.",
+          "Type your name, tick the box, done. Or upload a PDF the school asked for. All stored alongside your kid's record.",
       },
       {
-        title: "Parent practice log",
+        title: "Practice log that counts",
         detail:
-          "Date, total minutes, night minutes, conditions, free-text notes. Instructor sign-off makes it state-compliant.",
+          "Log each drive: date, minutes, night minutes, conditions, notes. Your kid's instructor signs off so the state actually counts the hours.",
       },
       {
         title: "Completion certificate",
         detail:
-          "School-branded, serialized, printable. Admin issues, family downloads. Survives a copy-paste of the URL for the DMV.",
+          "School-branded, dated, with a unique serial number. Print it, save it as a PDF, hand it to the DMV. Yours forever.",
       },
     ],
   },
   {
-    category: "Compliance",
+    category: "State compliance",
     icon: "📜",
     blurb:
-      "The hardest part of driver education is that the rules are different in every state. directio's rule engine is declarative, versioned, and per-tenant overridable.",
+      "Each state has its own rules. We handle them. You get the permit credential unlocked at the right moment, the right paperwork at the right step.",
     features: [
       {
-        title: "50 states + DC rule packs (seeded)",
+        title: "All 50 states + DC, ready",
         detail:
-          "Every state's teen pathway shipped at MVP — Minnesota's Blue Card, Texas's parent-taught BTW eligibility, California's no-classroom-hours-required pathway, etc.",
+          "Every state's teen path is loaded — Minnesota's Blue Card, Texas's parent-taught route, California's classroom certificate. Pick yours and the rules apply.",
       },
       {
-        title: "Declarative + versioned",
+        title: "Override when you need to",
         detail:
-          "rule_pack + rule_pack_version + organization_rule_override. Definitions are JSON, not code, so updating a state requirement doesn't ship UI changes.",
+          "Your school does it slightly differently from the default? Adjust individual rules without throwing away the rest of the state's setup.",
       },
       {
-        title: "Permit-eligibility credentials",
+        title: "Permit credentials",
         detail:
-          "Modeled generically — Blue Card, ITTD, driver-education certificate. Delivery modes: manual hand-off, PDF export, or DMV API integration.",
+          "Blue Card, ITTD slip, driver-education certificate — whatever your state calls it. Unlocks on the student's timeline when they hit the requirement. Hand it over, print it, or submit it electronically.",
       },
       {
-        title: "Three-level state adapter maturity",
+        title: "Three coverage depths",
         detail:
-          "Level 1: manual checklist. Level 2: PDF export. Level 3: DMV API. Honest national coverage; deep Minnesota implementation first.",
+          "Some states are a guided checklist. Some include the official PDF. Some submit directly to the DMV. We tell you which is which — no marketing-page lies.",
       },
       {
-        title: "Road test outcome tracking",
+        title: "Road test results",
         detail:
-          "Per-attempt logging with examiner notes and testing center. Auto-advances journey state on first pass. Surfaces pass-rate + first-try-pass metric to the school.",
+          "Log each attempt. We calculate your pass rate and first-try pass rate. Show it on your public page — families look at this when picking a school.",
       },
       {
-        title: "Audit log",
+        title: "Audit trail",
         detail:
-          "Credential issuance, rule overrides, fee changes, cancellations, document approvals, certificate issuance — every compliance-relevant action recorded with actor, timestamp, and JSON payload.",
+          "Every compliance-touching action — credential issued, fee changed, refund processed, certificate printed — recorded with who did it and when.",
       },
     ],
   },
   {
-    category: "Operations",
+    category: "Back office",
     icon: "⚙",
     blurb:
-      "The back-office tooling schools actually use day-to-day. Imports, document review, fee collection, public listing, theming.",
+      "The unglamorous tools schools actually open every day. Imports, paperwork review, fees, branding, the works.",
     features: [
       {
-        title: "AI-assisted CSV import",
+        title: "Bring your old data",
         detail:
-          "Drop in a legacy CSV from a previous tool. Claude normalizes the rows, flags conflicts, and bulk-creates students + guardians.",
+          "Drop in a CSV from your previous tool. Our import figures out which column is what, flags duplicates, and brings everything in — students, guardians, programs.",
       },
       {
-        title: "Document review queue",
+        title: "Paperwork review queue",
         detail:
-          "/admin/documents shows pending waivers, parental consents, and uploaded paperwork. Approve, reject (with reason in audit log), or reopen.",
+          "Every signed waiver, every uploaded form, in one list. Approve, reject (with a reason for the record), or send it back for review.",
       },
       {
-        title: "Fee collection workflow",
+        title: "Late-cancel and no-show fees",
         detail:
-          "/admin/fees lists assessed cancellation + no-show fees. Headline tiles for pending / paid / waived. Mark paid or waive in one click.",
+          "Pending, paid, waived — three tabs. Headline tiles show how much is outstanding. One click to mark paid or waive.",
       },
       {
-        title: "Public listing",
+        title: "Branded public page",
         detail:
-          "Opt-in branded page at /schools/:slug with tagline, about copy, programs, and a checkout CTA. School controls visibility.",
+          "Flip a switch and your school gets a real marketing page at /schools/your-slug. Tagline, about copy, programs, checkout — your brand throughout.",
       },
       {
-        title: "Per-tenant theming",
+        title: "Your logo, your colors",
         detail:
-          "Logo, brand color, and custom fonts via CSS custom properties on <html>. Every school looks like their own product.",
+          "Set your brand color, upload your logo, pick a custom font. Every page your families see looks like your school, not ours.",
       },
       {
-        title: "Onboarding wizard",
+        title: "Onboarding checklist",
         detail:
-          "Add an instructor, add a vehicle, install a rule pack, install a curriculum pack — checked off as the school finishes each step.",
+          "Add an instructor. Add a car. Pick your state. Install lessons. Connect your bank. Tick each box and you're operating.",
       },
     ],
   },
   {
-    category: "Discovery & help",
+    category: "Find your way",
     icon: "?",
     blurb:
-      "When the family gets to a state-managed step — finding a testing center, booking a road test, locating a partner school — directio surfaces it inside the app.",
+      "When your student needs to find the nearest DMV or get an answer about the Blue Card at 9pm, it's all in the app.",
     features: [
       {
-        title: "BTW lesson finder",
+        title: "Map-based BTW finder",
         detail:
-          "Mapbox-powered. Parents enter their ZIP, see the school's BTW step flow plus nearby state-testing centers, driving schools, and DMV offices.",
+          "Family enters their ZIP. They see your school's step-by-step flow plus the nearest testing centers, partner schools, and DMV offices on a map.",
       },
       {
-        title: "Place enrichment",
+        title: "Fill in your local directory",
         detail:
-          "When the directory is sparse, an admin can trigger Perplexity to surface verified candidates in the org's jurisdiction; ingested with provenance.",
+          "Empty directory for your state? Click 'enrich' and we'll surface verified candidates you can vet and publish.",
       },
       {
-        title: "Configurable BTW flow",
+        title: "Your own steps",
         detail:
-          "Each school defines its own step list at /admin/settings/btw-flow: plain instructions, find-a-place steps, external links, document uploads, payments.",
+          "Build your school's behind-the-wheel flow with whatever steps fit: instructions, finding a place, external link, upload a doc, make a payment.",
       },
       {
-        title: "AI help center",
+        title: "AI help that knows your school",
         detail:
-          "Grounded answers from your school's help articles + the platform library. Asks follow-up questions when the answer requires a fee + schedule combination.",
+          "Families ask questions in plain English. Answers pull from your school's help articles and the platform library — so 'when do I get the Blue Card?' gets a real answer.",
       },
       {
-        title: "Voice playback",
+        title: "Listen instead of read",
         detail:
-          "Optional ElevenLabs synthesis for accessibility — long answers can be heard, not just read.",
+          "Long help answers can be read aloud — handy for parents driving or students with reading challenges.",
       },
     ],
   },
@@ -364,8 +364,8 @@ export default function Features({ loaderData }: Route.ComponentProps) {
           </Reveal>
           <Reveal delay={160}>
             <p className="mt-6 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              No "coming soon", no premium upsell tier. If a feature is listed here, it's in the
-              shipped codebase, has a backing migration, and has a smoke test that exercises it.
+              No "coming soon" pages and no premium tier hiding the good stuff. If a feature is
+              listed below, it's working in the product today.
             </p>
           </Reveal>
         </div>

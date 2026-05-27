@@ -98,34 +98,34 @@ function Hero({ destination, signedIn }: { destination: string; signedIn: boolea
 
 const OPERATIONS = [
   {
-    title: "One operator dashboard",
+    title: "One dashboard for everything",
     body:
-      "Dashboard, students, schedule, programs, instructors, vehicles, curriculum, payments, fees, documents, road tests, settings. Every workflow in one sidebar, every action two clicks deep.",
+      "Students, schedule, programs, instructors, vehicles, lessons, payments, fees, paperwork, road tests, settings. Every workflow in one sidebar, every action two clicks away.",
   },
   {
-    title: "AI-assisted CSV import",
+    title: "Bring your old data",
     body:
-      "Migrating off another tool? Drop in the CSV. Claude normalizes student rows, flags conflicts, and bulk-creates the records — guardians, emails, packages, journey state.",
+      "Moving off another tool? Drop in a CSV from your previous system. The import figures out which column is what, flags duplicates, and brings everything in — students, guardians, the lot.",
   },
   {
-    title: "Onboarding wizard",
+    title: "Onboarding checklist",
     body:
-      "Add an instructor, add a vehicle, install a state rule pack, install a curriculum pack. Check off the steps as you go; the dashboard shows you where you are.",
+      "Add an instructor. Add a car. Pick your state. Install lessons. Connect your bank. Tick each box and you're operating — the dashboard shows you where you are.",
   },
   {
-    title: "Hard double-booking prevention",
+    title: "No double-bookings",
     body:
-      "The system refuses to put two students in the same car at the same time, or the same instructor in two places. 409 Conflict, not 'oops, sorry'.",
+      "Try to put two students in the same car at the same time, or the same instructor in two places — the system says no and shows you what's already on the schedule.",
   },
   {
-    title: "Configurable fee policy",
+    title: "Your own fee rules",
     body:
-      "Cancellation deadline (in hours), late-cancel fee, no-show fee, family self-serve toggle. Set it once at /admin/settings/cancellation. The platform assesses fees automatically.",
+      "Set your cancellation deadline, your late-cancel fee, your no-show fee, and whether families can cancel themselves. We'll charge the fees automatically when they apply.",
   },
   {
-    title: "Document review queue",
+    title: "Paperwork queue",
     body:
-      "Pending parent waivers and uploaded paperwork in one list. Approve, reject (with reason in the audit log), or reopen for re-review.",
+      "Every signed waiver and uploaded form in one list. Approve, reject (with a reason for the record), or send it back for review.",
   },
 ];
 
@@ -176,17 +176,17 @@ function PaymentsSection() {
                 Tuition lands in your bank. Not ours.
               </h2>
               <p className="mt-6 text-base leading-relaxed text-ink-600 sm:text-lg dark:text-ink-300">
-                Stripe Connect Express means every school owns a real connected account. Charges
-                settle directly to you. directio collects an application fee on each transaction —
-                no custodial money, no monthly invoice for "payment processing".
+                We don't sit in the middle of your money. The family pays, the funds go straight
+                to your bank. We take a small fee on each transaction — no monthly bill, no
+                holding your tuition for a week before paying it out.
               </p>
               <ul className="mt-6 space-y-3 text-sm text-ink-700 sm:text-base dark:text-ink-200">
                 {[
-                  "One-time charges, BNPL (Klarna / Affirm), or installment subscriptions",
-                  "Refunds with refund_application_fee — you don't eat the platform cut on drop-outs",
-                  "Stripe Customer + Subscription primitives drive payment plans",
-                  "Webhook-backed status — paid / pending / failed surfaces in /admin/payments",
-                  "Fee transparency baked into checkout: every line item visible before commit",
+                  "Pay once, pay later (Klarna or Affirm), or pay monthly",
+                  "Refund a drop-out and you get our fee back too — you shouldn't eat the cost of a transaction that didn't stick",
+                  "Payment plans built on the same rails Spotify and Netflix use",
+                  "See every charge — paid, pending, failed — in one list",
+                  "Every fee on the agreement page before the family clicks pay",
                 ].map((b) => (
                   <li key={b} className="flex items-start gap-2">
                     <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
@@ -244,28 +244,28 @@ function Line({ label, amount, muted }: { label: string; amount: string; muted?:
 
 const COMPLIANCE = [
   {
-    head: "Declarative rule packs",
-    body: "Each state's pathway is JSON: credentials, requirements, rules, facts. Updating a state requirement doesn't ship UI changes.",
+    head: "Your state, already loaded",
+    body: "Pick your state. The credential names, hour requirements, age minimums, and official agency name are already in place. You don't have to teach the software your state's rules.",
   },
   {
-    head: "Per-school overrides",
-    body: "Your school does it differently from the next? Override individual rules without forking the pack. Overrides versioned + audit-logged.",
+    head: "Override when you need to",
+    body: "Your school does something slightly differently from the state default? Adjust individual rules without throwing away the rest. Every override is recorded.",
   },
   {
-    head: "Credential delivery",
-    body: "Three modes per state: manual hand-off, PDF export, DMV API. Deep Minnesota Blue Card first; honest national coverage.",
+    head: "Deliver the credential your way",
+    body: "Hand it over in person, print the official PDF, or — where the state DMV supports it — submit electronically. We tell you exactly which is available for your state.",
   },
   {
-    head: "Road test outcome metric",
-    body: "Per-attempt logging surfaces pass-rate + first-try-pass rate. Parents Google your school's pass-rate; show it on your public listing.",
+    head: "Show your pass rate",
+    body: "Log each road test attempt and result. We calculate your pass rate and first-try pass rate. Put it on your public page — parents Google for this.",
   },
   {
-    head: "Instructor-signed practice log",
-    body: "Parent-supervised hours don't count until your instructor signs off. State-compliant by default.",
+    head: "Practice hours that count",
+    body: "Parents log their supervised drives. Your instructor signs off. Only signed entries count toward the state-required hours — no more handwritten logs the DMV rejects.",
   },
   {
-    head: "Audit log on everything",
-    body: "Credential issuance, rule overrides, fee changes, cancellations, document approvals, certificate issuance, refunds. With actor + payload.",
+    head: "Audit trail",
+    body: "Every action that touches compliance — credentials, fees, refunds, certificates — is recorded with the person who did it. Searchable forever.",
   },
 ];
 
@@ -282,9 +282,9 @@ function ComplianceSection() {
               The hardest part — already done.
             </h2>
             <p className="mt-4 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Driver education is heavily regulated, state by state. directio ships with 51 rule
-              packs (50 states + DC) seeded at MVP. You install the one you need and override the
-              two or three rules where your school differs.
+              Driver education is heavily regulated, state by state. We ship with all 50 states
+              plus DC ready to go. You install your state, the rules apply, and you adjust the
+              one or two things that are specific to your school.
             </p>
           </div>
         </Reveal>
@@ -401,8 +401,8 @@ function DayOneSection() {
             },
             {
               t: "20 minutes",
-              h: "Connect Stripe + import students",
-              b: "Stripe Connect handshake takes 3 minutes. Drop in your legacy CSV; AI imports the rest. Add an instructor and a vehicle.",
+              h: "Connect your bank + bring your students",
+              b: "Linking your bank for payments takes 3 minutes. Drop in your existing student list as a CSV — we'll import it. Add an instructor and a vehicle.",
             },
             {
               t: "15 minutes",
@@ -444,8 +444,8 @@ function Cta({ destination, signedIn }: { destination: string; signedIn: boolean
                 Try it on your school today.
               </h2>
               <p className="mt-4 text-base text-ink-100/80 sm:text-lg">
-                Free to start. No credit card. No sales call required. Stripe Connect handshake
-                when you're ready to take your first payment.
+                Free to start. No credit card. No sales call. Connect your bank when you're
+                ready to take your first payment.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <a

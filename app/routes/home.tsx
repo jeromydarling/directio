@@ -305,23 +305,23 @@ function ProblemSection() {
 
 const PILLARS = [
   {
-    title: "Multi-tenant by design",
-    body: "Every school operates inside its own tenant with its own branding, pricing, and policies. State rule packs handle the law; your overrides handle the rest.",
+    title: "Every school gets its own space",
+    body: "Your school. Your brand. Your pricing. Your rules. Schools never see each other's students or data.",
     icon: "🏫",
   },
   {
-    title: "State-aware compliance",
-    body: "A declarative rules engine unlocks the right credential — Minnesota's Blue Card, Texas's ITTD, whatever your jurisdiction calls it — at the right moment in the student's journey.",
+    title: "It knows your state",
+    body: "Minnesota's Blue Card, Texas's parent-taught paperwork, whatever your state calls it — we already know when it unlocks and what it requires.",
     icon: "📜",
   },
   {
-    title: "A journey, not a checklist",
-    body: "Enrollment, classroom, permit, behind-the-wheel, road test. Every student sees what's done, what's next, and what it costs — long before the invoice arrives.",
+    title: "A real journey, not a checklist",
+    body: "Enrolled, classroom, permit, behind-the-wheel, road test. Everyone — parent, student, instructor, school — sees the same map.",
     icon: "🗺️",
   },
   {
-    title: "Curriculum you can ship today",
-    body: "Install seeded curriculum packs, brand them, edit the local examples. Skip the months of building lessons from scratch.",
+    title: "Lessons you can use tomorrow",
+    body: "Install our starter curriculum, change what you want, leave the rest. You don't have to write 30 hours of classroom content from scratch.",
     icon: "📚",
   },
 ];
@@ -373,92 +373,91 @@ function PillarSection() {
 
 const FEATURE_CATEGORIES = [
   {
-    title: "Enrollment & payments",
+    title: "Sign up & pay",
     icon: "◉",
     features: [
-      "Public school catalog at /schools/:slug",
-      "Programs and packages with transparent fee breakdowns",
-      "Stripe Connect — schools own their money",
-      "One-time, BNPL, or installment subscription plans",
-      "Self-serve checkout, no calls",
+      "A real marketing page for your school, not a Google site",
+      "Programs and packages with every fee visible up front",
+      "Tuition lands in your bank — Stripe handles the money",
+      "Pay once, pay later, or pay monthly",
+      "Families enroll without calling the office",
     ],
   },
   {
-    title: "Classroom (LMS)",
+    title: "Online classroom",
     icon: "📖",
     features: [
-      "Install-copy-edit curriculum packs",
-      "Modules → lessons → quizzes with multiple-choice + rationales",
-      "Per-lesson video, PDFs, and image assets in R2",
-      "YouTube embeds with multi-format URL parsing",
-      "Quiz analytics: per-question wrong-rate, struggling-student leaderboard",
+      "Starter lessons you can use as-is or edit",
+      "Modules, lessons, quizzes with explanations after each answer",
+      "Embed video, attach PDFs, drop in images",
+      "Paste any YouTube link — we figure it out",
+      "See which questions are tripping students up",
     ],
   },
   {
     title: "Scheduling",
     icon: "▦",
     features: [
-      "Instructor availability windows",
-      "Vehicle assignment",
-      "Hard double-booking prevention on instructor + vehicle",
-      "Soft warning when booking outside availability + override",
-      "Cron-driven 24-hour and 1-hour reminders via Resend",
+      "Instructors publish the hours they're free to teach",
+      "Assign a vehicle to each lesson",
+      "Can't double-book the same instructor or car",
+      "Warns you if you're booking outside an instructor's hours",
+      "24-hour and 1-hour email reminders go out automatically",
     ],
   },
   {
-    title: "BTW lesson runner",
+    title: "In-the-car",
     icon: "🚗",
     features: [
-      "Mobile-first today view for instructors",
-      "One-tap no-show with school-configured fee",
-      "Lesson notes + 'next lesson focus' that carries forward",
-      "Complete / cancel / weather-hold flows",
-      "Past + upcoming lesson lists",
+      "Instructor's today view fits one hand",
+      "One tap to mark a no-show",
+      "Type lesson notes for next time — they show up at the next lesson",
+      "Complete, cancel, weather-hold — all in one form",
+      "Today, this week, last week — two taps each",
     ],
   },
   {
     title: "Family experience",
     icon: "♡",
     features: [
-      "Multi-kid household view",
-      "Unified journey timeline per student",
-      "Self-serve cancel with school's deadline policy applied",
-      "Practice log entries (parent supervised drives)",
-      "Documents: sign waivers, upload paperwork, download certificate",
+      "All your kids on one page",
+      "One timeline per kid — see what's done, what's next, what it costs",
+      "Cancel a lesson without calling the office",
+      "Log parent-supervised practice drives",
+      "Sign waivers, upload paperwork, download the certificate",
     ],
   },
   {
-    title: "Compliance",
+    title: "State compliance",
     icon: "📜",
     features: [
-      "50-state rule packs (teen pathways) seeded",
-      "Permit credentials unlocked when hours hit",
-      "Instructor sign-off on parent practice log",
-      "Road test outcome logging + school pass-rate metric",
-      "Completion certificate PDF (school-branded, serialized)",
-      "Audit log on every compliance action",
+      "All 50 states + DC ready out of the box",
+      "Permit credentials unlock automatically when requirements hit",
+      "Instructor signs off on supervised-practice hours",
+      "Log road test results, show your pass rate",
+      "School-branded completion certificate, ready to print",
+      "Every important action is recorded",
     ],
   },
   {
-    title: "Operations",
+    title: "Back office",
     icon: "⚙",
     features: [
-      "AI-assisted CSV import for legacy student data",
-      "Document review queue (waivers, parental consent)",
-      "Cancellation + no-show fee workflow (assess → collect → mark paid)",
-      "School public listing with branded slug",
-      "Per-tenant theming (logo, brand color, custom fonts)",
+      "Drop in your old student list — we'll sort it out",
+      "Review and approve signed waivers in one queue",
+      "Late-cancel and no-show fees, collected on your terms",
+      "Branded public page at /schools/your-slug",
+      "Your logo, your colors, your fonts",
     ],
   },
   {
-    title: "Discovery & help",
+    title: "Find your way",
     icon: "?",
     features: [
-      "BTW lesson finder with Mapbox + ZIP geocoding",
-      "Nearby places (state testing, driving schools, DMV offices)",
-      "Perplexity-enriched directory candidates",
-      "AI help center grounded in school + platform articles",
-      "Voice synthesis for accessibility (ElevenLabs)",
+      "Map-based finder for BTW lessons by ZIP",
+      "Nearest testing centers, schools, and DMV offices",
+      "AI help that knows your school and your state",
+      "Audio playback for long answers",
     ],
   },
 ];
@@ -476,8 +475,8 @@ function FeaturesGrid() {
               Eight categories. One product.
             </h2>
             <p className="mt-4 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Every feature below ships in MVP. No "coming soon", no upsell tier. If it's
-              listed, it's in the codebase.
+              Everything you see here works today. No "coming soon" pages, no premium tier
+              hiding the good stuff. If we wrote it down, it's in the product.
             </p>
           </div>
         </Reveal>
@@ -522,12 +521,12 @@ const ROLES = [
   {
     role: "School owner",
     headline: "Stop juggling six tools.",
-    body: "Enrollment, scheduling, instructors, vehicles, payments, compliance, certificates — one operator dashboard. Stripe Connect lets you take payments without the platform touching your bank.",
+    body: "Sign-ups, schedules, instructors, cars, payments, paperwork, certificates — all in one place. Money goes straight to your bank.",
     bullets: [
-      "Multi-tenant isolation — your data is never co-mingled",
-      "AI-assisted CSV import for your existing students",
-      "Configurable fee policies (late-cancel, no-show)",
-      "Audit logs on every compliance action",
+      "Your school's data stays inside your school",
+      "Bring your old student list — we'll sort it out",
+      "Set your own late-cancel and no-show fees",
+      "Every important action is recorded",
     ],
     cta: { label: "For schools", to: "/for-schools" },
     accent: "brand",
@@ -535,25 +534,25 @@ const ROLES = [
   {
     role: "Parent",
     headline: "One login. One timeline. No surprise charges.",
-    body: "See exactly where your kid is in the licensing journey, what the next step costs, and when it happens. Cancel or reschedule yourself without calling the school during office hours.",
+    body: "See exactly where your kid is, what the next step costs, and when it happens. Cancel or reschedule yourself — without calling the office at 9:01 AM hoping someone picks up.",
     bullets: [
-      "Multi-kid household view",
-      "Self-serve reschedule with the school's deadline policy",
-      "Sign waivers from your phone",
-      "Practice log that the school's instructor signs off on",
+      "All your kids on one page",
+      "Cancel from your phone, fee disclosed before you confirm",
+      "Sign waivers from the bus stop",
+      "Practice log the instructor signs off on",
     ],
     cta: { label: "For families", to: "/for-families" },
     accent: "accent",
   },
   {
     role: "Instructor",
-    headline: "Phone-first, voice-typed.",
-    body: "Your today view fits in your hand. One tap to mark a no-show. Voice-typed lesson notes flow into the family's timeline and pre-fill the next lesson's focus.",
+    headline: "Built for one hand.",
+    body: "Your today view fits in your pocket. One tap to mark a no-show. Type notes for the next lesson and they're waiting for you next time.",
     bullets: [
-      "Mobile lesson runner with one-tap status changes",
-      "Availability windows the office can book against",
-      "Sign off on parent supervised-practice entries",
-      "Past lessons + upcoming schedule in two clicks",
+      "Phone-friendly today view",
+      "Publish the hours you're free to teach",
+      "Sign off on parent practice-log entries",
+      "Today, this week, last week — two taps each",
     ],
     cta: { label: "Get started", to: "/signup" },
     accent: "brand",
@@ -698,28 +697,28 @@ function JourneySection() {
 
 const TRUST_ITEMS = [
   {
-    title: "Multi-tenant isolation",
-    body: "Every query is scoped by organization at the application layer. No row-level security to misconfigure — and no shared tables to leak across schools.",
+    title: "Your school's data is your school's",
+    body: "Schools never see each other's students, instructors, payments, or paperwork. Even by accident.",
   },
   {
-    title: "Audit log on every compliance action",
-    body: "Credential issuance, rule overrides, fee changes, manual milestone events — all recorded with the actor, timestamp, and payload.",
+    title: "Every important action is recorded",
+    body: "Credentials issued, fees changed, refunds processed, certificates printed — who did it and when. Searchable forever.",
   },
   {
-    title: "Built on Cloudflare Workers",
-    body: "Edge runtime, sub-100ms latency globally, D1 for relational data, R2 for blobs, KV for cache. No ops team required.",
+    title: "Fast everywhere",
+    body: "Pages load in well under a second on any device, anywhere in the country. We host on infrastructure designed for it.",
   },
   {
-    title: "Stripe Connect, not custodial",
-    body: "Tuition lands in your bank, not ours. Refunds, payouts, payment plans, and disputes use Stripe primitives end-to-end.",
+    title: "Your money goes to your bank",
+    body: "We don't sit in the middle. Tuition goes straight from the family's card to your bank. Refunds, payment plans, payouts — all the standard rails, no custodial accounts.",
   },
   {
-    title: "Honest state-rule maturity",
-    body: "Three levels: Level 1 (manual checklist), Level 2 (PDF generation), Level 3 (state-API integrated). We're transparent about which states are where.",
+    title: "Honest about state coverage",
+    body: "All 50 states + DC are seeded today. We're upfront about which states are at 'manual checklist' depth and which are deeper — see /states for the full breakdown.",
   },
   {
-    title: "Install-copy-edit curriculum",
-    body: "Schools install a copy of the platform curriculum. Your edits stay yours; platform updates surface as a notice you choose to apply.",
+    title: "Your lessons stay yours",
+    body: "Edit our starter curriculum freely. Platform updates show as a 'review and accept' notice, never as a forced overwrite. Your content, your call.",
   },
 ];
 
@@ -760,36 +759,36 @@ function TrustSection() {
 
 const FAQS = [
   {
-    q: "Do you replace my online classroom?",
-    a: "Yes. directio ships a full LMS — modules, lessons, quizzes with multiple-choice and rationales, embedded video (YouTube + R2-hosted MP4), PDFs, and per-student progress. Schools install a seeded curriculum and edit a copy locally; platform updates appear as upgrade notices, not forced overwrites.",
+    q: "Does this replace my online classroom?",
+    a: "Yes. You get modules, lessons, and quizzes — with video, PDFs, and explanations after each answer. Start with our lessons and edit freely; when we improve the originals, you get a notice, not a surprise overwrite.",
   },
   {
-    q: "How does the Blue Card / permit credential actually work?",
-    a: "Each state's rule pack defines its own credential — Minnesota's Blue Card, Texas's ITTD slip, whatever the jurisdiction calls it. When a student crosses the required threshold (e.g., 30 classroom hours in MN), the credential unlocks on the student's timeline. Delivery mode is per-state: manual hand-off, PDF export, or API submission to the DMV where supported.",
+    q: "How does the Blue Card / permit credential work?",
+    a: "Each state has its own name for it — Minnesota's Blue Card, Texas's ITTD slip, California's classroom certificate. When your student finishes the required hours, the credential unlocks on their timeline. You hand it over, print it, or (where the state DMV lets you) submit it electronically.",
   },
   {
     q: "Can families pay with installments?",
-    a: "Yes — Stripe Connect handles one-time, BNPL (Klarna / Affirm via Stripe), and recurring installment subscriptions. Schools see transparent fees up front; families never see a surprise charge after enrollment.",
+    a: "Yes. Families can pay once up front, use buy-now-pay-later (Klarna or Affirm), or set up monthly installments. They see every fee before they pay, never after.",
   },
   {
     q: "What about no-shows and late cancellations?",
-    a: "Each school sets its own policy: cancellation deadline (in hours), late-cancel fee, no-show fee, and whether families can cancel from /family at all. Cancellations inside the deadline assess the fee automatically and show as 'pending' until the school marks them paid or waived.",
+    a: "You set the rules. Pick your cancellation deadline, your late-cancel fee, your no-show fee, and whether families can cancel themselves. Fees show up as 'pending' until you collect them — we don't auto-charge anyone's card.",
   },
   {
-    q: "Is the data multi-tenant safe?",
-    a: "Every query is scoped by organizationId at the application layer — D1 (SQLite at the edge) doesn't have row-level security, so we enforce isolation in code, audited via a query helper that refuses unscoped reads on tenant-owned tables.",
+    q: "Is my school's data safe?",
+    a: "Schools never see each other's students, payments, or paperwork. Every action that touches compliance — credentials issued, refunds, certificate printing — is recorded with a timestamp and the person who did it.",
   },
   {
-    q: "How do you handle 50 states without going crazy?",
-    a: "A declarative rule_pack table with versioned definitions. Each pack lists credentials, requirements, rules, and 'facts' (agency names, age minimums, restriction texts). Schools install the relevant pack and override individual rules if their state lets them. State logic never lives in UI code.",
+    q: "How does it handle 50 states without going crazy?",
+    a: "We model each state's rules as a separate 'rule pack' — credentials, hour requirements, age minimums, the official agency name. You install the one for your state. If your school does something differently from the default, you can override individual rules without forking the whole pack.",
   },
   {
-    q: "Do instructors need a separate login?",
-    a: "Yes — instructors get their own portal (/instructor) with availability, today's lessons, past lessons, and parent-practice-log sign-off. Owners and admins can act as instructors when needed for QA.",
+    q: "Do instructors get their own login?",
+    a: "Yes. Instructors land in their own portal with today's lessons, upcoming work, the hours they're free to teach, and the parent practice-log entries to sign off on. Owners can act as instructors too.",
   },
   {
-    q: "How long to onboard a school?",
-    a: "First school: under an hour for the basics (programs, packages, an instructor, a vehicle, a Stripe Connect handshake). AI-assisted CSV import handles legacy student data. State rule pack is one click.",
+    q: "How long does onboarding take?",
+    a: "About an hour. Sign up, name your school, add an instructor and a vehicle, install your state's rule pack, install the starter curriculum, connect your bank for payments. Bring your existing student list as a CSV and we'll import it.",
   },
 ];
 

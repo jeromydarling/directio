@@ -159,39 +159,39 @@ function Story() {
 
 const CONVICTIONS = [
   {
-    title: "Multi-tenant from day one, not bolted on",
+    title: "Every school gets its own space, from day one",
     body:
-      "Every row that isn't platform-global belongs to an organization. Every query is scoped. There's no 'enterprise edition' that adds isolation later — it's the foundation.",
+      "Schools never share data, never see each other's students, never have to worry about a setting that accidentally leaks. It's the foundation, not a feature we sell later.",
   },
   {
-    title: "Declarative state law, not hardcoded UI",
+    title: "State rules live in data, not in code",
     body:
-      "Minnesota's Blue Card is data, not a button in our codebase. State rule packs are versioned JSON; schools override individual rules without forking the pack. Adding a state takes hours, not a sprint.",
+      "Minnesota's Blue Card requirements are written down once and applied to every Minnesota school. If your state changes its requirements, we update one file. We don't ship a new app every time a DMV moves a comma.",
   },
   {
-    title: "Three-level state adapter maturity",
+    title: "Honest about state coverage",
     body:
-      "Level 1: manual checklist. Level 2: PDF export. Level 3: DMV API. We refuse to ship 'national coverage' that's actually a misleading line on a marketing page. /states tells you exactly where each state is.",
+      "Some states are deep — Minnesota's Blue Card is fully modeled, fees and all. Others are a guided checklist while we build out the deeper integrations. We tell you exactly where each state is. No marketing-page lies.",
   },
   {
-    title: "Install-copy-edit, not lock-in",
+    title: "Your lessons stay yours",
     body:
-      "Schools install a copy of our curriculum and edit it locally. Platform updates surface as notices, not forced overwrites. Schools own their content.",
+      "Install our starter curriculum, edit anything you want. When we improve the originals, you get a 'review and accept' notice — never a forced change. You're not renting our content.",
   },
   {
-    title: "One timeline, one payment history, one login per family",
+    title: "One login per family",
     body:
-      "The fragmentation that makes the status quo painful is the same fragmentation we refuse to introduce. A family with three kids on the licensing path sees three kids in one place.",
+      "Three kids on the path? One login, three timelines, one payment history. The fragmentation that makes the status quo painful is the same fragmentation we refuse to add.",
   },
   {
-    title: "Transparent fees, every step",
+    title: "Every fee, before it's owed",
     body:
-      "Tuition, admin/compliance, credential, reschedule — visible on the package page, on the checkout, on the receipt, on the family's payment history. Surprise charges are a bug we refuse to ship.",
+      "Tuition, admin fees, credential costs, reschedule policies — all visible on the package page, in the checkout, on the receipt, in the family's payment history. Surprise charges are a bug.",
   },
   {
-    title: "Audit log on every compliance action",
+    title: "Every important action is recorded",
     body:
-      "Credential issuance, rule overrides, fee changes, manual milestones, refunds. With actor, timestamp, and JSON payload. Driver education is regulated; we operate like a regulated product.",
+      "Credentials issued, fees changed, refunds processed, certificates printed — with who did it and when. Driver education is regulated; we operate like a regulated product.",
   },
 ];
 
@@ -226,46 +226,26 @@ function Convictions() {
   );
 }
 
-const STACK = [
+const PRINCIPLES = [
   {
-    title: "Cloudflare Workers",
-    body: "Edge runtime. Sub-100ms latency globally. No servers to babysit, no autoscaler to misconfigure.",
+    title: "Fast on every device, anywhere",
+    body: "Pages load in well under a second whether you're in Duluth or San Diego. We picked infrastructure built for that — so your families don't bounce when they're trying to pay you.",
   },
   {
-    title: "D1 (SQLite at the edge)",
-    body: "Tenant data lives close to your users. Migrations versioned in /migrations. Hourly cron triggers run from the same runtime.",
+    title: "Money goes to your bank",
+    body: "We don't take tuition into our account and pay you out later. The family's card charges your bank directly. Same story for refunds, payment plans, and disputes.",
   },
   {
-    title: "R2",
-    body: "Asset storage for lesson videos, PDFs, images, signed PDFs, completion certificates. Egress is free.",
+    title: "Reliable email reminders",
+    body: "24 hours and 1 hour before each lesson, families get a reminder. The system never sends duplicates — even if something hiccups in the middle of the night.",
   },
   {
-    title: "React Router 7",
-    body: "Server-rendered, loader/action pattern, type-safe routes. The same framework that ships Shopify and Remix-era apps, evolved.",
+    title: "AI where it actually helps",
+    body: "Importing your old student list, answering parent questions about the Blue Card, reading help answers aloud. We use AI where the job is genuinely tedious — not as a marketing checkbox.",
   },
   {
-    title: "Better Auth",
-    body: "Email + password sessions stored in D1. Multi-tenant by design. Activeorganization on the session, plus a fallback to the user's first membership.",
-  },
-  {
-    title: "Stripe Connect Express",
-    body: "Schools own their connected account. Charges, payouts, payment plans, refunds, application fees — all Stripe primitives.",
-  },
-  {
-    title: "Resend",
-    body: "Transactional email. 24-hour and 1-hour BTW reminders. Idempotent via cron_run UNIQUE constraint.",
-  },
-  {
-    title: "Mapbox + Perplexity",
-    body: "Mapbox for the BTW lesson finder. Perplexity (sonar) for AI-enriched directory candidates when a state's directory is thin.",
-  },
-  {
-    title: "Claude (Anthropic)",
-    body: "AI-assisted CSV import for legacy student data. Help center grounded in school + platform articles.",
-  },
-  {
-    title: "ElevenLabs",
-    body: "Optional voice synthesis for accessibility — help-center answers can be heard, not just read.",
+    title: "Built to last",
+    body: "Same web technology used by some of the biggest commerce sites in the world. Boring, well-tested, fast. We don't chase the hot framework of the month — your school can't afford that.",
   },
 ];
 
@@ -276,19 +256,19 @@ function Stack() {
         <Reveal>
           <div className="mb-12 max-w-2xl">
             <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
-              The stack
+              Under the hood
             </p>
             <h2 className="font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl md:text-5xl dark:text-ink-50">
-              How we built it.
+              The boring stuff, done right.
             </h2>
             <p className="mt-4 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Cloudflare's edge stack underneath. Best-in-class third parties for the things we
-              don't want to own.
+              You don't need to care what we built it with. But you should care that we picked
+              well, so the product is fast, your money is safe, and the lights stay on.
             </p>
           </div>
         </Reveal>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 md:gap-6">
-          {STACK.map((s, i) => (
+          {PRINCIPLES.map((s, i) => (
             <Reveal key={s.title} delay={(i % 3) * 60}>
               <div className="h-full rounded-2xl border border-ink-200 bg-white/70 p-5 backdrop-blur-sm dark:border-ink-800 dark:bg-ink-900/40">
                 <h3 className="font-display text-base font-semibold text-ink-900 dark:text-ink-50">

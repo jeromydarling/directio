@@ -370,11 +370,11 @@ const FAQS = [
   },
   {
     q: "Is my kid's data safe?",
-    a: "Every database query in directio is scoped to your kid's school. Schools never see each other's students. Audit logs record every compliance action with a timestamp and the actor. Stripe handles payment data — directio never touches a card number.",
+    a: "Yes. Your kid's school never sees other schools' students and vice-versa. Every important action is recorded. Payment info goes straight to Stripe — we never store a card number.",
   },
   {
     q: "What if my state isn't fully supported?",
-    a: "All 50 states + DC have a teen rule pack seeded. The depth varies — Minnesota and a few others are deep with the Blue Card credential modeled; others are at 'manual checklist' maturity. Check /states for honest coverage details.",
+    a: "All 50 states + DC are loaded. The depth varies — Minnesota and a few others are deep with the credential fully modeled; others are at the 'guided checklist' level for now. Check /states for the full breakdown.",
   },
 ];
 

@@ -116,9 +116,10 @@ export default function States({ loaderData }: Route.ComponentProps) {
           </Reveal>
           <Reveal delay={160}>
             <p className="mt-6 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              All 50 states plus DC have a seeded teen driver-education rule pack at MVP. The
-              depth varies — Minnesota is our lead implementation; others are at "manual
-              checklist" maturity but will deepen as we add API integrations.
+              All 50 states plus DC are loaded with their teen driver-education rules today. The
+              depth varies — Minnesota is the deepest, others are at the "guided checklist"
+              level for now and will deepen as we add the official forms and electronic
+              submission for each state.
             </p>
           </Reveal>
         </div>
@@ -131,21 +132,21 @@ export default function States({ loaderData }: Route.ComponentProps) {
               {[
                 {
                   level: 1,
-                  title: "Manual checklist",
+                  title: "Guided checklist",
                   body:
-                    "Rule pack with credentials and requirements modeled. Schools issue credentials manually; the platform tracks the journey state.",
+                    "The state's credential and hour requirements are loaded. Schools hand the credential over in person; the platform tracks the journey state.",
                 },
                 {
                   level: 2,
-                  title: "PDF export",
+                  title: "Official PDF",
                   body:
-                    "State-form generation included. School clicks 'Export Blue Card' and the platform produces a state-shaped PDF the family can hand to the DMV.",
+                    "The state's form is built in. The school clicks 'export' and gets a PDF the family can hand to the DMV — no separate portal, no surprise fee.",
                 },
                 {
                   level: 3,
-                  title: "API submission",
+                  title: "Submit electronically",
                   body:
-                    "Where the state DMV exposes an API, directio submits credentials and completion records directly. No paper at all.",
+                    "Where the state DMV lets us, we submit the credential and completion record directly. No paper, no waiting in line.",
                 },
               ].map((m, i) => (
                 <Reveal key={m.level} delay={i * 80}>
@@ -221,9 +222,9 @@ export default function States({ loaderData }: Route.ComponentProps) {
                 Deep state coverage is a roadmap we co-build with the first school in each state.
               </h2>
               <p className="mt-4 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-                If you're a driver-ed school in a state we haven't deepened yet, we'll work with
-                you to model the credential, requirements, and any state forms you need. The rule
-                pack engine is declarative — no code changes for most jurisdictions.
+                If you're a driver-ed school in a state we haven't gone deep on yet, we'll work
+                with you to build out the credential, the requirements, and any state forms
+                you need. Most of this is a configuration change, not a code change.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <a
@@ -253,7 +254,7 @@ function MaturityPill({ level }: { level: 1 | 2 | 3 }) {
     2: "bg-brand-100 text-brand-700 dark:bg-brand-900/60 dark:text-brand-200",
     3: "bg-accent-100 text-accent-700 dark:bg-accent-900/40 dark:text-accent-200",
   } as const;
-  const label = { 1: "Level 1 · Checklist", 2: "Level 2 · PDF", 3: "Level 3 · API" }[level];
+  const label = { 1: "Checklist", 2: "Official PDF", 3: "Electronic" }[level];
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[level]}`}>
       {label}

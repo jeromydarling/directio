@@ -39,39 +39,39 @@ const TIERS = [
     headline: "Run your school. Take payments.",
     price: "0",
     priceUnit: "/ month",
-    feeNote: "+ 2% application fee on processed payments (Stripe fees pass-through)",
+    feeNote: "Plus a 2% fee on payments you process. Standard card-processing fees pass through.",
     cta: { label: "Start free", to: "/signup" },
     features: [
-      "Unlimited students + enrollments",
-      "Unlimited instructors + vehicles",
-      "Stripe Connect — your bank account, your money",
-      "All 51 state rule packs",
-      "Curriculum library + LMS",
-      "Family portal with multi-kid view",
-      "Cancellation + no-show fee policy",
-      "Cron-driven email reminders (24h + 1h)",
-      "Audit logs",
-      "Public school listing at /schools/your-slug",
+      "Unlimited students and enrollments",
+      "Unlimited instructors and vehicles",
+      "Your bank account, your money",
+      "All 50 states + DC, ready out of the box",
+      "Lessons, quizzes, video — the whole classroom",
+      "Family portal that handles all your kids",
+      "Late-cancel and no-show fee rules",
+      "Automatic email reminders (24 hours and 1 hour ahead)",
+      "Every important action recorded",
+      "Branded public page at /schools/your-slug",
     ],
     accent: "brand" as const,
     featured: true,
   },
   {
-    name: "Pro · per-state deep coverage",
-    headline: "When you need DMV API submission and bulk credentials.",
+    name: "Pro · deeper state coverage",
+    headline: "For when you want electronic DMV submission and bulk credentials.",
     price: "Talk to us",
     priceUnit: "",
-    feeNote: "Application fee waived above $50k MRR. Includes deep-state work.",
+    feeNote: "The 2% fee is waived above $50k a month. Includes the state-specific work.",
     cta: { label: "Schedule a call", to: "/signup" },
     features: [
       "Everything in Free",
-      "DMV API integration for your state (where supported)",
-      "Bulk credential issuance",
-      "Custom rule pack work for your jurisdiction",
-      "Onboarding + migration support",
+      "Electronic DMV submission for your state (where available)",
+      "Issue credentials in bulk",
+      "We build out the deeper state-specific work with you",
+      "Hands-on onboarding and migration help",
       "Priority support (4-hour response)",
-      "SSO (SAML / OIDC) for multi-location schools",
-      "SLA",
+      "Single sign-on for multi-location schools",
+      "Service-level agreement",
     ],
     accent: "accent" as const,
     featured: false,
@@ -101,9 +101,9 @@ export default function Pricing({ loaderData }: Route.ComponentProps) {
           </Reveal>
           <Reveal delay={160}>
             <p className="mx-auto mt-6 max-w-xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Free to start. Stripe Connect fees pass through. directio adds a 2% application fee
-              on each successful charge — that's it. No per-seat, no per-student, no
-              feature-tier upsell.
+              Free to start. Standard card-processing fees pass through. We add a 2% fee on each
+              successful payment — that's it. No per-student fees, no premium tier hiding the
+              good stuff.
             </p>
           </Reveal>
         </div>
@@ -187,27 +187,27 @@ export default function Pricing({ loaderData }: Route.ComponentProps) {
             {[
               {
                 q: "Is there a free trial?",
-                a: "Free isn't a trial — it's the actual product. The only thing the paid tier adds is deeper state coverage (DMV API submission), SSO for multi-location chains, and SLA-backed support.",
+                a: "Free isn't a trial — it's the actual product. The paid tier only adds deeper state coverage (electronic DMV submission), single sign-on for multi-location chains, and a support agreement.",
               },
               {
-                q: "What does the 2% application fee actually cost a family?",
-                a: "Zero. The fee comes out of the school's revenue, not on top of the family's bill. The family's checkout shows the school's listed price, no platform surcharge tacked on.",
+                q: "What does the 2% fee actually cost a family?",
+                a: "Zero. It comes out of your school's revenue, not on top of the family's bill. The checkout shows the price you set — no surcharge tacked on.",
               },
               {
-                q: "What about Stripe's fees?",
-                a: "Stripe's standard processing fees (~2.9% + $0.30 per US card transaction) are paid by the school as a pass-through. directio doesn't mark them up. They show on every charge in /admin/payments.",
+                q: "What about card-processing fees?",
+                a: "Standard card fees (around 2.9% + 30¢ per transaction in the US) are paid by your school as a pass-through. We don't mark them up. They show on every charge.",
               },
               {
                 q: "Are there per-student or per-instructor limits?",
-                a: "No. The free tier supports unlimited students, instructors, vehicles, and enrollments. We scale on payment volume, not on seats — schools shouldn't be punished for growing.",
+                a: "No. Free includes unlimited students, instructors, vehicles, and enrollments. We grow with you on payment volume, not on seats.",
               },
               {
-                q: "Can I migrate off later?",
-                a: "Yes. Every school owns its data and can export the lot. Stripe Connect means your customer + subscription history stays in your Stripe account regardless of what we do.",
+                q: "Can I leave later?",
+                a: "Yes. You own your data and can export it. Your payment history stays in your bank's records regardless of what happens with us.",
               },
               {
-                q: "What if my state doesn't have DMV API integration?",
-                a: "Most don't. The free tier ships Level 1 (manual checklist) and Level 2 (PDF export) for every state. Level 3 (DMV API) is the Pro tier — and we co-build with the first school in each state.",
+                q: "What if my state doesn't support electronic DMV submission?",
+                a: "Most don't, today. Free includes the guided checklist and official PDF export for every state. Electronic submission is on the Pro tier — and we work with the first school in each state to build it out.",
               },
             ].map((f, i) => (
               <Reveal key={f.q} delay={i * 30}>

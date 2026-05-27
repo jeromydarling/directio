@@ -109,14 +109,18 @@ function MarketingHeader({
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <>
           <button
             type="button"
             aria-label="Close menu"
             onClick={() => setOpen(false)}
-            className="absolute inset-0 bg-ink-950/50 backdrop-blur-md"
+            className="fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-md lg:hidden"
           />
-          <aside className="relative ml-auto flex h-full w-80 max-w-[85vw] flex-col gap-4 overflow-y-auto bg-ink-50 px-6 py-6 shadow-2xl dark:bg-ink-950">
+          <aside
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-y-0 right-0 z-50 flex h-dvh w-80 max-w-[88vw] flex-col gap-4 overflow-y-auto bg-white px-6 py-6 shadow-2xl lg:hidden dark:bg-ink-950"
+          >
             <div className="flex items-center justify-between">
               <Wordmark />
               <button
@@ -133,12 +137,13 @@ function MarketingHeader({
                 <NavLink
                   key={n.to}
                   to={n.to}
+                  onClick={() => setOpen(false)}
                   className={({ isActive }) =>
                     [
                       "rounded-xl px-3 py-2.5 text-base font-medium transition",
                       isActive
                         ? "bg-gradient-to-r from-brand-500 to-brand-600 text-white"
-                        : "text-ink-700 hover:bg-ink-100 dark:text-ink-200 dark:hover:bg-ink-800",
+                        : "text-ink-700 hover:bg-ink-100 dark:text-ink-100 dark:hover:bg-ink-800",
                     ].join(" ")
                   }
                 >
@@ -172,7 +177,7 @@ function MarketingHeader({
               )}
             </div>
           </aside>
-        </div>
+        </>
       )}
     </header>
   );
