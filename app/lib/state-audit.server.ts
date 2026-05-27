@@ -287,3 +287,37 @@ export async function getStateSourceUrls(
     .all<{ url: string }>();
   return rows.results.map((r) => r.url);
 }
+
+/**
+ * Pull contextual snippets from the AutoRAG knowledge base for a state.
+ * Used to feed the audit agent fresh ground-truth from DMV pages /
+ * reference docs without making the agent fetch them itself. Falls back
+ * to an empty array if the binding isn't configured or the query fails.
+ */
+export async function queryKnowledgeBase(
+  env: Env,
+  args: { stateCode: string; question: string; limit?: number },
+): Promise<Array<{ url: string; text: string }>> {
+  if (!env.STATE_KB) return [];
+  try {
+    // AI Search exposes a search() method that returns relevant chunks
+    // with metadata. Shape: { data: [{ content, attributes }, ...] }
+    const result = (await env.STATE_KB.search({
+      query: `${args.stateCode}: ${args.question}`,
+      max_num_results: args.limit ?? 6,
+    } as never)) as {
+      data?: Array<{
+        content?: string;
+        attributes?: { filename?: string; source_url?: string };
+      }>;
+    };
+    return (result.data ?? [])
+      .map((c) => ({
+        url: c.attributes?.source_url ?? c.attributes?.filename ?? "kb://unknown",
+        text: c.content ?? "",
+      }))
+      .filter((c) => c.text.length > 50);
+  } catch {
+    return [];
+  }
+}

@@ -54,6 +54,13 @@
     }
   ],
 
+  "ai_search": [
+    {
+      "binding": "STATE_KB",
+      "instance_name": "directio-states"
+    }
+  ],
+
   "vars": {
     "APP_ENV": "development",
     "APP_URL": "http://localhost:5173",

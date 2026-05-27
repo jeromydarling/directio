@@ -16,6 +16,7 @@ import {
   fetchStatePage,
   getCurrentRulePackJson,
   getStateSourceUrls,
+  queryKnowledgeBase,
   runStateAudit,
 } from "../app/lib/state-audit.server";
 
@@ -42,10 +43,23 @@ export class StateAuditWorkflow extends WorkflowEntrypoint<Env, StateAuditWorkfl
       };
     });
 
-    // Step 2 (optional): fetch source pages so the model has fresh content.
-    let webSnippets: Array<{ url: string; text: string }> = [];
+    // Step 2a: pull context from the AutoRAG knowledge base (indexed
+    // state DMV pages + reference docs). Fast and cheap; runs first.
+    const kbSnippets = await step.do("query-knowledge-base", async () => {
+      return await queryKnowledgeBase(this.env, {
+        stateCode,
+        question:
+          "teen driver education requirements, classroom hours, BTW hours, permit credential, supervised practice, fees",
+        limit: 8,
+      });
+    });
+
+    // Step 2b (optional): fetch live source pages too. Disabled by
+    // default; enabled when the change-monitor triggers a re-audit and
+    // we want the very latest content beyond what's in the index.
+    let webSnippets: Array<{ url: string; text: string }> = [...kbSnippets];
     if (fetchPageSnippets && context.sourceUrls.length > 0) {
-      webSnippets = await step.do("fetch-source-pages", async () => {
+      const fresh = await step.do("fetch-source-pages", async () => {
         const out: Array<{ url: string; text: string }> = [];
         for (const url of context.sourceUrls.slice(0, 5)) {
           try {
@@ -57,6 +71,7 @@ export class StateAuditWorkflow extends WorkflowEntrypoint<Env, StateAuditWorkfl
         }
         return out;
       });
+      webSnippets = [...kbSnippets, ...fresh];
     }
 
     // Step 3: run the audit via Claude. Serialize as plain JSON string to
