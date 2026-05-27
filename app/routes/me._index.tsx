@@ -88,10 +88,52 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(student.id, tenant.organization.id, Date.now())
     .all<AppointmentRow>();
 
+  // "Continue where you left off": find the next published lesson
+  // the student hasn't completed (in-progress preferred, else first
+  // not-started lesson in publish order).
+  const continueRow = await db
+    .prepare(
+      `SELECT sl.id, sl.title, sl.estimatedSeatMinutes,
+              sm.title AS moduleTitle,
+              CASE WHEN lp.id IS NULL THEN 'not_started'
+                   WHEN lp.completedAt IS NULL THEN 'in_progress'
+                   ELSE 'complete' END AS progressStatus
+         FROM school_lesson sl
+         JOIN school_module sm ON sm.id = sl.schoolModuleId
+         LEFT JOIN lesson_progress lp ON lp.schoolLessonId = sl.id AND lp.userId = ?
+         WHERE sl.organizationId = ? AND sl.published = 1
+           AND (lp.completedAt IS NULL OR lp.id IS NULL)
+         ORDER BY (lp.id IS NULL), lp.lastSeenAt DESC, sm.ordinal, sl.ordinal
+         LIMIT 1`,
+    )
+    .bind(tenant.user.id, tenant.organization.id)
+    .first<{
+      id: string;
+      title: string;
+      estimatedSeatMinutes: number;
+      moduleTitle: string;
+      progressStatus: "in_progress" | "not_started" | "complete";
+    }>();
+
+  // Quick LMS stats so the journey page has a real "you're 4/40
+  // lessons in" line.
+  const lessonStats = await db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM school_lesson WHERE organizationId = ? AND published = 1) AS total,
+         (SELECT COUNT(*) FROM lesson_progress lp
+            JOIN school_lesson sl ON sl.id = lp.schoolLessonId
+            WHERE lp.userId = ? AND lp.completedAt IS NOT NULL AND sl.published = 1) AS completed`,
+    )
+    .bind(tenant.organization.id, tenant.user.id)
+    .first<{ total: number; completed: number }>();
+
   return {
     hasStudent: true as const,
     enrollments: enrollments.results,
     upcoming: upcoming.results,
+    continueLesson: continueRow ?? null,
+    lessonStats: lessonStats ?? { total: 0, completed: 0 },
   };
 }
 
@@ -110,7 +152,7 @@ export default function MyJourney({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  const { enrollments, upcoming } = loaderData;
+  const { enrollments, upcoming, continueLesson, lessonStats } = loaderData;
   const active = enrollments.find((e) => e.status === "active") ?? enrollments[0];
 
   return (
@@ -133,6 +175,13 @@ export default function MyJourney({ loaderData }: Route.ComponentProps) {
           </div>
           <Timeline current={active.journeyState} />
           <WhatsNext current={active.journeyState} />
+          {continueLesson && (
+            <ContinueLessonCard
+              lesson={continueLesson}
+              completed={lessonStats.completed}
+              total={lessonStats.total}
+            />
+          )}
         </section>
       ) : (
         <EmptyState
@@ -170,6 +219,46 @@ export default function MyJourney({ loaderData }: Route.ComponentProps) {
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+function ContinueLessonCard({
+  lesson,
+  completed,
+  total,
+}: {
+  lesson: {
+    id: string;
+    title: string;
+    moduleTitle: string;
+    estimatedSeatMinutes: number;
+    progressStatus: "in_progress" | "not_started" | "complete";
+  };
+  completed: number;
+  total: number;
+}) {
+  const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
+  return (
+    <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-6 dark:border-brand-800 dark:bg-brand-950/30">
+      <p className="text-xs font-medium uppercase tracking-wider text-brand-700 dark:text-brand-200">
+        {lesson.progressStatus === "in_progress" ? "Continue where you left off" : "Start your next lesson"}
+      </p>
+      <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">{lesson.moduleTitle}</p>
+      <p className="mt-1 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+        {lesson.title}
+      </p>
+      <div className="mt-3 flex items-center gap-3">
+        <a
+          href={`/me/learn/${lesson.id}`}
+          className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-ink-50 transition hover:bg-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
+        >
+          {lesson.progressStatus === "in_progress" ? "Resume" : "Open"} · {lesson.estimatedSeatMinutes} min
+        </a>
+        <span className="text-xs text-ink-600 dark:text-ink-300">
+          {completed} of {total} lessons complete · {pct}%
+        </span>
+      </div>
     </div>
   );
 }

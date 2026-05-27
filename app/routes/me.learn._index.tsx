@@ -18,6 +18,8 @@ type LessonRow = {
   estimatedSeatMinutes: number;
   ordinal: number;
   hasAudio: number;
+  progressStatus: "not_started" | "in_progress" | "complete";
+  bestScorePercent: number | null;
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -39,13 +41,21 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const lessons = await db
     .prepare(
-      `SELECT id, schoolModuleId, title, estimatedSeatMinutes, ordinal,
-              CASE WHEN audioUrl IS NULL THEN 0 ELSE 1 END AS hasAudio
-         FROM school_lesson
-         WHERE organizationId = ? AND published = 1
-         ORDER BY ordinal`,
+      `SELECT sl.id, sl.schoolModuleId, sl.title, sl.estimatedSeatMinutes, sl.ordinal,
+              CASE WHEN sl.audioUrl IS NULL THEN 0 ELSE 1 END AS hasAudio,
+              CASE
+                WHEN lp.completedAt IS NOT NULL THEN 'complete'
+                WHEN lp.id IS NOT NULL THEN 'in_progress'
+                ELSE 'not_started'
+              END AS progressStatus,
+              lp.bestScorePercent
+         FROM school_lesson sl
+         LEFT JOIN lesson_progress lp
+           ON lp.schoolLessonId = sl.id AND lp.userId = ?
+         WHERE sl.organizationId = ? AND sl.published = 1
+         ORDER BY sl.ordinal`,
     )
-    .bind(tenant.organization.id)
+    .bind(tenant.user.id, tenant.organization.id)
     .all<LessonRow>();
 
   return { modules: modules.results, lessons: lessons.results };
@@ -86,29 +96,60 @@ export default function MeLearnIndex({ loaderData }: Route.ComponentProps) {
                   {m.moduleTitle}
                 </h2>
                 <ul className="grid gap-2 md:grid-cols-2">
-                  {items.map((l) => (
-                    <li key={l.id}>
-                      <Link
-                        to={`/me/learn/${l.id}`}
-                        className="flex items-center justify-between rounded-2xl border border-ink-200 bg-white/70 p-4 transition hover:border-brand-300 hover:shadow-sm dark:border-ink-800 dark:bg-ink-900/40 dark:hover:border-brand-700"
-                      >
-                        <div className="flex items-center gap-4">
-                          <span className="font-display text-sm font-medium text-brand-500 dark:text-brand-300">
-                            {String(l.ordinal + 1).padStart(2, "0")}
-                          </span>
-                          <div>
-                            <p className="text-base font-semibold text-ink-900 dark:text-ink-50">
-                              {l.title}
-                            </p>
-                            <p className="text-xs text-ink-500 dark:text-ink-400">
-                              {l.estimatedSeatMinutes} min{l.hasAudio ? " · listen available" : ""}
-                            </p>
+                  {items.map((l) => {
+                    const statusBadge =
+                      l.progressStatus === "complete"
+                        ? { label: `✓ ${l.bestScorePercent ?? 100}%`, tone: "good" as const }
+                        : l.progressStatus === "in_progress"
+                          ? { label: "In progress", tone: "warn" as const }
+                          : { label: "Not started", tone: "neutral" as const };
+                    return (
+                      <li key={l.id}>
+                        <Link
+                          to={`/me/learn/${l.id}`}
+                          className="flex items-center justify-between rounded-2xl border border-ink-200 bg-white/70 p-4 transition hover:border-brand-300 hover:shadow-sm dark:border-ink-800 dark:bg-ink-900/40 dark:hover:border-brand-700"
+                        >
+                          <div className="flex items-center gap-4">
+                            <span
+                              className={[
+                                "grid h-8 w-8 place-items-center rounded-full font-display text-sm font-medium",
+                                l.progressStatus === "complete"
+                                  ? "bg-brand-500 text-white"
+                                  : l.progressStatus === "in_progress"
+                                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
+                                    : "bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-400",
+                              ].join(" ")}
+                            >
+                              {l.progressStatus === "complete"
+                                ? "✓"
+                                : String(l.ordinal + 1).padStart(2, "0")}
+                            </span>
+                            <div>
+                              <p className="text-base font-semibold text-ink-900 dark:text-ink-50">
+                                {l.title}
+                              </p>
+                              <p className="text-xs text-ink-500 dark:text-ink-400">
+                                {l.estimatedSeatMinutes} min
+                                {l.hasAudio ? " · listen available" : ""}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                        <span className="text-ink-400 dark:text-ink-500">→</span>
-                      </Link>
-                    </li>
-                  ))}
+                          <span
+                            className={[
+                              "rounded-full px-3 py-1 text-xs font-medium",
+                              statusBadge.tone === "good"
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200"
+                                : statusBadge.tone === "warn"
+                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
+                                  : "bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-300",
+                            ].join(" ")}
+                          >
+                            {statusBadge.label}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             );

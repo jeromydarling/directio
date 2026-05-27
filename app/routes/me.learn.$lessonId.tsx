@@ -1,7 +1,8 @@
 import { Form, Link, useNavigation } from "react-router";
 import { marked } from "marked";
 import type { Route } from "./+types/me.learn.$lessonId";
-import { requireTenant } from "~/lib/tenant.server";
+import { findStudentForUser, requireTenant } from "~/lib/tenant.server";
+import { newId } from "~/lib/ids";
 import { youTubeEmbedUrl } from "~/lib/youtube";
 import { Card, LinkButton, Button } from "~/components/ui";
 
@@ -61,6 +62,11 @@ type LoaderData = {
   }>;
   prev: AdjacentRow | null;
   next: AdjacentRow | null;
+  progress: {
+    bestScorePercent: number | null;
+    completedAt: number | null;
+    attemptCount: number;
+  };
 };
 
 type ActionData = {
@@ -163,6 +169,35 @@ export async function loader({
 
   const bodyHtml = await marked.parse(lesson.body, { async: true });
 
+  // Upsert lesson_progress so /me/learn can show "in progress / done".
+  const now = Date.now();
+  const existing = await db
+    .prepare(
+      "SELECT id, attemptCount, bestScorePercent, completedAt FROM lesson_progress WHERE userId = ? AND schoolLessonId = ?",
+    )
+    .bind(tenant.user.id, params.lessonId)
+    .first<{
+      id: string;
+      attemptCount: number;
+      bestScorePercent: number | null;
+      completedAt: number | null;
+    }>();
+  if (!existing) {
+    await db
+      .prepare(
+        `INSERT INTO lesson_progress (id, organizationId, userId, schoolLessonId,
+                                       startedAt, lastSeenAt, attemptCount)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      )
+      .bind(newId(), tenant.organization.id, tenant.user.id, params.lessonId, now, now)
+      .run();
+  } else {
+    await db
+      .prepare("UPDATE lesson_progress SET lastSeenAt = ? WHERE id = ?")
+      .bind(now, existing.id)
+      .run();
+  }
+
   return {
     lesson,
     bodyHtml,
@@ -171,6 +206,13 @@ export async function loader({
     questions,
     prev: prev ?? null,
     next: next ?? null,
+    progress: existing
+      ? {
+          bestScorePercent: existing.bestScorePercent,
+          completedAt: existing.completedAt,
+          attemptCount: existing.attemptCount,
+        }
+      : { bestScorePercent: null, completedAt: null, attemptCount: 0 },
   };
 }
 
@@ -215,10 +257,99 @@ export async function action({
   });
   const correctCount = results.filter((r) => r.isCorrect).length;
   const score = results.length === 0 ? 0 : Math.round((correctCount / results.length) * 100);
+  const passed = score >= quiz.passingScore;
+
+  // Persist the attempt + answers (compliance + best-score tracking).
+  const now = Date.now();
+  const attemptId = newId();
+  const student = await findStudentForUser(
+    tenant.organization.id ? context.cloudflare.env : context.cloudflare.env,
+    { id: tenant.user.id, email: tenant.user.email },
+    tenant.organization.id,
+  );
+  const stmts: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `INSERT INTO quiz_attempt (id, organizationId, userId, studentId, schoolLessonId,
+                                    schoolQuizId, scorePercent, passed, answeredCount,
+                                    correctCount, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        attemptId,
+        tenant.organization.id,
+        tenant.user.id,
+        student?.id ?? null,
+        params.lessonId,
+        quiz.quizId,
+        score,
+        passed ? 1 : 0,
+        results.filter((r) => r.chosen !== null).length,
+        correctCount,
+        now,
+      ),
+  ];
+  for (const r of results) {
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO quiz_attempt_answer (id, quizAttemptId, schoolQuestionId,
+                                             chosenIndex, correctIndex, isCorrect, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(newId(), attemptId, r.questionId, r.chosen, r.correct, r.isCorrect ? 1 : 0, now),
+    );
+  }
+  await db.batch(stmts);
+
+  // Update lesson_progress: bump attempt count, raise best score,
+  // stamp completedAt the first time the student passes.
+  const existing = await db
+    .prepare(
+      "SELECT id, bestScorePercent, completedAt, attemptCount FROM lesson_progress WHERE userId = ? AND schoolLessonId = ?",
+    )
+    .bind(tenant.user.id, params.lessonId)
+    .first<{
+      id: string;
+      bestScorePercent: number | null;
+      completedAt: number | null;
+      attemptCount: number;
+    }>();
+  if (existing) {
+    const bestSoFar = existing.bestScorePercent ?? 0;
+    const newBest = score > bestSoFar ? score : bestSoFar;
+    const newCompletedAt = existing.completedAt ?? (passed ? now : null);
+    await db
+      .prepare(
+        "UPDATE lesson_progress SET bestScorePercent = ?, completedAt = ?, attemptCount = ?, lastSeenAt = ? WHERE id = ?",
+      )
+      .bind(newBest, newCompletedAt, existing.attemptCount + 1, now, existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO lesson_progress (id, organizationId, userId, schoolLessonId,
+                                       startedAt, lastSeenAt, completedAt,
+                                       bestScorePercent, attemptCount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      )
+      .bind(
+        newId(),
+        tenant.organization.id,
+        tenant.user.id,
+        params.lessonId,
+        now,
+        now,
+        passed ? now : null,
+        score,
+      )
+      .run();
+  }
+
   return {
     results,
     score,
-    passed: score >= quiz.passingScore,
+    passed,
     passingScore: quiz.passingScore,
   };
 }
