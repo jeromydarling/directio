@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "directio",
+  "compatibility_date": "2025-04-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./workers/app.ts",
+
+  "observability": {
+    "enabled": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "directio-dev",
+      "database_id": "c0cf0619-a5f5-4ed4-ad7e-e1bfe7cb73db",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "directio-dev-assets"
+    }
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "032cdcf60cfa4dce999cdc372b5e2765"
+    }
+  ],
+
+  "vars": {
+    "APP_ENV": "development"
+  }
+}

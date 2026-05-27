@@ -14,10 +14,13 @@ Greenfield. Only `README.md`, `CLAUDE.md`, and `docs/product-spec.md` exist. No 
 
 The product spec was originally written assuming Supabase + Postgres. **This project has explicitly chosen Cloudflare.** Targets:
 
-- **Cloudflare Workers** — API + server-rendered surfaces.
+- **Cloudflare Workers** — runtime.
+- **React Router v7** (formerly Remix) on Workers — full-stack framework for all user-facing surfaces. Chosen over Hono+HTMX because design polish (scheduling board interactions, lesson player, motion) is a product priority.
+- **Better Auth** on Workers, D1-backed sessions — email/password + magic link, multi-org/tenant support.
 - **D1** (SQLite) — relational store for tenants, students, instructors, enrollments, lessons, rule packs, content packs, audit logs.
 - **R2** — blob storage for lesson assets (video/PDF/images), credential PDFs, signed waivers.
 - **KV** — only for cache-shaped needs (e.g. rendered rule-pack snapshots); prefer D1 as source of truth.
+- **Tailwind CSS** + CSS custom properties for per-tenant theming (logo/colors/fonts).
 - **Stripe** — payments / payment plans (MCP connected).
 - Email/SMS providers (Resend/Postmark + Twilio or similar) — TBD when commerce lands.
 
@@ -26,7 +29,7 @@ The Cloudflare MCP is connected and should be used to provision D1 databases, R2
 ### Stack consequences that matter
 
 - **No row-level security.** D1 is SQLite; tenant isolation must be enforced in application code on every query (always scope by `organization_id`). Build a query helper that refuses unscoped reads.
-- **No Supabase Auth.** Auth needs a Cloudflare-native solution (Workers OAuth, Better-Auth on Workers, or custom JWT). This is an open decision — see `docs/product-spec.md` roles list (super admin, school owner/admin, instructor, parent, student).
+- **Auth is Better Auth on Workers.** Sessions stored in D1. Roles to support (per `docs/product-spec.md`): super admin, school owner/admin, instructor, parent, student.
 - **Background jobs.** No Supabase cron — use Cloudflare Cron Triggers / Queues for reminders, no-show follow-ups, scheduled communications.
 
 ## Core architectural pillars

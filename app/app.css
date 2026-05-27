@@ -1,0 +1,50 @@
+@import "tailwindcss" source(".");
+
+@theme {
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display:
+    "Fraunces", "Iowan Old Style", "Apple Garamond", Georgia, serif;
+
+  /* Default brand palette. Tenants override these via inline style on <html>. */
+  --color-brand-50: oklch(0.985 0.01 250);
+  --color-brand-100: oklch(0.96 0.02 250);
+  --color-brand-200: oklch(0.91 0.04 250);
+  --color-brand-300: oklch(0.84 0.08 250);
+  --color-brand-400: oklch(0.74 0.13 250);
+  --color-brand-500: oklch(0.62 0.18 250);
+  --color-brand-600: oklch(0.52 0.19 250);
+  --color-brand-700: oklch(0.43 0.17 250);
+  --color-brand-800: oklch(0.34 0.13 250);
+  --color-brand-900: oklch(0.26 0.09 250);
+  --color-brand-950: oklch(0.18 0.06 250);
+
+  --color-ink-50: oklch(0.98 0 0);
+  --color-ink-100: oklch(0.95 0 0);
+  --color-ink-200: oklch(0.9 0.002 250);
+  --color-ink-300: oklch(0.82 0.004 250);
+  --color-ink-400: oklch(0.68 0.006 250);
+  --color-ink-500: oklch(0.54 0.008 250);
+  --color-ink-600: oklch(0.42 0.01 250);
+  --color-ink-700: oklch(0.32 0.012 250);
+  --color-ink-800: oklch(0.22 0.014 250);
+  --color-ink-900: oklch(0.15 0.014 250);
+  --color-ink-950: oklch(0.09 0.012 250);
+}
+
+html,
+body {
+  @apply bg-ink-50 text-ink-900 antialiased;
+  font-feature-settings:
+    "ss01" on,
+    "cv11" on;
+}
+
+@media (prefers-color-scheme: dark) {
+  html,
+  body {
+    @apply bg-ink-950 text-ink-100;
+    color-scheme: dark;
+  }
+}
