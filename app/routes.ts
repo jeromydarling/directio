@@ -22,6 +22,7 @@ export default [
     route("programs", "routes/admin.programs.tsx"),
     route("programs/new", "routes/admin.programs.new.tsx"),
     route("programs/:programId", "routes/admin.programs.$programId.tsx"),
+    route("library", "routes/admin.library.tsx"),
     route("settings", "routes/admin.settings.tsx"),
   ]),
 
