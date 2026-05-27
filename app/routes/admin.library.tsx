@@ -3,9 +3,13 @@ import type { Route } from "./+types/admin.library";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
-import { deepCopyPackToSchool, removeSchoolCopyForInstall } from "~/lib/curriculum.server";
+import {
+  createSchoolOwnedPack,
+  deepCopyPackToSchool,
+  removeSchoolCopyForInstall,
+} from "~/lib/curriculum.server";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
-import { FormError } from "~/components/form";
+import { Field, FormError, TextInput } from "~/components/form";
 
 type PackRow = {
   packId: string;
@@ -41,11 +45,44 @@ export async function loader({ request, context }: Route.LoaderArgs) {
        LEFT JOIN school_pack_install spi
          ON spi.contentPackVersionId = cpv.id AND spi.organizationId = ?
       WHERE cpv.publishedAt IS NOT NULL
-      ORDER BY cp.scope, cp.name, cpv.version`,
+        AND cp.scope IN ('national', 'state')
+      ORDER BY cp.scope, cp.jurisdiction, cp.name, cpv.version`,
   )
     .bind(tenant.organization.id)
     .all<PackRow>();
-  return { packs: rows.results };
+
+  // School-owned packs (this tenant only)
+  const owned = await context.cloudflare.env.DB.prepare(
+    `SELECT spi.id AS installId, cp.name, cpv.version, spi.installedAt,
+            (SELECT COUNT(*) FROM school_module sm
+               JOIN school_course sc ON sc.id = sm.schoolCourseId
+              WHERE sc.schoolPackInstallId = spi.id) AS moduleCount,
+            (SELECT COUNT(*) FROM school_lesson sl
+               JOIN school_module sm ON sm.id = sl.schoolModuleId
+               JOIN school_course sc ON sc.id = sm.schoolCourseId
+              WHERE sc.schoolPackInstallId = spi.id) AS lessonCount,
+            (SELECT COUNT(*) FROM school_lesson sl
+               JOIN school_module sm ON sm.id = sl.schoolModuleId
+               JOIN school_course sc ON sc.id = sm.schoolCourseId
+              WHERE sc.schoolPackInstallId = spi.id AND sl.published = 1) AS publishedCount
+       FROM school_pack_install spi
+       JOIN content_pack_version cpv ON cpv.id = spi.contentPackVersionId
+       JOIN content_pack cp ON cp.id = cpv.contentPackId
+      WHERE spi.organizationId = ? AND cp.scope = 'school'
+      ORDER BY spi.installedAt DESC`,
+  )
+    .bind(tenant.organization.id)
+    .all<{
+      installId: string;
+      name: string;
+      version: string;
+      installedAt: number;
+      moduleCount: number;
+      lessonCount: number;
+      publishedCount: number;
+    }>();
+
+  return { packs: rows.results, ownedPacks: owned.results };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -53,6 +90,32 @@ export async function action({ request, context }: Route.ActionArgs) {
   const env = context.cloudflare.env;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
+
+  if (intent === "create-school-pack") {
+    const name = String(formData.get("name") ?? "").trim();
+    if (!name) return data({ error: "Pack name required." }, { status: 400 });
+    try {
+      const installId = await createSchoolOwnedPack(env, {
+        organizationId: tenant.organization.id,
+        name,
+      });
+      await recordAudit(env, {
+        organizationId: tenant.organization.id,
+        actorUserId: tenant.user.id,
+        action: "content_pack.created",
+        entityType: "school_pack_install",
+        entityId: installId,
+        payload: { name, scope: "school" },
+      });
+      return redirect(`/admin/library/installed/${installId}`);
+    } catch (err) {
+      return data(
+        { error: err instanceof Error ? err.message : "Create failed." },
+        { status: 400 },
+      );
+    }
+  }
+
   const versionId = String(formData.get("versionId") ?? "");
   if (!versionId) return data({ error: "Missing pack version." }, { status: 400 });
 
@@ -118,20 +181,87 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function AdminLibrary({ loaderData, actionData }: Route.ComponentProps) {
-  const { packs } = loaderData;
+  const { packs, ownedPacks } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-10">
       <PageHeader
         eyebrow="Curriculum library"
         title="Content packs"
-        description="Platform-published curriculum you can install for your school. Install a pack to make its lessons available to your students."
+        description="Install platform curriculum and edit your copy, or build your own pack from scratch for things only your school teaches."
       />
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
 
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Your school's own packs
+        </h2>
+        {ownedPacks.length === 0 ? (
+          <Card>
+            <p className="text-sm text-ink-600 dark:text-ink-300">
+              Create a pack for content only your school teaches: welcome &amp; orientation,
+              instructor bios, local pickup zones, school policies, anything.
+            </p>
+            <Form method="post" className="mt-4 flex items-end gap-2">
+              <input type="hidden" name="intent" value="create-school-pack" />
+              <Field label="">
+                <TextInput
+                  name="name"
+                  type="text"
+                  placeholder="Welcome to your school"
+                  className="min-w-[24rem]"
+                />
+              </Field>
+              <Button type="submit" disabled={submitting}>
+                Create your own pack
+              </Button>
+            </Form>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {ownedPacks.map((p) => (
+              <a
+                key={p.installId}
+                href={`/admin/library/installed/${p.installId}`}
+                className="block rounded-2xl border border-ink-200 bg-white/70 p-5 transition hover:border-brand-300 hover:shadow-sm dark:border-ink-800 dark:bg-ink-900/40 dark:hover:border-brand-700"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
+                      Your school
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-ink-900 dark:text-ink-50">
+                      {p.name}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">
+                      {p.moduleCount} module{p.moduleCount === 1 ? "" : "s"} ·{" "}
+                      {p.lessonCount} lesson{p.lessonCount === 1 ? "" : "s"} · {p.publishedCount} published
+                    </p>
+                  </div>
+                  <span className="text-ink-400 dark:text-ink-500">→</span>
+                </div>
+              </a>
+            ))}
+            <Form method="post" className="flex items-end gap-2 pt-2">
+              <input type="hidden" name="intent" value="create-school-pack" />
+              <Field label="">
+                <TextInput name="name" type="text" placeholder="+ Create another pack" className="min-w-[20rem]" />
+              </Field>
+              <Button type="submit" variant="secondary" disabled={submitting}>
+                Create pack
+              </Button>
+            </Form>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Platform-published packs
+        </h2>
       {packs.length === 0 ? (
         <EmptyState
           title="No curriculum packs published yet"
@@ -201,6 +331,7 @@ export default function AdminLibrary({ loaderData, actionData }: Route.Component
           ))}
         </div>
       )}
+      </section>
     </div>
   );
 }

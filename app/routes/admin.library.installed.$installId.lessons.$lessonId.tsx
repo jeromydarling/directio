@@ -2,6 +2,7 @@ import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.library.installed.$installId.lessons.$lessonId";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
+import { addSchoolQuestion, deleteSchoolQuestion } from "~/lib/curriculum.server";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput, TextArea, Select } from "~/components/form";
 
@@ -155,6 +156,40 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
 
+  if (intent === "add-question") {
+    const questionId = await addSchoolQuestion(env, {
+      organizationId: tenant.organization.id,
+      schoolLessonId: params.lessonId,
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "quiz_question.created",
+      entityType: "school_quiz_question",
+      entityId: questionId,
+    });
+    return redirect(
+      `/admin/library/installed/${params.installId}/lessons/${params.lessonId}#q-${questionId}`,
+    );
+  }
+
+  if (intent === "delete-question") {
+    const questionId = String(formData.get("questionId") ?? "");
+    if (!questionId) return data({ error: "Question missing." }, { status: 400 });
+    await deleteSchoolQuestion(env, {
+      organizationId: tenant.organization.id,
+      questionId,
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "quiz_question.deleted",
+      entityType: "school_quiz_question",
+      entityId: questionId,
+    });
+    return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
+  }
+
   if (intent === "generate-audio") {
     // Stub for ElevenLabs. Real call lands in the keys-pass at the end.
     // For now we mark a placeholder URL so the UI can demonstrate audio
@@ -202,8 +237,8 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
                 {lesson.published ? "Unpublish" : "Publish"}
               </Button>
             </Form>
-            <LinkButton to={`/admin/library/installed/${lesson.moduleTitle ? "" : ""}`} variant="ghost">
-              ← Pack
+            <LinkButton to={`/admin/library`} variant="ghost">
+              ← Library
             </LinkButton>
           </div>
         }
@@ -295,13 +330,23 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
             {questions.map((q, idx) => {
               const choices = JSON.parse(q.choices) as string[];
               return (
-                <Card key={q.id}>
-                  <Form method="post" className="flex flex-col gap-4">
-                    <input type="hidden" name="intent" value="save-question" />
-                    <input type="hidden" name="questionId" value={q.id} />
+                <Card key={q.id} className="scroll-mt-20" >
+                  <div id={`q-${q.id}`} />
+                  <div className="flex items-center justify-between">
                     <p className="text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">
                       Question {idx + 1}
                     </p>
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="delete-question" />
+                      <input type="hidden" name="questionId" value={q.id} />
+                      <Button type="submit" variant="ghost" disabled={submitting}>
+                        Delete question
+                      </Button>
+                    </Form>
+                  </div>
+                  <Form method="post" className="mt-4 flex flex-col gap-4">
+                    <input type="hidden" name="intent" value="save-question" />
+                    <input type="hidden" name="questionId" value={q.id} />
                     <Field label="Prompt">
                       <TextArea
                         name="prompt"
@@ -343,6 +388,13 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
             })}
           </div>
         )}
+
+        <Form method="post" className="mt-4">
+          <input type="hidden" name="intent" value="add-question" />
+          <Button type="submit" variant="secondary" disabled={submitting}>
+            + Add a question
+          </Button>
+        </Form>
       </section>
     </div>
   );

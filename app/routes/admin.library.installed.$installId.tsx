@@ -1,13 +1,23 @@
-import { Link } from "react-router";
+import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.library.installed.$installId";
 import { requireTenant } from "~/lib/tenant.server";
-import { PageHeader, Card, LinkButton } from "~/components/ui";
+import { recordAudit } from "~/lib/audit.server";
+import {
+  addSchoolLesson,
+  addSchoolModule,
+  deleteSchoolLesson,
+  deleteSchoolModule,
+} from "~/lib/curriculum.server";
+import { PageHeader, Card, LinkButton, Button } from "~/components/ui";
+import { Field, FormError, TextInput } from "~/components/form";
 
 type InstallRow = {
   installId: string;
   packName: string;
+  packScope: string;
   version: string;
   installedAt: number;
+  schoolCourseId: string;
 };
 
 type ModuleRow = {
@@ -27,6 +37,7 @@ type LessonRow = {
   ordinal: number;
   published: number;
   audioUrl: string | null;
+  isSchoolAdded: number;
 };
 
 export async function loader({ params, request, context }: Route.LoaderArgs) {
@@ -35,7 +46,9 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const install = await db
     .prepare(
-      `SELECT spi.id AS installId, cp.name AS packName, cpv.version, spi.installedAt
+      `SELECT spi.id AS installId, cp.name AS packName, cp.scope AS packScope,
+              cpv.version, spi.installedAt,
+              (SELECT id FROM school_course WHERE schoolPackInstallId = spi.id ORDER BY ordinal LIMIT 1) AS schoolCourseId
          FROM school_pack_install spi
          JOIN content_pack_version cpv ON cpv.id = spi.contentPackVersionId
          JOIN content_pack cp ON cp.id = cpv.contentPackId
@@ -62,7 +75,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const lessons = await db
     .prepare(
       `SELECT sl.id, sl.schoolModuleId, sl.title, sl.estimatedSeatMinutes, sl.ordinal,
-              sl.published, sl.audioUrl
+              sl.published, sl.audioUrl,
+              CASE WHEN sl.sourceLessonId IS NULL THEN 1 ELSE 0 END AS isSchoolAdded
          FROM school_lesson sl
          JOIN school_module sm ON sm.id = sl.schoolModuleId
          JOIN school_course sc ON sc.id = sm.schoolCourseId
@@ -75,7 +89,95 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   return { install, modules: modules.results, lessons: lessons.results };
 }
 
-export default function InstalledPack({ loaderData }: Route.ComponentProps) {
+export async function action({ params, request, context }: Route.ActionArgs) {
+  const tenant = await requireTenant(request, context.cloudflare.env);
+  const env = context.cloudflare.env;
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "");
+
+  // Confirm the install belongs to this tenant before any mutation.
+  const install = await env.DB.prepare(
+    "SELECT id FROM school_pack_install WHERE id = ? AND organizationId = ?",
+  )
+    .bind(params.installId, tenant.organization.id)
+    .first<{ id: string }>();
+  if (!install) throw new Response("Install not found", { status: 404 });
+
+  if (intent === "add-module") {
+    const title = String(formData.get("title") ?? "").trim();
+    const schoolCourseId = String(formData.get("schoolCourseId") ?? "");
+    if (!title) return data({ error: "Module title required." }, { status: 400 });
+    if (!schoolCourseId)
+      return data({ error: "Course missing." }, { status: 400 });
+    const moduleId = await addSchoolModule(env, {
+      organizationId: tenant.organization.id,
+      schoolCourseId,
+      title,
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "module.created",
+      entityType: "school_module",
+      entityId: moduleId,
+      payload: { title },
+    });
+    return redirect(`/admin/library/installed/${params.installId}`);
+  }
+
+  if (intent === "add-lesson") {
+    const title = String(formData.get("title") ?? "").trim();
+    const schoolModuleId = String(formData.get("schoolModuleId") ?? "");
+    if (!title) return data({ error: "Lesson title required." }, { status: 400 });
+    if (!schoolModuleId) return data({ error: "Module missing." }, { status: 400 });
+    const lessonId = await addSchoolLesson(env, {
+      organizationId: tenant.organization.id,
+      schoolModuleId,
+      title,
+    });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "lesson.created",
+      entityType: "school_lesson",
+      entityId: lessonId,
+      payload: { title },
+    });
+    return redirect(`/admin/library/installed/${params.installId}/lessons/${lessonId}`);
+  }
+
+  if (intent === "delete-lesson") {
+    const lessonId = String(formData.get("lessonId") ?? "");
+    if (!lessonId) return data({ error: "Lesson missing." }, { status: 400 });
+    await deleteSchoolLesson(env, { organizationId: tenant.organization.id, lessonId });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "lesson.deleted",
+      entityType: "school_lesson",
+      entityId: lessonId,
+    });
+    return redirect(`/admin/library/installed/${params.installId}`);
+  }
+
+  if (intent === "delete-module") {
+    const moduleId = String(formData.get("moduleId") ?? "");
+    if (!moduleId) return data({ error: "Module missing." }, { status: 400 });
+    await deleteSchoolModule(env, { organizationId: tenant.organization.id, moduleId });
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "module.deleted",
+      entityType: "school_module",
+      entityId: moduleId,
+    });
+    return redirect(`/admin/library/installed/${params.installId}`);
+  }
+
+  return data({ error: "Unknown action." }, { status: 400 });
+}
+
+export default function InstalledPack({ loaderData, actionData }: Route.ComponentProps) {
   const { install, modules, lessons } = loaderData;
   const lessonsByModule = new Map<string, LessonRow[]>();
   for (const l of lessons) {
@@ -83,14 +185,17 @@ export default function InstalledPack({ loaderData }: Route.ComponentProps) {
     arr.push(l);
     lessonsByModule.set(l.schoolModuleId, arr);
   }
+  const nav = useNavigation();
+  const submitting = nav.state === "submitting";
 
   const totalLessons = lessons.length;
   const publishedLessons = lessons.filter((l) => l.published).length;
+  const isSchoolOwned = install.packScope === "school";
 
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="Installed pack"
+        eyebrow={isSchoolOwned ? "School-owned pack" : "Installed pack"}
         title={install.packName}
         description={`v${install.version} · installed ${new Date(install.installedAt).toLocaleDateString()} · ${publishedLessons} / ${totalLessons} lessons published`}
         actions={
@@ -100,22 +205,40 @@ export default function InstalledPack({ loaderData }: Route.ComponentProps) {
         }
       />
 
+      <FormError message={actionData && "error" in actionData ? actionData.error : null} />
+
       {modules.length === 0 ? (
-        <Card>No modules in this pack.</Card>
+        <Card>
+          <p className="text-sm text-ink-600 dark:text-ink-300">
+            No modules yet. Add the first one below.
+          </p>
+        </Card>
       ) : (
         <div className="flex flex-col gap-8">
           {modules.map((m) => {
             const moduleLessons = lessonsByModule.get(m.moduleId) ?? [];
             return (
               <section key={m.moduleId}>
-                <div className="mb-3 flex items-baseline justify-between">
+                <div className="mb-3 flex items-baseline justify-between gap-4">
                   <h2 className="font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
                     {m.moduleTitle}
                   </h2>
-                  <p className="text-xs text-ink-500 dark:text-ink-400">
-                    {m.publishedCount} / {m.lessonCount} published
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-ink-500 dark:text-ink-400">
+                      {m.publishedCount} / {m.lessonCount} published
+                    </p>
+                    {moduleLessons.length === 0 && (
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="delete-module" />
+                        <input type="hidden" name="moduleId" value={m.moduleId} />
+                        <Button type="submit" variant="ghost" disabled={submitting}>
+                          Delete
+                        </Button>
+                      </Form>
+                    )}
+                  </div>
                 </div>
+
                 <ul className="flex flex-col gap-2">
                   {moduleLessons.map((l) => (
                     <li
@@ -136,25 +259,77 @@ export default function InstalledPack({ loaderData }: Route.ComponentProps) {
                           <p className="text-xs text-ink-500 dark:text-ink-400">
                             {l.estimatedSeatMinutes} min
                             {l.audioUrl ? " · audio ready" : ""}
+                            {l.isSchoolAdded ? " · school added" : ""}
                           </p>
                         </div>
                       </div>
-                      <span
-                        className={
-                          l.published
-                            ? "rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
-                            : "rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-600 dark:bg-ink-800 dark:text-ink-300"
-                        }
-                      >
-                        {l.published ? "Published" : "Draft"}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={
+                            l.published
+                              ? "rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
+                              : "rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                          }
+                        >
+                          {l.published ? "Published" : "Draft"}
+                        </span>
+                        <Form method="post">
+                          <input type="hidden" name="intent" value="delete-lesson" />
+                          <input type="hidden" name="lessonId" value={l.id} />
+                          <Button type="submit" variant="ghost" disabled={submitting}>
+                            ×
+                          </Button>
+                        </Form>
+                      </div>
                     </li>
                   ))}
                 </ul>
+
+                <Form method="post" className="mt-3 flex items-end gap-2">
+                  <input type="hidden" name="intent" value="add-lesson" />
+                  <input type="hidden" name="schoolModuleId" value={m.moduleId} />
+                  <Field label="">
+                    <TextInput
+                      name="title"
+                      type="text"
+                      placeholder="+ Add a lesson to this module"
+                      className="min-w-[24rem]"
+                    />
+                  </Field>
+                  <Button type="submit" variant="secondary" disabled={submitting}>
+                    Add lesson
+                  </Button>
+                </Form>
               </section>
             );
           })}
         </div>
+      )}
+
+      {install.schoolCourseId && (
+        <Card>
+          <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+            Add a module
+          </h3>
+          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+            Create a school-specific module (welcome, instructor bios, local policies, anything).
+          </p>
+          <Form method="post" className="mt-3 flex items-end gap-2">
+            <input type="hidden" name="intent" value="add-module" />
+            <input type="hidden" name="schoolCourseId" value={install.schoolCourseId} />
+            <Field label="">
+              <TextInput
+                name="title"
+                type="text"
+                placeholder="Module title"
+                className="min-w-[24rem]"
+              />
+            </Field>
+            <Button type="submit" disabled={submitting}>
+              Add module
+            </Button>
+          </Form>
+        </Card>
       )}
     </div>
   );
