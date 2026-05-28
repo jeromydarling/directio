@@ -355,6 +355,9 @@ export default function FamilyIndex({ loaderData, actionData }: Route.ComponentP
           <LinkButton to="/me/help" variant="secondary">
             Help center
           </LinkButton>
+          <LinkButton to="/family/practice-log" variant="secondary">
+            Practice log
+          </LinkButton>
           <LinkButton to="/family/payments" variant="secondary">
             Payment history
           </LinkButton>

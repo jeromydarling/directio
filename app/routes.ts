@@ -91,6 +91,7 @@ export default [
     route("lessons", "routes/family.lessons.tsx"),
     route("payments", "routes/family.payments.tsx"),
     route("documents", "routes/family.documents.tsx"),
+    route("practice-log", "routes/family.practice-log.tsx"),
     route("certificate/:enrollmentId", "routes/family.certificate.$enrollmentId.tsx"),
   ]),
 
