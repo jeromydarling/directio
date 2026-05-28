@@ -1,5 +1,6 @@
 import { createRequestHandler } from "react-router";
 import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
+import { sendDailyDigests } from "../app/lib/daily-digest.server";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
 
@@ -128,6 +129,19 @@ export default {
           }
         } catch (err) {
           console.error("scheduled pay-period close failed:", err);
+        }
+        try {
+          // Daily digest dispatch — only sends to orgs whose
+          // dailyDigestLastSentOnDate is not today (UTC), so running
+          // hourly is fine; the per-org dedupe lives in the lib.
+          const result = await sendDailyDigests(env, Date.now());
+          if (result.sent > 0 || result.errored > 0) {
+            console.log(
+              `[cron] daily digest sent=${result.sent} skipped=${result.skipped} errored=${result.errored}`,
+            );
+          }
+        } catch (err) {
+          console.error("scheduled daily digest failed:", err);
         }
       })(),
     );

@@ -1,11 +1,11 @@
-import { Form, data, useNavigation, useOutletContext } from "react-router";
+import { Form, data, redirect, useNavigation, useOutletContext } from "react-router";
 import type { Route } from "./+types/admin.settings";
 import type { ActiveTenant } from "~/lib/tenant.server";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
 import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
-import { Field, FormError, Select } from "~/components/form";
+import { Field, FormError, Select, TextInput } from "~/components/form";
 import {
   MATURITY_LABEL,
   maturityForJurisdiction,
@@ -91,9 +91,18 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // own jurisdiction column if set), so the school sees their reality
   // without us guessing.
   const orgRow = await db
-    .prepare("SELECT jurisdiction FROM organization WHERE id = ?")
+    .prepare(
+      `SELECT jurisdiction, dailyDigestEnabled, dailyDigestRecipientEmail,
+              dailyDigestLastSentOnDate
+         FROM organization WHERE id = ?`,
+    )
     .bind(tenant.organization.id)
-    .first<{ jurisdiction: string | null }>();
+    .first<{
+      jurisdiction: string | null;
+      dailyDigestEnabled: number;
+      dailyDigestRecipientEmail: string | null;
+      dailyDigestLastSentOnDate: string | null;
+    }>();
   const installedJurisdiction = installed.results[0]?.jurisdiction ?? null;
   const adapter = maturityForJurisdiction(
     orgRow?.jurisdiction ?? installedJurisdiction,
@@ -104,6 +113,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     installed: installed.results,
     audit: audit.results,
     adapter,
+    digest: {
+      enabled: Boolean(orgRow?.dailyDigestEnabled),
+      recipient: orgRow?.dailyDigestRecipientEmail ?? "",
+      lastSentOnDate: orgRow?.dailyDigestLastSentOnDate ?? null,
+    },
   };
 }
 
@@ -112,6 +126,34 @@ export async function action({ request, context }: Route.ActionArgs) {
   const env = context.cloudflare.env;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
+
+  if (intent === "save-daily-digest") {
+    const enabled = formData.get("dailyDigestEnabled") === "on" ? 1 : 0;
+    const email =
+      String(formData.get("dailyDigestRecipientEmail") ?? "").trim() || null;
+    if (enabled && !email) {
+      return data(
+        { error: "Pick a recipient email if the daily digest is on." },
+        { status: 400 },
+      );
+    }
+    await context.cloudflare.env.DB.prepare(
+      `UPDATE organization
+          SET dailyDigestEnabled = ?, dailyDigestRecipientEmail = ?
+        WHERE id = ?`,
+    )
+      .bind(enabled, email, tenant.organization.id)
+      .run();
+    await recordAudit(context.cloudflare.env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "organization.daily_digest_updated",
+      entityType: "organization",
+      entityId: tenant.organization.id,
+      payload: { enabled: Boolean(enabled), hasEmail: Boolean(email) },
+    });
+    return redirect("/admin/settings");
+  }
 
   if (intent === "install-rule-pack") {
     const versionId = String(formData.get("versionId") ?? "");
@@ -152,7 +194,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function AdminSettings({ loaderData, actionData }: Route.ComponentProps) {
   const { tenant } = useOutletContext<{ tenant: ActiveTenant }>();
-  const { available, installed, audit, adapter } = loaderData;
+  const { available, installed, audit, adapter, digest } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -181,6 +223,48 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
           </div>
         }
       />
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Daily digest email
+        </h2>
+        <Card>
+          <p className="text-sm text-ink-600 dark:text-ink-300">
+            One email a day with the top-line numbers — revenue, fees
+            recovered, payroll accrued, lessons in the next 24h, outstanding
+            A/R, instructor licenses expiring. Sends once a day per the
+            platform's hourly cron; tomorrow's digest covers the previous day.
+          </p>
+          {digest.enabled && digest.lastSentOnDate && (
+            <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
+              Last sent on {digest.lastSentOnDate}.
+            </p>
+          )}
+          <Form method="post" className="mt-3 grid gap-3 md:grid-cols-2">
+            <input type="hidden" name="intent" value="save-daily-digest" />
+            <label className="flex items-center gap-2 text-sm text-ink-700 dark:text-ink-200">
+              <input
+                type="checkbox"
+                name="dailyDigestEnabled"
+                defaultChecked={digest.enabled}
+                className="h-4 w-4 rounded border-ink-300"
+              />
+              Send me the daily digest
+            </label>
+            <Field label="Recipient email">
+              <TextInput
+                name="dailyDigestRecipientEmail"
+                type="email"
+                defaultValue={digest.recipient}
+                placeholder="owner@example.com"
+              />
+            </Field>
+            <div className="md:col-span-2">
+              <Button type="submit">Save</Button>
+            </div>
+          </Form>
+        </Card>
+      </section>
 
       {adapter && (
         <section>
