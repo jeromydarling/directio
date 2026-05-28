@@ -3,6 +3,12 @@ import type { Route } from "./+types/admin._onboarding";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { PageHeader, Card, LinkButton, Button } from "~/components/ui";
+import {
+  MATURITY_LABEL,
+  maturityForJurisdiction,
+  whatWeHandle,
+  whatYouStillDo,
+} from "~/lib/state-coverage";
 
 type OrgRow = {
   id: string;
@@ -77,7 +83,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .first<{ n: number }>();
   state.btwFlow ||= (btwStepsCount?.n ?? 0) > 0;
 
-  return { org, state };
+  const adapter = maturityForJurisdiction(org.jurisdiction);
+  return { org, state, adapter };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -157,7 +164,7 @@ const STEPS: Array<{
 ];
 
 export default function OnboardingChecklist({ loaderData }: Route.ComponentProps) {
-  const { org, state } = loaderData;
+  const { org, state, adapter } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const completed = STEPS.filter((s) => state[s.key]).length;
@@ -186,6 +193,37 @@ export default function OnboardingChecklist({ loaderData }: Route.ComponentProps
           )
         }
       />
+
+      {adapter && (
+        <Card>
+          <p className="text-xs uppercase tracking-[0.18em] text-brand-700 dark:text-brand-200">
+            Your state · {adapter.name} ({adapter.code})
+          </p>
+          <p className="mt-1 font-display text-lg font-semibold text-ink-900 dark:text-ink-50">
+            Level {adapter.maturity.level} · {MATURITY_LABEL[adapter.maturity.level]}
+          </p>
+          {adapter.maturity.legalBlocker && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50/40 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-100">
+              <p className="text-xs font-semibold uppercase tracking-wider">
+                Read this before you keep going
+              </p>
+              <p className="mt-1">{adapter.maturity.legalBlocker}</p>
+            </div>
+          )}
+          <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
+            <p className="text-ink-700 dark:text-ink-200">
+              <strong className="text-emerald-700 dark:text-emerald-200">
+                directio handles:
+              </strong>{" "}
+              {whatWeHandle(adapter.maturity)}.
+            </p>
+            <p className="text-ink-700 dark:text-ink-200">
+              <strong className="text-ink-900 dark:text-ink-50">You still do:</strong>{" "}
+              {whatYouStillDo(adapter.maturity)}.
+            </p>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <div className="flex items-baseline justify-between">
