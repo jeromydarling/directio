@@ -35,6 +35,7 @@ export default [
       "routes/admin.instructors.$instructorId.tax-doc.$docId[.pdf].tsx",
     ),
     route("vehicles", "routes/admin.vehicles.tsx"),
+    route("locations", "routes/admin.locations.tsx"),
     route("vehicles/:vehicleId", "routes/admin.vehicles.$vehicleId.tsx"),
     route(
       "vehicles/:vehicleId/photo.jpg",

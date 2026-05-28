@@ -18,6 +18,7 @@ const NAV = [
   { to: "/admin/programs", label: "Programs", icon: "❖" },
   { to: "/admin/instructors", label: "Instructors", icon: "◇" },
   { to: "/admin/vehicles", label: "Vehicles", icon: "▤" },
+  { to: "/admin/locations", label: "Locations", icon: "◈" },
   { to: "/admin/website", label: "Website", icon: "◐" },
   { to: "/admin/library", label: "Curriculum", icon: "◧" },
   { to: "/admin/reports/quizzes", label: "Quiz reports", icon: "◍" },
