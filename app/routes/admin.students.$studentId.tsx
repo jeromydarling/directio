@@ -25,6 +25,9 @@ type StudentRow = {
   phone: string | null;
   dateOfBirth: string | null;
   userId: string | null;
+  importSource: string | null;
+  importExternalId: string | null;
+  importBatchId: string | null;
 };
 
 type EnrollmentRow = {
@@ -51,7 +54,9 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const student = await db
     .prepare(
-      "SELECT id, firstName, lastName, email, phone, dateOfBirth, userId FROM student WHERE id = ? AND organizationId = ?",
+      `SELECT id, firstName, lastName, email, phone, dateOfBirth, userId,
+              importSource, importExternalId, importBatchId
+         FROM student WHERE id = ? AND organizationId = ?`,
     )
     .bind(params.studentId, tenant.organization.id)
     .first<StudentRow>();
@@ -214,6 +219,20 @@ export default function StudentDetail({ loaderData, actionData }: Route.Componen
           </LinkButton>
         }
       />
+
+      {student.importSource && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50/40 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-100">
+          <span className="font-medium">From a previous system.</span>{" "}
+          Imported via <code className="font-mono">{student.importSource}</code>
+          {student.importExternalId ? (
+            <>
+              {" "}with external ID <code className="font-mono">{student.importExternalId}</code>
+            </>
+          ) : null}
+          . Milestones and lessons recorded before the import preserve their
+          original attribution.
+        </div>
+      )}
 
       <section className="flex flex-col gap-4">
         <h2 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">

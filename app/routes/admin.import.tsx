@@ -209,10 +209,16 @@ export async function action({ request, context }: Route.ActionArgs) {
           .first<{ id: string }>();
         if (u) userId = u.id;
       }
+      // Spec #4: every imported row carries (importSource, importExternalId,
+      // importBatchId) so audit-bridge questions ("how did you certify this
+      // hour?") have a defensible answer. NULL importSource = native row.
+      // importExternalId is the email if available (most stable per-row
+      // identifier across SISes); the import_job.id is the batch.
       await env.DB.prepare(
         `INSERT INTO student (id, organizationId, userId, firstName, lastName, dateOfBirth,
-                              email, phone, notes, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              email, phone, notes, createdAt, updatedAt,
+                              importSource, importExternalId, importBatchId)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
         .bind(
           newId(),
@@ -226,6 +232,9 @@ export async function action({ request, context }: Route.ActionArgs) {
           r.notes,
           now,
           now,
+          `csv-import`,
+          r.email ?? null,
+          jobId,
         )
         .run();
       inserted++;
@@ -397,6 +406,38 @@ export default function ImportStudents({ loaderData, actionData }: Route.Compone
           </div>
         </Card>
       )}
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Export your data
+        </h2>
+        <Card>
+          <p className="text-sm text-ink-700 dark:text-ink-200">
+            Symmetric exporter — same CSV column shape as the importer, so you
+            can leave with everything intact at any time. No lock-in.
+          </p>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {[
+              { entity: "students", label: "Students" },
+              { entity: "guardians", label: "Guardians" },
+              { entity: "enrollments", label: "Enrollments" },
+              { entity: "appointments", label: "Appointments" },
+              { entity: "instructors", label: "Instructors" },
+              { entity: "vehicles", label: "Vehicles" },
+              { entity: "payments", label: "Payments" },
+            ].map((e) => (
+              <li key={e.entity}>
+                <a
+                  href={`/admin/export.csv?entity=${e.entity}`}
+                  className="block rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-700 hover:border-brand-400 hover:bg-brand-50/30 dark:border-ink-800 dark:text-ink-200 dark:hover:border-brand-600 dark:hover:bg-brand-950/20"
+                >
+                  Download {e.label} (CSV)
+                </a>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </section>
 
       {recentJobs.length > 0 && (
         <section>

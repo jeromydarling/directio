@@ -43,6 +43,7 @@ export default [
     route("payroll/1099/:year.csv", "routes/admin.payroll.1099.$year[.csv].tsx"),
     route("onboarding", "routes/admin._onboarding.tsx"),
     route("import", "routes/admin.import.tsx"),
+    route("export.csv", "routes/admin.export[.csv].tsx"),
     route("reminders", "routes/admin.reminders.tsx"),
     route("library", "routes/admin.library.tsx"),
     route("library/media", "routes/admin.library.media.tsx"),
