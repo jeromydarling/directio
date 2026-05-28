@@ -20,6 +20,7 @@ type Row = {
   plate: string | null;
   active: number;
   status: string;
+  locationName: string | null;
   vin: string | null;
   color: string | null;
   fuelType: string | null;
@@ -40,23 +41,31 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
   const rows = await context.cloudflare.env.DB.prepare(
     `SELECT
-       id, label, makeModel, year, plate, active, status, vin, color, fuelType,
-       dualControls, currentOdometer, quirks,
-       insuranceCarrier, insurancePolicyNumber, insuranceExpiresAt,
-       registrationNumber, registrationExpiresAt,
-       nextOilChangeMiles, nextTireRotationMiles, nextSafetyInspectionAt
-     FROM vehicle
-     WHERE organizationId = ?
-     ORDER BY (status = 'retired'), label`,
+       v.id, v.label, v.makeModel, v.year, v.plate, v.active, v.status,
+       v.vin, v.color, v.fuelType, v.dualControls, v.currentOdometer, v.quirks,
+       v.insuranceCarrier, v.insurancePolicyNumber, v.insuranceExpiresAt,
+       v.registrationNumber, v.registrationExpiresAt,
+       v.nextOilChangeMiles, v.nextTireRotationMiles, v.nextSafetyInspectionAt,
+       l.name AS locationName
+     FROM vehicle v
+     LEFT JOIN location l ON l.id = v.locationId
+     WHERE v.organizationId = ?
+     ORDER BY (v.status = 'retired'), v.label`,
   )
     .bind(tenant.organization.id)
     .all<Row>();
+
+  const locations = await context.cloudflare.env.DB.prepare(
+    "SELECT id, name FROM location WHERE organizationId = ? AND active = 1 ORDER BY name",
+  )
+    .bind(tenant.organization.id)
+    .all<{ id: string; name: string }>();
   const now = Date.now();
   const vehicles = rows.results.map((v) => ({
     ...v,
     compliance: checkVehicleCompliance(v, now),
   }));
-  return { vehicles };
+  return { vehicles, locations: locations.results };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -103,17 +112,21 @@ export async function action({ request, context }: Route.ActionArgs) {
   )
     return data({ error: "Odometer must be a non-negative number." }, { status: 400 });
 
+  const locationId = String(formData.get("locationId") ?? "").trim() || null;
+
   await context.cloudflare.env.DB.prepare(
     `INSERT INTO vehicle (
        id, organizationId, label, makeModel, year, plate, active, createdAt,
        status, vin, color, fuelType, dualControls, currentOdometer, quirks,
        insuranceCarrier, insurancePolicyNumber, insuranceExpiresAt,
-       registrationNumber, registrationExpiresAt, nextSafetyInspectionAt
+       registrationNumber, registrationExpiresAt, nextSafetyInspectionAt,
+       locationId
      ) VALUES (
        ?, ?, ?, ?, ?, ?, 1, ?,
        ?, ?, ?, ?, ?, ?, ?,
        ?, ?, ?,
-       ?, ?, ?
+       ?, ?, ?,
+       ?
      )`,
   )
     .bind(
@@ -137,6 +150,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       registrationNumber,
       registrationExpiresAt,
       nextSafetyInspectionAt,
+      locationId,
     )
     .run();
 
@@ -144,7 +158,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function AdminVehicles({ loaderData, actionData }: Route.ComponentProps) {
-  const { vehicles } = loaderData;
+  const { vehicles, locations } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -217,6 +231,11 @@ export default function AdminVehicles({ loaderData, actionData }: Route.Componen
                       <p className="text-[10px] uppercase tracking-wider text-ink-400">
                         {v.fuelType}
                         {v.dualControls ? " · dual-controls" : " · no dual-controls"}
+                      </p>
+                    )}
+                    {v.locationName && (
+                      <p className="text-[10px] uppercase tracking-wider text-brand-700 dark:text-brand-200">
+                        @ {v.locationName}
                       </p>
                     )}
                   </td>
@@ -312,6 +331,18 @@ export default function AdminVehicles({ loaderData, actionData }: Route.Componen
               <option value="off">No</option>
             </Select>
           </Field>
+          {locations.length > 0 && (
+            <Field label="Home location">
+              <Select name="locationId" defaultValue="">
+                <option value="">— Unassigned —</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
 
           <div className="md:col-span-3">
             <SectionTitle>Insurance & registration</SectionTitle>
