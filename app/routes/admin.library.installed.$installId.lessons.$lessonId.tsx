@@ -13,15 +13,20 @@ import {
 import { parseYouTubeId, youTubeEmbedUrl } from "~/lib/youtube";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput, TextArea, Select } from "~/components/form";
+import { VoiceRecorder } from "~/components/voice-recorder";
 
 type LessonRow = {
   id: string;
   title: string;
   body: string;
+  narrationScript: string | null;
   estimatedSeatMinutes: number;
   published: number;
   audioUrl: string | null;
   audioGeneratedAt: number | null;
+  narrationAudioR2Key: string | null;
+  narrationAudioVoiceId: string | null;
+  narrationAudioGeneratedAt: number | null;
   moduleTitle: string;
 };
 
@@ -55,8 +60,11 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const lesson = await db
     .prepare(
-      `SELECT sl.id, sl.title, sl.body, sl.estimatedSeatMinutes, sl.published, sl.audioUrl,
-              sl.audioGeneratedAt, sm.title AS moduleTitle
+      `SELECT sl.id, sl.title, sl.body, sl.narrationScript,
+              sl.estimatedSeatMinutes, sl.published, sl.audioUrl,
+              sl.audioGeneratedAt, sl.narrationAudioR2Key,
+              sl.narrationAudioVoiceId, sl.narrationAudioGeneratedAt,
+              sm.title AS moduleTitle
          FROM school_lesson sl
          JOIN school_module sm ON sm.id = sl.schoolModuleId
          JOIN school_course sc ON sc.id = sm.schoolCourseId
@@ -407,40 +415,53 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
           Narration
         </h2>
-        <Card>
-          {lesson.audioUrl ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-sm text-ink-700 dark:text-ink-200">
-                Audio generated {lesson.audioGeneratedAt && new Date(lesson.audioGeneratedAt).toLocaleString()}.
+        <div className="flex flex-col gap-4">
+          {lesson.narrationAudioR2Key ? (
+            <Card>
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-ink-700 dark:text-ink-200">
+                  Narration saved{" "}
+                  {lesson.narrationAudioGeneratedAt
+                    ? new Date(lesson.narrationAudioGeneratedAt).toLocaleString()
+                    : ""}
+                  {" — "}
+                  <span className="font-mono text-xs text-ink-500 dark:text-ink-400">
+                    {lesson.narrationAudioVoiceId === "owner-recorded"
+                      ? "owner-recorded"
+                      : lesson.narrationAudioVoiceId ?? "AI"}
+                  </span>
+                </p>
+                <audio
+                  controls
+                  src={`/audio/narration/${lesson.narrationAudioR2Key}`}
+                  className="w-full"
+                />
+              </div>
+            </Card>
+          ) : null}
+
+          <VoiceRecorder
+            uploadUrl="/api/lesson/narration/upload"
+            uploadFields={{ lessonId: lesson.id }}
+            label={`Record your own narration: ${lesson.title}`}
+            prompt={
+              lesson.narrationScript
+                ? "Read the narration script below. We'll clean up your audio in your browser before saving — high-pass filter, soft noise gate, and a compressor so quiet and loud passages match."
+                : "Read the lesson body in your own words. We clean up your audio in your browser — high-pass, soft noise gate, and a compressor — before saving."
+            }
+          />
+
+          {lesson.narrationScript && (
+            <Card>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-brand-600 dark:text-brand-300">
+                Narration script
               </p>
-              <audio controls src={lesson.audioUrl} className="w-full" />
-              <p className="text-xs text-ink-500 dark:text-ink-400">
-                Playback URL: <code className="font-mono">{lesson.audioUrl}</code>
-              </p>
-              <Form method="post">
-                <input type="hidden" name="intent" value="generate-audio" />
-                <Button type="submit" variant="secondary" disabled={submitting}>
-                  Regenerate audio
-                </Button>
-              </Form>
-            </div>
-          ) : (
-            <Form method="post" className="flex flex-col gap-3">
-              <input type="hidden" name="intent" value="generate-audio" />
-              <p className="text-sm text-ink-600 dark:text-ink-300">
-                Generate narrated audio of this lesson using ElevenLabs. Students hear it on the
-                lesson page.
-              </p>
-              <Button type="submit" disabled={submitting}>
-                Generate audio with ElevenLabs
-              </Button>
-              <p className="text-xs text-ink-500 dark:text-ink-400">
-                ElevenLabs API integration is wired in the keys-pass; for now this stamps a
-                placeholder URL so the editing + playback flow can be reviewed end-to-end.
-              </p>
-            </Form>
+              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-ink-700 dark:text-ink-200">
+                {lesson.narrationScript}
+              </pre>
+            </Card>
           )}
-        </Card>
+        </div>
       </section>
 
       <section>

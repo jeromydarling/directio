@@ -22,6 +22,8 @@ export default [
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
   route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
+  route("audio/narration/*", "routes/audio.narration.$.tsx"),
+  route("api/lesson/narration/upload", "routes/api.lesson.narration.upload.tsx"),
   route("sitemap.xml", "routes/sitemap[.]xml.tsx"),
   route("robots.txt", "routes/robots[.]txt.tsx"),
   route("schools/:slug", "routes/schools.$slug.tsx"),
