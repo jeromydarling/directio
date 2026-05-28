@@ -8,6 +8,7 @@ const NAV = [
   { to: "/for-families", label: "Family experience" },
   { to: "/for-instructors", label: "For instructors" },
   { to: "/states", label: "State coverage" },
+  { to: "/compare", label: "Compare" },
   { to: "/pricing", label: "Pricing" },
 ];
 

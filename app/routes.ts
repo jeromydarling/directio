@@ -11,6 +11,7 @@ export default [
   route("states/requests", "routes/states.requests.tsx"),
   route("why", "routes/why.tsx"),
   route("pricing", "routes/pricing.tsx"),
+  route("compare", "routes/compare.tsx"),
   route("login", "routes/login.tsx"),
   route("signup", "routes/signup.tsx"),
   route("logout", "routes/logout.tsx"),

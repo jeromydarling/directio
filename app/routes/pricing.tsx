@@ -59,9 +59,9 @@ const TIERS = [
   {
     name: "Studio",
     headline: "Your own custom marketing website. AI-built. Your domain.",
-    price: "149",
+    price: "29",
     priceUnit: "/ month",
-    feeNote: "All Free features included. 2% payment fee applies. Replaces your Wix/Squarespace/whatever.",
+    feeNote: "All Free features included. 2% payment fee applies. Replaces your Wix/Squarespace/whatever for less than a single domain renewal.",
     cta: { label: "Start with Studio", to: "/signup" },
     features: [
       "Everything in Free",
