@@ -1,4 +1,4 @@
-import { Form, data, redirect, useNavigation } from "react-router";
+import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.vehicles";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
@@ -198,7 +198,14 @@ export default function AdminVehicles({ loaderData, actionData }: Route.Componen
                   className="border-b border-ink-200/60 align-top last:border-0 dark:border-ink-800/60"
                 >
                   <td className="px-4 py-3">
-                    <p className="font-medium text-ink-900 dark:text-ink-50">{v.label}</p>
+                    <p className="font-medium text-ink-900 dark:text-ink-50">
+                      <Link
+                        to={`/admin/vehicles/${v.id}`}
+                        className="hover:text-brand-600 dark:hover:text-brand-300"
+                      >
+                        {v.label}
+                      </Link>
+                    </p>
                     {v.makeModel && (
                       <p className="text-xs text-ink-600 dark:text-ink-300">
                         {v.makeModel}

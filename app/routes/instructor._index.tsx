@@ -11,7 +11,7 @@ import {
   persistLessonPayout,
 } from "~/lib/comp";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
-import { Field, FormError, Select, TextArea } from "~/components/form";
+import { Field, FormError, Select, TextArea, TextInput } from "~/components/form";
 import {
   BTW_PROFICIENCY_LEVELS,
   BTW_RUBRIC_SKILLS,
@@ -85,6 +85,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       instructorId: null,
       todays: [] as ApptRow[],
       earnings: { cents: 0, lessons: 0, unpaidCents: 0 },
+      openShift: null,
+      bookableVehicles: [] as Array<{
+        id: string;
+        label: string;
+        currentOdometer: number | null;
+      }>,
     };
   }
 
@@ -213,6 +219,56 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     };
   });
 
+  // Open vehicle shift (check-out without a matching check-in yet).
+  const openShift = await db
+    .prepare(
+      `SELECT vs.id, vs.vehicleId, vs.startedAt, vs.startOdometer,
+              vs.flaggedIssue, v.label AS vehicleLabel
+         FROM vehicle_shift vs
+         JOIN vehicle v ON v.id = vs.vehicleId
+        WHERE vs.organizationId = ?
+          AND vs.instructorId = ?
+          AND vs.endedAt IS NULL
+        ORDER BY vs.startedAt DESC
+        LIMIT 1`,
+    )
+    .bind(tenant.organization.id, instructor.id)
+    .first<{
+      id: string;
+      vehicleId: string;
+      startedAt: number;
+      startOdometer: number;
+      flaggedIssue: string | null;
+      vehicleLabel: string;
+    }>();
+
+  // Bookable vehicles for "Start shift" picker. Filter by compliance state.
+  let bookableVehicles: Array<{ id: string; label: string; currentOdometer: number | null }> = [];
+  if (!openShift) {
+    const vehicleRows = await db
+      .prepare(
+        `SELECT id, label, currentOdometer, status,
+                insuranceExpiresAt, registrationExpiresAt,
+                nextSafetyInspectionAt, nextOilChangeMiles, nextTireRotationMiles
+           FROM vehicle WHERE organizationId = ? AND active = 1`,
+      )
+      .bind(tenant.organization.id)
+      .all<{
+        id: string;
+        label: string;
+        currentOdometer: number | null;
+        status: string;
+        insuranceExpiresAt: number | null;
+        registrationExpiresAt: number | null;
+        nextSafetyInspectionAt: number | null;
+        nextOilChangeMiles: number | null;
+        nextTireRotationMiles: number | null;
+      }>();
+    bookableVehicles = vehicleRows.results
+      .filter((v) => checkVehicleComplianceLite(v) !== "blocked")
+      .map((v) => ({ id: v.id, label: v.label, currentOdometer: v.currentOdometer }));
+  }
+
   return {
     instructorId: instructor.id,
     todays,
@@ -221,7 +277,33 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       lessons: earningsRow?.lessons ?? 0,
       unpaidCents: earningsRow?.unpaidCents ?? 0,
     },
+    openShift,
+    bookableVehicles,
   };
+}
+
+function checkVehicleComplianceLite(v: {
+  status: string;
+  insuranceExpiresAt: number | null;
+  registrationExpiresAt: number | null;
+  nextSafetyInspectionAt: number | null;
+  currentOdometer: number | null;
+  nextOilChangeMiles: number | null;
+  nextTireRotationMiles: number | null;
+}): "ok" | "warning" | "blocked" {
+  // Inline cheap check; vehicles.ts has the full version.
+  if (v.status === "retired" || v.status === "out_of_service") return "blocked";
+  const now = Date.now();
+  if (v.insuranceExpiresAt !== null && v.insuranceExpiresAt < now) return "blocked";
+  if (v.registrationExpiresAt !== null && v.registrationExpiresAt < now) return "blocked";
+  if (v.nextSafetyInspectionAt !== null && v.nextSafetyInspectionAt < now) return "blocked";
+  if (
+    v.nextOilChangeMiles !== null &&
+    v.currentOdometer !== null &&
+    v.currentOdometer >= v.nextOilChangeMiles
+  )
+    return "blocked";
+  return "ok";
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -484,6 +566,154 @@ export async function action({ request, context }: Route.ActionArgs) {
     return redirect("/instructor");
   }
 
+  if (intent === "start_shift") {
+    const myInstructor = await env.DB.prepare(
+      "SELECT id FROM instructor WHERE userId = ? AND organizationId = ?",
+    )
+      .bind(tenant.user.id, tenant.organization.id)
+      .first<{ id: string }>();
+    if (!myInstructor) {
+      return data({ error: "You aren't set up as an instructor at this school." }, { status: 400 });
+    }
+    const existingOpen = await env.DB.prepare(
+      `SELECT id FROM vehicle_shift
+        WHERE organizationId = ? AND instructorId = ? AND endedAt IS NULL`,
+    )
+      .bind(tenant.organization.id, myInstructor.id)
+      .first<{ id: string }>();
+    if (existingOpen) {
+      return data({ error: "You already have an open shift. End it before starting a new one." }, {
+        status: 409,
+      });
+    }
+    const vehicleId = String(formData.get("vehicleId") ?? "");
+    const startOdoStr = String(formData.get("startOdometer") ?? "").trim();
+    const startOdometer = Number.parseInt(startOdoStr, 10);
+    if (!vehicleId) return data({ error: "Pick a vehicle." }, { status: 400 });
+    if (!Number.isFinite(startOdometer) || startOdometer < 0) {
+      return data({ error: "Enter the current odometer reading." }, { status: 400 });
+    }
+    const startFuelLevel = String(formData.get("startFuelLevel") ?? "").trim() || null;
+    const walkAroundOk = formData.get("walkAroundOk") === "on" ? 1 : 0;
+    const walkAroundNotes = String(formData.get("walkAroundNotes") ?? "").trim() || null;
+
+    const shiftId = newId();
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO vehicle_shift
+         (id, organizationId, vehicleId, instructorId, startedAt, startOdometer,
+          startFuelLevel, walkAroundOk, walkAroundNotes, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        shiftId,
+        tenant.organization.id,
+        vehicleId,
+        myInstructor.id,
+        now,
+        startOdometer,
+        startFuelLevel,
+        walkAroundOk,
+        walkAroundNotes,
+        now,
+        now,
+      )
+      .run();
+    // Bump vehicle.currentOdometer if the new reading is higher.
+    await env.DB.prepare(
+      `UPDATE vehicle SET currentOdometer = ?
+        WHERE id = ? AND organizationId = ?
+          AND (currentOdometer IS NULL OR currentOdometer < ?)`,
+    )
+      .bind(startOdometer, vehicleId, tenant.organization.id, startOdometer)
+      .run();
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "vehicle_shift.started",
+      entityType: "vehicle_shift",
+      entityId: shiftId,
+      payload: { vehicleId, startOdometer, walkAroundOk: Boolean(walkAroundOk) },
+    });
+    return redirect("/instructor");
+  }
+
+  if (intent === "end_shift") {
+    const shiftId = String(formData.get("shiftId") ?? "");
+    if (!shiftId) return data({ error: "Missing shift." }, { status: 400 });
+    const shift = await env.DB.prepare(
+      `SELECT id, vehicleId, instructorId, startOdometer, endedAt
+         FROM vehicle_shift
+        WHERE id = ? AND organizationId = ?`,
+    )
+      .bind(shiftId, tenant.organization.id)
+      .first<{
+        id: string;
+        vehicleId: string;
+        instructorId: string;
+        startOdometer: number;
+        endedAt: number | null;
+      }>();
+    if (!shift) return data({ error: "Shift not found." }, { status: 404 });
+    if (shift.endedAt !== null) return data({ error: "Already ended." }, { status: 409 });
+
+    const endOdoStr = String(formData.get("endOdometer") ?? "").trim();
+    const endOdometer = Number.parseInt(endOdoStr, 10);
+    if (!Number.isFinite(endOdometer) || endOdometer < shift.startOdometer) {
+      return data({ error: `End odometer must be >= start (${shift.startOdometer}).` }, { status: 400 });
+    }
+    const endFuelLevel = String(formData.get("endFuelLevel") ?? "").trim() || null;
+    const flaggedIssue = String(formData.get("flaggedIssue") ?? "").trim() || null;
+    const now = Date.now();
+
+    await env.DB.prepare(
+      `UPDATE vehicle_shift
+          SET endedAt = ?, endOdometer = ?, endFuelLevel = ?,
+              flaggedIssue = ?, flaggedAt = ?, updatedAt = ?
+        WHERE id = ?`,
+    )
+      .bind(
+        now,
+        endOdometer,
+        endFuelLevel,
+        flaggedIssue,
+        flaggedIssue ? now : null,
+        now,
+        shift.id,
+      )
+      .run();
+    // Roll forward vehicle.currentOdometer.
+    await env.DB.prepare(
+      `UPDATE vehicle SET currentOdometer = ?
+        WHERE id = ? AND organizationId = ?
+          AND (currentOdometer IS NULL OR currentOdometer < ?)`,
+    )
+      .bind(endOdometer, shift.vehicleId, tenant.organization.id, endOdometer)
+      .run();
+    // If the instructor flagged an issue, flip the vehicle out-of-service
+    // automatically — admin can clear it after inspection.
+    if (flaggedIssue) {
+      await env.DB.prepare(
+        "UPDATE vehicle SET status = 'out_of_service' WHERE id = ? AND organizationId = ? AND status = 'active'",
+      )
+        .bind(shift.vehicleId, tenant.organization.id)
+        .run();
+    }
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "vehicle_shift.ended",
+      entityType: "vehicle_shift",
+      entityId: shift.id,
+      payload: {
+        endOdometer,
+        miles: endOdometer - shift.startOdometer,
+        flagged: Boolean(flaggedIssue),
+      },
+    });
+    return redirect("/instructor");
+  }
+
   if (intent === "confirm") {
     await env.DB.prepare(
       "UPDATE appointment SET status = 'confirmed', updatedAt = ? WHERE id = ? AND status = 'scheduled'",
@@ -498,7 +728,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function InstructorToday({ loaderData, actionData }: Route.ComponentProps) {
   const me = useOutletContext<InstructorCtx>();
-  const { instructorId, todays, earnings } = loaderData;
+  const { instructorId, todays, earnings, openShift, bookableVehicles } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -523,6 +753,12 @@ export default function InstructorToday({ loaderData, actionData }: Route.Compon
       />
 
       {earnings.lessons > 0 && <EarningsStrip earnings={earnings} />}
+
+      <ShiftPanel
+        openShift={openShift}
+        bookableVehicles={bookableVehicles}
+        submitting={submitting}
+      />
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
 
@@ -797,6 +1033,146 @@ function RubricSummary({ rubric }: { rubric: RubricMap }) {
         })}
       </ul>
     </div>
+  );
+}
+
+function ShiftPanel({
+  openShift,
+  bookableVehicles,
+  submitting,
+}: {
+  openShift: {
+    id: string;
+    vehicleId: string;
+    startedAt: number;
+    startOdometer: number;
+    flaggedIssue: string | null;
+    vehicleLabel: string;
+  } | null;
+  bookableVehicles: Array<{ id: string; label: string; currentOdometer: number | null }>;
+  submitting: boolean;
+}) {
+  if (openShift) {
+    return (
+      <Card className="border-emerald-300 bg-emerald-50/30 dark:border-emerald-800/60 dark:bg-emerald-950/20">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-200">
+              On shift · {openShift.vehicleLabel}
+            </p>
+            <p className="mt-1 text-sm text-ink-700 dark:text-ink-200">
+              Started {new Date(openShift.startedAt).toLocaleTimeString(undefined, {
+                hour: "numeric",
+                minute: "2-digit",
+              })} ·{" "}
+              {openShift.startOdometer.toLocaleString()} mi
+            </p>
+          </div>
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer select-none text-sm font-medium text-brand-700 dark:text-brand-200">
+            End shift
+          </summary>
+          <Form method="post" className="mt-3 grid gap-3 md:grid-cols-3">
+            <input type="hidden" name="intent" value="end_shift" />
+            <input type="hidden" name="shiftId" value={openShift.id} />
+            <Field label="End odometer (mi)">
+              <TextInput
+                name="endOdometer"
+                type="number"
+                min={openShift.startOdometer}
+                required
+                defaultValue={openShift.startOdometer.toString()}
+              />
+            </Field>
+            <Field label="End fuel level">
+              <Select name="endFuelLevel" defaultValue="">
+                <option value="">—</option>
+                <option value="empty">Empty</option>
+                <option value="quarter">¼</option>
+                <option value="half">½</option>
+                <option value="three_quarters">¾</option>
+                <option value="full">Full</option>
+              </Select>
+            </Field>
+            <Field
+              label="Flag an issue (optional)"
+              hint="Anything wrong with the car; this flips it out of service automatically until admin clears it."
+            >
+              <TextInput name="flaggedIssue" type="text" placeholder="Brakes squeaking" />
+            </Field>
+            <div className="md:col-span-3">
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Ending…" : "End shift"}
+              </Button>
+            </div>
+          </Form>
+        </details>
+      </Card>
+    );
+  }
+
+  if (bookableVehicles.length === 0) return null;
+
+  return (
+    <Card className="border-brand-300 bg-brand-50/30 dark:border-brand-800/60 dark:bg-brand-950/20">
+      <details>
+        <summary className="cursor-pointer select-none text-sm font-medium text-brand-700 dark:text-brand-200">
+          Start a shift — check out a vehicle
+        </summary>
+        <Form method="post" className="mt-3 grid gap-3 md:grid-cols-2">
+          <input type="hidden" name="intent" value="start_shift" />
+          <Field label="Vehicle">
+            <Select name="vehicleId" required defaultValue={bookableVehicles[0]?.id ?? ""}>
+              {bookableVehicles.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                  {v.currentOdometer !== null
+                    ? ` (${v.currentOdometer.toLocaleString()} mi)`
+                    : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Start odometer (mi)">
+            <TextInput name="startOdometer" type="number" min="0" required />
+          </Field>
+          <Field label="Start fuel level">
+            <Select name="startFuelLevel" defaultValue="">
+              <option value="">—</option>
+              <option value="empty">Empty</option>
+              <option value="quarter">¼</option>
+              <option value="half">½</option>
+              <option value="three_quarters">¾</option>
+              <option value="full">Full</option>
+            </Select>
+          </Field>
+          <div className="flex items-end gap-3">
+            <label className="flex items-center gap-2 text-sm text-ink-700 dark:text-ink-200">
+              <input
+                type="checkbox"
+                name="walkAroundOk"
+                defaultChecked
+                className="h-4 w-4 rounded border-ink-300"
+              />
+              Walk-around inspection passed
+            </label>
+          </div>
+          <Field label="Walk-around notes (optional)">
+            <TextInput
+              name="walkAroundNotes"
+              type="text"
+              placeholder="Tires fine; passenger side mirror loose"
+            />
+          </Field>
+          <div className="md:col-span-2">
+            <Button type="submit" disabled={submitting}>
+              Start shift
+            </Button>
+          </div>
+        </Form>
+      </details>
+    </Card>
   );
 }
 

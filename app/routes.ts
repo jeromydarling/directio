@@ -31,6 +31,7 @@ export default [
     route("instructors/new", "routes/admin.instructors.new.tsx"),
     route("instructors/:instructorId", "routes/admin.instructors.$instructorId.tsx"),
     route("vehicles", "routes/admin.vehicles.tsx"),
+    route("vehicles/:vehicleId", "routes/admin.vehicles.$vehicleId.tsx"),
     route("schedule", "routes/admin.schedule.tsx"),
     route("schedule/new", "routes/admin.schedule.new.tsx"),
     route("programs", "routes/admin.programs.tsx"),
