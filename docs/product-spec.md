@@ -306,6 +306,68 @@ The first N customer migrations are run as a paid white-glove service by the dir
 
 A symmetric exporter ships from day one so a school can leave with their data intact. This is a trust signal during the sales conversation and a hedge against lock-in concerns. The exporter covers every entity the importer covers, in the same CSV shape, plus credential PDFs and any attached receipts as a zip bundle.
 
+### 8. Auth, account lifecycle, and the conversion funnel
+
+"One login, one timeline, one payment history per family" is correct as a retention principle and wrong as a funnel mechanic. Parents are buying a service, not adopting a platform. Any account-creation step before the first lesson is booked is the single largest threat to conversion. The fix is architectural: separate the *account* from the *signup* — the account exists, the signup never happens.
+
+The north-star funnel metric is **time-to-paid**: from landing on the school's enrollment page to a paid enrollment with a scheduled first lesson, in under 10 minutes. Every account decision below is graded against that number.
+
+#### Guest checkout as the default path
+
+A parent landing on a school's enrollment page can complete the entire flow without ever choosing a password. They pick a program, enter student information, pay, and receive a confirmation. No sign-up form, no password setup, no "create your account" step.
+
+The account is created behind the scenes during checkout from the email and phone number they entered, in a "claim-pending" state. From their perspective, they bought a service and got a portal; the account is incidental.
+
+#### Magic-link claim post-purchase
+
+The post-purchase confirmation email contains a one-tap "open your portal" link that logs them in. Better Auth's magic-link support is the underlying mechanism; the UX framing is what matters.
+
+#### Passwordless is a permanent lifecycle, not a temporary state
+
+A parent who never sets a password can use directio forever, logging in via emailed magic links each session. Password setup is offered in account settings but never blocking, never nagged about, never required for any feature. If/when they do set a password, modern guidance applies — longer is better, no special-character theater — and Better Auth defaults are trusted.
+
+#### Account merging at checkout
+
+If the email entered at checkout already exists in the system — a sibling enrolled previously, the parent of two kids at the same school, a returning customer, or a parent enrolling at a second directio school — the system recognizes it and links the new enrollment to the existing family record. The parent receives a magic-link email that reads "looks like you're already with us — here's your portal." No "account already exists" friction wall, no duplicate family records.
+
+#### Progressive profile completion
+
+The checkout form collects only what is strictly required to process the enrollment and start the journey: student name, date of birth, parent name, parent email, parent phone, program selection, payment. Everything else lives in a "complete your profile" surface inside the portal:
+
+- Emergency contacts.
+- Secondary parent or guardian.
+- Medical notes.
+- Student photo.
+- Detailed address and pickup preferences.
+- Marketing and communication preferences.
+
+The nudge is persistent but never blocks any core action.
+
+#### Student accounts deferred until needed
+
+Teen students do not need their own login at the funnel. Their account is provisioned by the parent when classroom or LMS work begins, and they receive their own magic link via the parent. This eliminates a second sign-up wall during enrollment and keeps parental control over account creation explicit.
+
+#### Cross-school family identity
+
+Parent identity is platform-level for the same reason instructor identity is: a parent enrolling a second child at a different directio school should be recognized, not asked to make a second account. The multi-school portal view shows all their enrolled children across all directio schools they engage with. This is the same architectural exception to strict tenant scoping, with the same audit posture.
+
+#### Roles that can stay tenant-scoped
+
+Not every role needs platform-level identity. School admins and office managers stay tenant-scoped — they work for one school and their identity has no reason to span tenants. The exceptions are instructors and parent/guardian accounts, both of which have legitimate cross-tenant reality.
+
+#### Auth posture summary
+
+- Better Auth on Workers, D1-backed sessions.
+- Email + magic link is the canonical authentication flow.
+- Passwords are optional and supplemental.
+- Instructor identity and parent identity are platform-level with per-school memberships.
+- Admin and student identities are tenant-scoped.
+- Guest checkout is the funnel default; account claim is post-purchase via magic link.
+
+#### Funnel measurement
+
+Time-to-paid is instrumented from first landing-page hit through confirmed payment + first lesson scheduled. The funnel is observable per school so each school can see their own conversion rate and where parents drop off. Friction added anywhere in this flow — required fields, password setup, account verification gates — must be justified against its measured cost in funnel drop-off, not added by default.
+
 ## Multi-tenant architecture
 
 The platform should be multi-tenant from day one. Every school should operate inside its own tenant with configurable branding, pricing, terminology, messaging, and state rule configuration.[cite:27][cite:3]
