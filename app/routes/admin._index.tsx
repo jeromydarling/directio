@@ -418,10 +418,18 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
         description="Your school at a glance — the answer to “is the business healthy?” before you scroll."
       />
 
-      <PeriodPicker
-        active={data.period.key}
-        presets={data.periodPresets}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PeriodPicker
+          active={data.period.key}
+          presets={data.periodPresets}
+        />
+        <a
+          href={`/admin/dashboard/snapshot.csv?period=${data.period.key}`}
+          className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-3 py-1 text-xs font-medium text-ink-700 hover:border-brand-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
+        >
+          Download CSV snapshot
+        </a>
+      </div>
 
       <HealthBanner data={data} />
 

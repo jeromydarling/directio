@@ -54,6 +54,7 @@ export default [
     route("payroll/:periodId", "routes/admin.payroll.$periodId.tsx"),
     route("payroll/:periodId/export.csv", "routes/admin.payroll.$periodId.export[.csv].tsx"),
     route("payroll/1099/:year.csv", "routes/admin.payroll.1099.$year[.csv].tsx"),
+    route("dashboard/snapshot.csv", "routes/admin.dashboard.snapshot[.csv].tsx"),
     route("onboarding", "routes/admin._onboarding.tsx"),
     route("import", "routes/admin.import.tsx"),
     route("export.csv", "routes/admin.export[.csv].tsx"),

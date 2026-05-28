@@ -1,5 +1,7 @@
+import { Form, data, useNavigation } from "react-router";
 import type { Route } from "./+types/states";
 import { getSession } from "~/lib/session.server";
+import { newId } from "~/lib/ids";
 import { MarketingShell } from "~/components/marketing-shell";
 import { MeshBackground, Reveal } from "~/components/motion";
 
@@ -50,13 +52,54 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
+export async function action({ request, context }: Route.ActionArgs) {
+  const env = context.cloudflare.env;
+  const formData = await request.formData();
+  const stateCode = String(formData.get("stateCode") ?? "").trim().toUpperCase();
+  const schoolName = String(formData.get("schoolName") ?? "").trim();
+  const contactName = String(formData.get("contactName") ?? "").trim();
+  const contactEmail = String(formData.get("contactEmail") ?? "").trim();
+  const contactPhone = String(formData.get("contactPhone") ?? "").trim() || null;
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  if (!stateCode || stateCode.length !== 2) {
+    return data({ error: "Pick a state." }, { status: 400 });
+  }
+  if (!schoolName || !contactName || !contactEmail) {
+    return data(
+      { error: "School name, contact name, and email are required." },
+      { status: 400 },
+    );
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO state_partner_request
+       (id, stateCode, schoolName, contactName, contactEmail, contactPhone, notes,
+        status, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'received', ?)`,
+  )
+    .bind(
+      newId(),
+      stateCode,
+      schoolName,
+      contactName,
+      contactEmail,
+      contactPhone,
+      notes,
+      Date.now(),
+    )
+    .run();
+
+  return data({ submitted: contactEmail });
+}
+
 import { STATE_LABEL, STATE_MATURITY } from "~/lib/state-coverage";
 
 // Maturity levels per state — read from the shared lib so the public
 // coverage page and the per-school settings card never drift.
 const MATURITY = STATE_MATURITY;
 
-export default function States({ loaderData }: Route.ComponentProps) {
+export default function States({ loaderData, actionData }: Route.ComponentProps) {
   const dest = loaderData.destination ?? "/signup";
   const packs = loaderData.packs;
 
@@ -220,11 +263,118 @@ export default function States({ loaderData }: Route.ComponentProps) {
                   For schools →
                 </a>
               </div>
+
+              <PartnerIntake actionData={actionData} />
             </div>
           </Reveal>
         </div>
       </section>
     </MarketingShell>
+  );
+}
+
+function PartnerIntake({ actionData }: { actionData: Route.ComponentProps["actionData"] }) {
+  const nav = useNavigation();
+  const submitting = nav.state === "submitting";
+  const submitted =
+    actionData && "submitted" in actionData ? actionData.submitted : null;
+  const errorMsg =
+    actionData && "error" in actionData ? actionData.error : null;
+  if (submitted) {
+    return (
+      <div className="mt-8 rounded-2xl border border-emerald-300 bg-emerald-50/40 p-5 dark:border-emerald-800 dark:bg-emerald-950/30">
+        <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+          Thanks — we'll be in touch.
+        </p>
+        <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
+          We sent confirmation to <strong>{submitted}</strong>. Expect a reply
+          within a week.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <details className="mt-6 rounded-2xl border border-ink-200 bg-white/60 p-5 dark:border-ink-800 dark:bg-ink-900/40">
+      <summary className="cursor-pointer select-none text-sm font-semibold text-brand-700 dark:text-brand-200">
+        Become a design partner for your state →
+      </summary>
+      <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
+        Tell us about your school and the state requirements you wish were
+        deeper. We pick one or two design-partner schools per state when we
+        level up an adapter.
+      </p>
+      {errorMsg && (
+        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300">
+          {errorMsg}
+        </p>
+      )}
+      <Form method="post" className="mt-3 grid gap-3 md:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm text-ink-800 dark:text-ink-200">
+          <span>State (two-letter code)</span>
+          <input
+            name="stateCode"
+            type="text"
+            required
+            maxLength={2}
+            className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm font-mono uppercase dark:border-ink-700 dark:bg-ink-900/60"
+            placeholder="MN"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-ink-800 dark:text-ink-200">
+          <span>School name</span>
+          <input
+            name="schoolName"
+            type="text"
+            required
+            className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm dark:border-ink-700 dark:bg-ink-900/60"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-ink-800 dark:text-ink-200">
+          <span>Your name</span>
+          <input
+            name="contactName"
+            type="text"
+            required
+            className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm dark:border-ink-700 dark:bg-ink-900/60"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-ink-800 dark:text-ink-200">
+          <span>Email</span>
+          <input
+            name="contactEmail"
+            type="email"
+            required
+            className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm dark:border-ink-700 dark:bg-ink-900/60"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-ink-800 dark:text-ink-200">
+          <span>Phone (optional)</span>
+          <input
+            name="contactPhone"
+            type="tel"
+            className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm dark:border-ink-700 dark:bg-ink-900/60"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-ink-800 dark:text-ink-200 md:col-span-2">
+          <span>What requirements are missing for your state?</span>
+          <textarea
+            name="notes"
+            rows={3}
+            className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm dark:border-ink-700 dark:bg-ink-900/60"
+            placeholder="e.g. We need direct electronic submission for the Iowa permit certificate."
+          />
+        </label>
+        <div className="md:col-span-2">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center justify-center rounded-full bg-ink-900 px-5 py-2.5 text-sm font-medium text-ink-50 disabled:opacity-60 dark:bg-ink-50 dark:text-ink-900"
+          >
+            {submitting ? "Sending…" : "Submit request"}
+          </button>
+        </div>
+      </Form>
+    </details>
   );
 }
 
