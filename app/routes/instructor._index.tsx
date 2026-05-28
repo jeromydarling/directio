@@ -94,6 +94,17 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         currentOdometer: number | null;
       }>,
       geolocationPolicy: "off" as "off" | "opt_in" | "required",
+      openShifts: [] as Array<{
+        id: string;
+        kind: string;
+        startsAt: number;
+        endsAt: number;
+        locationLabel: string | null;
+        openShiftAt: number;
+        studentFirst: string;
+        studentLast: string;
+        vehicleLabel: string | null;
+      }>,
     };
   }
 
@@ -281,6 +292,44 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     | "opt_in"
     | "required";
 
+  // Open shifts available for this instructor to claim. Filtered to
+  // future appointments only (no point claiming a past slot). Limited
+  // to next 14 days for relevance.
+  const openShifts = await db
+    .prepare(
+      `SELECT a.id, a.kind, a.startsAt, a.endsAt, a.locationLabel, a.openShiftAt,
+              s.firstName AS studentFirst, s.lastName AS studentLast,
+              v.label AS vehicleLabel
+         FROM appointment a
+         JOIN enrollment e ON e.id = a.enrollmentId
+         JOIN student s ON s.id = e.studentId
+         LEFT JOIN vehicle v ON v.id = a.vehicleId
+        WHERE a.organizationId = ?
+          AND a.instructorId IS NULL
+          AND a.openShiftAt IS NOT NULL
+          AND a.startsAt >= ?
+          AND a.startsAt < ?
+          AND a.status IN ('scheduled','confirmed')
+        ORDER BY a.startsAt
+        LIMIT 12`,
+    )
+    .bind(
+      tenant.organization.id,
+      Date.now(),
+      Date.now() + 14 * 24 * 60 * 60 * 1000,
+    )
+    .all<{
+      id: string;
+      kind: string;
+      startsAt: number;
+      endsAt: number;
+      locationLabel: string | null;
+      openShiftAt: number;
+      studentFirst: string;
+      studentLast: string;
+      vehicleLabel: string | null;
+    }>();
+
   return {
     instructorId: instructor.id,
     todays,
@@ -292,6 +341,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     openShift,
     bookableVehicles,
     geolocationPolicy,
+    openShifts: openShifts.results,
   };
 }
 
@@ -711,6 +761,54 @@ export async function action({ request, context }: Route.ActionArgs) {
     return redirect("/instructor");
   }
 
+  if (intent === "claim_open_shift") {
+    const apptId = String(formData.get("appointmentId") ?? "");
+    if (!apptId) return data({ error: "Missing shift." }, { status: 400 });
+    const myInstructor = await env.DB.prepare(
+      "SELECT id FROM instructor WHERE userId = ? AND organizationId = ?",
+    )
+      .bind(tenant.user.id, tenant.organization.id)
+      .first<{ id: string }>();
+    if (!myInstructor) {
+      return data({ error: "You aren't set up as an instructor at this school." }, {
+        status: 400,
+      });
+    }
+    const now = Date.now();
+    const result = await env.DB.prepare(
+      `UPDATE appointment
+          SET instructorId = ?, openShiftAt = NULL, updatedAt = ?
+        WHERE id = ? AND organizationId = ?
+          AND instructorId IS NULL
+          AND openShiftAt IS NOT NULL
+          AND startsAt > ?`,
+    )
+      .bind(myInstructor.id, now, apptId, tenant.organization.id, now)
+      .run();
+    if ((result.meta?.changes ?? 0) === 0) {
+      return data(
+        { error: "Another instructor just claimed that shift, or it's no longer open." },
+        { status: 409 },
+      );
+    }
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "appointment.open_shift_claimed",
+      entityType: "appointment",
+      entityId: apptId,
+      payload: {},
+    });
+    // Generic refresh signal — connected clients will reload and see
+    // the new assignment.
+    await notifyBoard(env, {
+      kind: "appointment.canceled",
+      orgId: tenant.organization.id,
+      appointmentId: apptId,
+    });
+    return redirect("/instructor");
+  }
+
   if (intent === "start_shift") {
     const myInstructor = await env.DB.prepare(
       "SELECT id FROM instructor WHERE userId = ? AND organizationId = ?",
@@ -893,7 +991,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function InstructorToday({ loaderData, actionData }: Route.ComponentProps) {
   const me = useOutletContext<InstructorCtx>();
-  const { instructorId, todays, earnings, openShift, bookableVehicles, geolocationPolicy } = loaderData;
+  const { instructorId, todays, earnings, openShift, bookableVehicles, geolocationPolicy, openShifts } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -926,6 +1024,10 @@ export default function InstructorToday({ loaderData, actionData }: Route.Compon
         bookableVehicles={bookableVehicles}
         submitting={submitting}
       />
+
+      {openShifts.length > 0 && (
+        <OpenShiftsPanel openShifts={openShifts} submitting={submitting} />
+      )}
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
 
@@ -1200,6 +1302,65 @@ function RubricSummary({ rubric }: { rubric: RubricMap }) {
         })}
       </ul>
     </div>
+  );
+}
+
+function OpenShiftsPanel({
+  openShifts,
+  submitting,
+}: {
+  openShifts: Array<{
+    id: string;
+    kind: string;
+    startsAt: number;
+    endsAt: number;
+    locationLabel: string | null;
+    studentFirst: string;
+    studentLast: string;
+    vehicleLabel: string | null;
+  }>;
+  submitting: boolean;
+}) {
+  return (
+    <Card className="border-amber-300 bg-amber-50/30 dark:border-amber-800/60 dark:bg-amber-950/20">
+      <p className="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-200">
+        {openShifts.length} open shift{openShifts.length === 1 ? "" : "s"} available
+      </p>
+      <p className="mt-1 text-sm text-ink-700 dark:text-ink-200">
+        First instructor to claim gets it. Pay follows the school's
+        compensation policy.
+      </p>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {openShifts.map((s) => (
+          <li
+            key={s.id}
+            className="rounded-xl border border-ink-200 bg-white/80 p-3 dark:border-ink-700 dark:bg-ink-900/60"
+          >
+            <p className="font-medium text-ink-900 dark:text-ink-50">
+              {new Date(s.startsAt).toLocaleString(undefined, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </p>
+            <p className="text-xs text-ink-600 dark:text-ink-300">
+              {s.studentFirst} {s.studentLast} · {s.kind.replace("_", " ")}
+              {s.vehicleLabel ? ` · ${s.vehicleLabel}` : ""}
+              {s.locationLabel ? ` · ${s.locationLabel}` : ""}
+            </p>
+            <Form method="post" className="mt-2">
+              <input type="hidden" name="intent" value="claim_open_shift" />
+              <input type="hidden" name="appointmentId" value={s.id} />
+              <Button type="submit" disabled={submitting} className="w-full text-xs">
+                Claim shift
+              </Button>
+            </Form>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

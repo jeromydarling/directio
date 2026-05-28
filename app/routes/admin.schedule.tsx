@@ -53,6 +53,36 @@ export async function action({ request, context }: Route.ActionArgs) {
   const intent = String(formData.get("intent") ?? "");
   const now = Date.now();
 
+  if (intent === "open_shift") {
+    const appointmentId = String(formData.get("appointmentId") ?? "");
+    if (!appointmentId)
+      return data({ error: "Missing appointment." }, { status: 400 });
+    await env.DB.prepare(
+      `UPDATE appointment
+          SET instructorId = NULL,
+              openShiftAt = ?,
+              updatedAt = ?
+        WHERE id = ? AND organizationId = ?
+          AND status IN ('scheduled','confirmed')`,
+    )
+      .bind(now, now, appointmentId, orgId)
+      .run();
+    await recordAudit(env, {
+      organizationId: orgId,
+      actorUserId: tenant.user.id,
+      action: "appointment.posted_open_shift",
+      entityType: "appointment",
+      entityId: appointmentId,
+      payload: {},
+    });
+    await notifyBoard(env, {
+      kind: "appointment.canceled",
+      orgId,
+      appointmentId,
+    });
+    return redirect("/admin/schedule");
+  }
+
   if (intent === "weather_hold") {
     const dateStr = String(formData.get("date") ?? "");
     const reason = String(formData.get("reason") ?? "").trim() || "weather";
@@ -214,9 +244,25 @@ export default function AdminSchedule({ loaderData }: Route.ComponentProps) {
                         {a.locationLabel && ` · ${a.locationLabel}`}
                       </p>
                     </div>
-                    <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-medium capitalize text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">
-                      {a.status.replace("_", " ")}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {(a.status === "scheduled" || a.status === "confirmed") && (
+                        <Form method="post" className="hidden sm:block">
+                          <input type="hidden" name="intent" value="open_shift" />
+                          <input type="hidden" name="appointmentId" value={a.id} />
+                          <button
+                            type="submit"
+                            disabled={submitting}
+                            title="Detach instructor + offer to any qualified instructor"
+                            className="rounded-full border border-amber-300 px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-800/60 dark:text-amber-200 dark:hover:bg-amber-950/30"
+                          >
+                            Post open
+                          </button>
+                        </Form>
+                      )}
+                      <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-medium capitalize text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">
+                        {a.status.replace("_", " ")}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>
