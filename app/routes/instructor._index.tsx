@@ -1,4 +1,5 @@
 import { Form, data, redirect, useNavigation, useOutletContext } from "react-router";
+import { useEffect } from "react";
 import type { Route } from "./+types/instructor._index";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
@@ -92,6 +93,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         label: string;
         currentOdometer: number | null;
       }>,
+      geolocationPolicy: "off" as "off" | "opt_in" | "required",
     };
   }
 
@@ -270,6 +272,15 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       .map((v) => ({ id: v.id, label: v.label, currentOdometer: v.currentOdometer }));
   }
 
+  const orgPolicyRow = await db
+    .prepare("SELECT geolocationPolicy FROM organization WHERE id = ?")
+    .bind(tenant.organization.id)
+    .first<{ geolocationPolicy: string }>();
+  const geolocationPolicy = (orgPolicyRow?.geolocationPolicy ?? "off") as
+    | "off"
+    | "opt_in"
+    | "required";
+
   return {
     instructorId: instructor.id,
     todays,
@@ -280,6 +291,95 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     },
     openShift,
     bookableVehicles,
+    geolocationPolicy,
+  };
+}
+
+/**
+ * Client-side: when the school's geolocation policy is non-'off',
+ * intercept every form on the page with data-geo="start" or
+ * data-geo="end" before its first submit. Capture lat/lng/accuracy
+ * via navigator.geolocation, stuff them into hidden inputs, then
+ * let the form submit. Times out and submits anyway if the browser
+ * is slow or the user denies — DB write authoritative, geo nice-to-have.
+ */
+function useGeolocationCapture(policy: "off" | "opt_in" | "required") {
+  useEffect(() => {
+    if (policy === "off") return;
+    if (typeof window === "undefined" || !("geolocation" in window.navigator))
+      return;
+
+    const handleSubmit = (event: SubmitEvent) => {
+      const form = event.target as HTMLFormElement;
+      if (!(form instanceof HTMLFormElement)) return;
+      const kind = form.dataset.geo as "start" | "end" | undefined;
+      if (kind !== "start" && kind !== "end") return;
+      if (form.dataset.geoCaptured === "1") return;
+
+      event.preventDefault();
+      const finish = (
+        pos: { latitude: number; longitude: number; accuracy: number } | null,
+      ) => {
+        const setHidden = (name: string, value: string) => {
+          let inp = form.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+          if (!inp) {
+            inp = document.createElement("input");
+            inp.type = "hidden";
+            inp.name = name;
+            form.appendChild(inp);
+          }
+          inp.value = value;
+        };
+        if (pos) {
+          setHidden(`${kind}Lat`, String(pos.latitude));
+          setHidden(`${kind}Lng`, String(pos.longitude));
+          setHidden(`${kind}AccuracyM`, String(pos.accuracy));
+          setHidden(`${kind}RecordedAt`, String(Date.now()));
+        }
+        form.dataset.geoCaptured = "1";
+        form.requestSubmit();
+      };
+      const timer = window.setTimeout(() => finish(null), 4000);
+      window.navigator.geolocation.getCurrentPosition(
+        (p) => {
+          window.clearTimeout(timer);
+          finish({
+            latitude: p.coords.latitude,
+            longitude: p.coords.longitude,
+            accuracy: p.coords.accuracy,
+          });
+        },
+        () => {
+          window.clearTimeout(timer);
+          finish(null);
+        },
+        { timeout: 4000, maximumAge: 30_000, enableHighAccuracy: false },
+      );
+    };
+
+    document.addEventListener("submit", handleSubmit, true);
+    return () => document.removeEventListener("submit", handleSubmit, true);
+  }, [policy]);
+}
+
+function readGeo(
+  formData: FormData,
+  kind: "start" | "end",
+): { lat: number; lng: number; accuracyM: number; recordedAt: number } | null {
+  const lat = Number.parseFloat(String(formData.get(`${kind}Lat`) ?? ""));
+  const lng = Number.parseFloat(String(formData.get(`${kind}Lng`) ?? ""));
+  const accuracyM = Number.parseFloat(String(formData.get(`${kind}AccuracyM`) ?? ""));
+  const recordedAt = Number.parseInt(
+    String(formData.get(`${kind}RecordedAt`) ?? ""),
+    10,
+  );
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return {
+    lat,
+    lng,
+    accuracyM: Number.isFinite(accuracyM) ? accuracyM : 0,
+    recordedAt: Number.isFinite(recordedAt) ? recordedAt : Date.now(),
   };
 }
 
@@ -346,13 +446,36 @@ export async function action({ request, context }: Route.ActionArgs) {
     const now = Date.now();
     const nextLessonFocus =
       String(formData.get("nextLessonFocus") ?? "").trim() || null;
-    await env.DB.prepare(
-      `UPDATE appointment
-          SET status = ?, notes = ?, canceledReason = ?, nextLessonFocus = ?, updatedAt = ?
-        WHERE id = ?`,
-    )
-      .bind(status, notes, canceledReason, nextLessonFocus, now, apptId)
-      .run();
+    const endGeo = readGeo(formData, "end");
+    if (endGeo) {
+      await env.DB.prepare(
+        `UPDATE appointment
+            SET status = ?, notes = ?, canceledReason = ?, nextLessonFocus = ?, updatedAt = ?,
+                endLat = ?, endLng = ?, endAccuracyM = ?, endRecordedAt = ?
+          WHERE id = ?`,
+      )
+        .bind(
+          status,
+          notes,
+          canceledReason,
+          nextLessonFocus,
+          now,
+          endGeo.lat,
+          endGeo.lng,
+          endGeo.accuracyM,
+          endGeo.recordedAt,
+          apptId,
+        )
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE appointment
+            SET status = ?, notes = ?, canceledReason = ?, nextLessonFocus = ?, updatedAt = ?
+          WHERE id = ?`,
+      )
+        .bind(status, notes, canceledReason, nextLessonFocus, now, apptId)
+        .run();
+    }
 
     // Broadcast the status change so the live board updates within a second.
     if (status === "completed") {
@@ -737,11 +860,31 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   if (intent === "confirm") {
-    await env.DB.prepare(
-      "UPDATE appointment SET status = 'confirmed', updatedAt = ? WHERE id = ? AND status = 'scheduled'",
-    )
-      .bind(Date.now(), apptId)
-      .run();
+    const geo = readGeo(formData, "start");
+    const now = Date.now();
+    if (geo) {
+      await env.DB.prepare(
+        `UPDATE appointment
+            SET status = 'confirmed', updatedAt = ?,
+                startLat = ?, startLng = ?, startAccuracyM = ?, startRecordedAt = ?
+          WHERE id = ? AND status = 'scheduled'`,
+      )
+        .bind(
+          now,
+          geo.lat,
+          geo.lng,
+          geo.accuracyM,
+          geo.recordedAt,
+          apptId,
+        )
+        .run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE appointment SET status = 'confirmed', updatedAt = ? WHERE id = ? AND status = 'scheduled'",
+      )
+        .bind(now, apptId)
+        .run();
+    }
     return redirect("/instructor");
   }
 
@@ -750,9 +893,11 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function InstructorToday({ loaderData, actionData }: Route.ComponentProps) {
   const me = useOutletContext<InstructorCtx>();
-  const { instructorId, todays, earnings, openShift, bookableVehicles } = loaderData;
+  const { instructorId, todays, earnings, openShift, bookableVehicles, geolocationPolicy } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
+
+  useGeolocationCapture(geolocationPolicy);
 
   if (!instructorId && (me.user.name === null || !me.instructor)) {
     return (
@@ -875,7 +1020,7 @@ function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean })
         <div className="mt-4 flex flex-col gap-3 border-t border-ink-200/60 pt-4 dark:border-ink-800/60">
           <div className="flex flex-wrap gap-2">
             {a.status === "scheduled" && (
-              <Form method="post">
+              <Form method="post" data-geo="start">
                 <input type="hidden" name="intent" value="confirm" />
                 <input type="hidden" name="appointmentId" value={a.id} />
                 <Button type="submit" variant="secondary" disabled={submitting}>
@@ -883,7 +1028,7 @@ function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean })
                 </Button>
               </Form>
             )}
-            <Form method="post">
+            <Form method="post" data-geo="end">
               <input type="hidden" name="intent" value="complete" />
               <input type="hidden" name="appointmentId" value={a.id} />
               <input type="hidden" name="completionStatus" value="no_show" />
@@ -897,7 +1042,7 @@ function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean })
             <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-ink-800 dark:text-ink-200">
               Complete lesson
             </summary>
-            <Form method="post" className="flex flex-col gap-3 p-3">
+            <Form method="post" className="flex flex-col gap-3 p-3" data-geo="end">
               <input type="hidden" name="intent" value="complete" />
               <input type="hidden" name="appointmentId" value={a.id} />
               <div className="grid gap-3 md:grid-cols-2">

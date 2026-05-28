@@ -93,7 +93,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const orgRow = await db
     .prepare(
       `SELECT jurisdiction, dailyDigestEnabled, dailyDigestRecipientEmail,
-              dailyDigestLastSentOnDate
+              dailyDigestLastSentOnDate, geolocationPolicy
          FROM organization WHERE id = ?`,
     )
     .bind(tenant.organization.id)
@@ -102,6 +102,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       dailyDigestEnabled: number;
       dailyDigestRecipientEmail: string | null;
       dailyDigestLastSentOnDate: string | null;
+      geolocationPolicy: string;
     }>();
   const installedJurisdiction = installed.results[0]?.jurisdiction ?? null;
   const adapter = maturityForJurisdiction(
@@ -118,6 +119,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       recipient: orgRow?.dailyDigestRecipientEmail ?? "",
       lastSentOnDate: orgRow?.dailyDigestLastSentOnDate ?? null,
     },
+    geolocationPolicy: (orgRow?.geolocationPolicy ?? "off") as
+      | "off"
+      | "opt_in"
+      | "required",
   };
 }
 
@@ -126,6 +131,26 @@ export async function action({ request, context }: Route.ActionArgs) {
   const env = context.cloudflare.env;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
+
+  if (intent === "save-geolocation-policy") {
+    const raw = String(formData.get("geolocationPolicy") ?? "off");
+    const policy =
+      raw === "opt_in" || raw === "required" ? raw : "off";
+    await context.cloudflare.env.DB.prepare(
+      "UPDATE organization SET geolocationPolicy = ? WHERE id = ?",
+    )
+      .bind(policy, tenant.organization.id)
+      .run();
+    await recordAudit(context.cloudflare.env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "organization.geolocation_policy_changed",
+      entityType: "organization",
+      entityId: tenant.organization.id,
+      payload: { policy },
+    });
+    return redirect("/admin/settings");
+  }
 
   if (intent === "save-daily-digest") {
     const enabled = formData.get("dailyDigestEnabled") === "on" ? 1 : 0;
@@ -194,7 +219,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function AdminSettings({ loaderData, actionData }: Route.ComponentProps) {
   const { tenant } = useOutletContext<{ tenant: ActiveTenant }>();
-  const { available, installed, audit, adapter, digest } = loaderData;
+  const { available, installed, audit, adapter, digest, geolocationPolicy } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -223,6 +248,38 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
           </div>
         }
       />
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Lesson geolocation
+        </h2>
+        <Card>
+          <p className="text-sm text-ink-600 dark:text-ink-300">
+            Two-ping evidence: one GPS reading captured when the instructor
+            confirms a lesson, one captured when they sign off as complete.
+            Defends good instructors against false accusations and catches
+            "ghost lesson" patterns. Never live tracking, never visible to
+            parents.
+          </p>
+          <Form method="post" className="mt-3 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="intent" value="save-geolocation-policy" />
+            <Field label="Policy">
+              <Select name="geolocationPolicy" defaultValue={geolocationPolicy}>
+                <option value="off">Off — don't capture</option>
+                <option value="opt_in">
+                  Opt-in — capture when the browser allows
+                </option>
+                <option value="required">
+                  Required — every instructor accepted at school-join
+                </option>
+              </Select>
+            </Field>
+            <Button type="submit" variant="secondary">
+              Save policy
+            </Button>
+          </Form>
+        </Card>
+      </section>
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
