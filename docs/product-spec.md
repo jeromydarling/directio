@@ -655,60 +655,146 @@ Schools should be able to set business rules, but not silently alter locked comp
 
 ## Seeded curriculum strategy
 
-The seeded curriculum library is the strongest non-obvious part of the product. The platform should offer content packs that schools can buy, install, brand, and edit manually inside their tenant.[cite:27]
+The seeded curriculum library is the strongest non-obvious part of the product. The platform offers content packs that schools install, brand, and customize inside their tenant — and, critically, that schools with existing curricula can layer their own content into rather than replace.
 
-This is different from giving schools an AI authoring toy. The platform owner uses AI internally to create and maintain a strong content catalog, then schools customize copies of that content the old-fashioned way.
+Most existing driving schools already have a curriculum: PDFs, slide decks, instructor handouts, video clips, decades of accumulated teaching material. They will not abandon it. New schools, by contrast, have nothing and need a complete starting point. The platform serves both: a real, ship-ready MN starter pack for greenfield schools, and an import-and-layer model for schools that already have content.
 
-### Curriculum layers
+### What "starter pack" actually means — the MN curriculum
 
-#### National core
+The MN starter is the reference implementation for the format and the proof that the LMS works on day one. Built by the directio team in collaboration with an MN-licensed driver-ed consultant, subject-matter-expert reviewed before launch. Two halves: 30 hours of classroom content aligned to MN DPS expectations, and a 6-hour BTW skill progression that the rubric and credential workflow map directly onto.
 
-Reusable units on:
+#### Classroom — 30 hours, structured into modules
 
-- Signs and signals
-- Right-of-way
-- Scanning and hazard perception
-- Speed and space management
-- Night driving
-- Weather driving
-- Impairment and distraction
-- Sharing the road
-- Emergencies and breakdowns
-- Insurance and basic responsibility
+The classroom curriculum is broken into modules that fit a typical driving school's scheduled classroom cadence (whether daily, evenings, or weekend intensives). Each module contains lessons, each lesson contains content blocks plus a check-for-understanding quiz, and each module ends with an assessment.
 
-These topics map well to broad driver education expectations and safety content found across providers and state programs.[cite:134][cite:143][cite:151]
+Indicative module set (final structure ratified with the MN consultant before ship):
 
-#### State overlays
+1. Driving as responsibility — risk, decision-making, consequences, graduated licensing introduction.
+2. Vehicle familiarization — controls, instruments, pre-drive checks, basic vehicle systems.
+3. Signs, signals, and pavement markings — full MN sign vocabulary with local examples.
+4. Right-of-way and intersection management — uncontrolled, controlled, four-way stops, roundabouts.
+5. Speed and space management — following distance, scanning, hazard perception, the SIPDE/SEEiT model.
+6. Lane control and lane changes — positioning, signaling, blind spots, multi-lane discipline.
+7. Sharing the road — pedestrians, cyclists, motorcycles, trucks, school buses, emergency vehicles, farm equipment (MN-relevant).
+8. Highway and freeway driving — entering, merging, lane discipline, exiting, interchange types.
+9. Adverse conditions — rain, snow, ice, fog, glare; the MN winter-driving emphasis is non-negotiable.
+10. Night driving — visibility, headlight use, fatigue, animal strike prevention.
+11. Impairment — alcohol, cannabis, prescription drugs, fatigue, emotional driving, distraction (with MN hands-free law).
+12. Emergency response — skids, brake failure, tire blowout, evasive maneuvers, crash response.
+13. Vehicle care and ownership — insurance basics, registration, maintenance, what to do at a stop.
+14. MN laws and graduated licensing — permit phase, provisional license, full license, restrictions, blue card workflow.
+15. Permit and road test prep — quiz-bank-driven review, common pitfalls, what to expect at the DPS exam station.
 
-Overlay packs should add:
+Each module ships in multiple modalities (video + text + interactive scenario) so different learners find a path through, and ships accessible — closed captions on every video, alt text on every image, screen-reader-compatible content blocks. Accessibility is a launch requirement, not a phase.
 
-- Permit and licensing stages
-- Required hours
-- Required supervised practice expectations
-- State-specific terminology
-- Common test emphasis
-- Local rules and penalties
+#### BTW — 6-hour progression with rubric mapping
 
-State expectations differ, so overlays should be versioned and clearly labeled for jurisdiction.[cite:132][cite:136][cite:141]
+The BTW progression structures the six required hours into a sequence that builds skill and feeds the structured rubric in the instructor section:
 
-#### School overlays
+- Lesson 1 — Vehicle controls, parking-lot maneuvers, low-speed turns, basic stops.
+- Lesson 2 — Residential streets, intersection types, basic lane positioning, mirror use.
+- Lesson 3 — Multi-lane roads, lane changes, signaling under load, traffic flow.
+- Lesson 4 — Highway entrance, merging, freeway speeds, lane discipline.
+- Lesson 5 — City driving or adverse-condition driving (instructor selects based on weather and student readiness).
+- Lesson 6 — Test prep — parallel parking, three-point turn, hill parking, route familiarization for the local DPS exam station.
 
-School-specific content blocks should include:
+Each lesson's rubric prompts are pre-filled. Instructors tap proficiency levels; the data flows into both the credential-readiness recommendation and the parent-facing progress summary.
 
-- Welcome module
-- Instructor bios
-- Local service area and pickup instructions
-- Local road examples
-- Office policy and cancellation terms
-- Parent communication expectations
+#### Supervised driving support — the 50 hours nobody owns
+
+MN requires 50 hours of supervised driving outside the BTW program, mostly logged by parents. Schools don't typically own this, but parents need help with it and it's a churn-protection win for the school to provide it. The starter pack ships with:
+
+- A parent-facing supervised-driving guide aligned to MN's logged-hours requirements.
+- A digital logbook (mobile-friendly) the parent uses to track hours, environments, and conditions.
+- Suggested practice routes by environment (residential, multi-lane, freeway, night, weather) with talking points.
+
+This is a low-cost-to-build, high-perceived-value addition that strengthens the parent portal's "what happens next" promise.
+
+### Curriculum layers — restated with the import model in mind
+
+Three layers, with explicit ownership and update rules:
+
+#### National core — platform-owned, installed-by-copy
+
+Reusable units on universally applicable driver safety content: signs and signals, right-of-way, scanning and hazard perception, speed and space management, night driving, weather driving, impairment and distraction, sharing the road, emergencies and breakdowns, insurance and basic responsibility.[cite:134][cite:143][cite:151]
+
+Schools install a copy into their tenant. The platform maintains the master; schools edit the copy. Platform updates flow as version-bumped update notices — never automatic overwrites.
+
+#### State overlays — platform-owned, jurisdiction-scoped
+
+Overlay packs add what differs by state: permit and licensing stages, required hours, required supervised practice expectations, state-specific terminology, common test emphasis, local rules and penalties.[cite:132][cite:136][cite:141]
+
+The MN overlay is the deepest and ships as part of the starter pack. Other states ship at maturity appropriate to their adapter level (per the honest-positioning section): Level 1 states get a state-fact-pack and a structural template; Level 2 and 3 states get progressively deeper overlays as the directio team builds them out.
+
+#### School overlays — school-owned
+
+The school's own content: welcome module, instructor bios, local service area and pickup instructions, local road examples specific to their service area, office policy and cancellation terms, parent communication expectations.
+
+This is also where imported existing curriculum lives (see below).
+
+### Import-and-layer for schools with existing curricula
+
+Schools with existing content bring it in, weave it into the starter, and edit going forward. They do not have to choose between "use directio's starter" and "use my own materials."
+
+#### Import sources
+
+The importer accepts:
+
+- PDFs (whole courses, individual handouts).
+- Slide decks (PowerPoint, Keynote, Google Slides export).
+- Video files (uploaded to R2, transcoded for streaming).
+- Document files (Word, Google Docs export, plain text).
+- CSV or spreadsheet question banks (mapped to the quiz schema).
+
+#### The mapping step
+
+Imported assets are presented in a mapping UI alongside the starter's module structure. For each imported asset the school chooses:
+
+- **Map to a module slot** — the import becomes the content for that slot in this school's tenant. AI assists by suggesting the best-fit module based on the imported content, with the school confirming or redirecting.
+- **Layer as supplement** — both directio's default and the school's content live in that slot, sequenced by the school (their content first, ours after; or vice versa; or as alternates the student chooses between).
+- **Use as standalone** — the import becomes its own school-overlay lesson that doesn't replace anything.
+- **Skip and use the directio default** — the import is parked for later; the starter content fills the slot.
+
+#### Layering preserves both sides
+
+Each layer carries its own version. When the platform releases a new starter version, the school sees what changed and decides whether to adopt it; their own layered content is never overwritten. Diffs are presented in plain English: "MN starter v2.1 adds a new winter-driving scenario in Module 9 and updates the hands-free law section. Your school's content in those slots is unchanged. Adopt the update?"
+
+#### AI-assisted import processing
+
+To make import less painful, AI does the heavy lifting (with school review):
+
+- Auto-segments long PDFs into lesson-sized chunks.
+- Extracts quiz questions from existing question banks and maps them to the directio quiz schema.
+- Generates summaries of imported content for the lesson-card UI.
+- Recommends module slot mappings based on content analysis.
+
+AI-touched content is visibly tagged "AI-assisted" with a school-admin approval field that captures "approved by [name] on [date]." The school owns editorial responsibility; AI is a draft engine, not the author of record. This protects against AI hallucinations reaching teen students unreviewed.
+
+### Authoring tools for net-new content
+
+When a school wants to add original content rather than import existing, the authoring surface stays deliberately simple:
+
+- Block-based editor — text blocks, media blocks, quiz blocks, scenario blocks. No rich-text contortions.
+- Duplicate-and-edit from any directio default to start from a known-good shape.
+- AI-assisted draft generation from a topic prompt, with the same AI-tagging and approval flow.
+- Inline preview of what the student will see.
 
 ### Content packaging model
 
-| Layer | Owner | Editable by school | Example |
-|---|---|---|---|
-| National core | Platform | Yes, after install copy | Defensive driving basics |
-| State overlay | Platform | Yes, after install copy, within guardrails | Minnesota permit stages |
-| School overlay | School | Yes | "Welcome to Arrowhead Driver Training" |
+| Layer | Owner | Editable by school | Source | Example |
+|---|---|---|---|---|
+| National core | Platform | Yes, after install copy | Platform-authored | Defensive driving basics |
+| State overlay | Platform | Yes, after install copy, within guardrails | Platform + SME-reviewed | Minnesota permit stages, blue card workflow |
+| School overlay | School | Yes | School-authored or imported | "Welcome to Arrowhead Driver Training," local road examples |
+| School-imported | School | Yes | Imported from PDF/slides/video | School's existing 30-hour curriculum, mapped into module slots |
+
+### Outcomes tracking
+
+Quiz pass rates, BTW rubric scores, credential issuance times, and (where available through state integrations or self-reporting) road-test pass rates are tracked per content version. This is what lets the platform identify weak modules over time and eventually market pack quality on outcomes rather than vibes — "students who completed MN starter v2.1 had measurably higher first-attempt road-test pass rates" becomes a real claim, not marketing copy.
+
+### Marketplace sequencing
+
+Phase 1 ships the MN starter as the only platform-owned pack, plus authoring tools that work, plus the import-and-layer flow. Phase 1.5 invites three to five known driver-ed creators to publish under directio terms. Phase 2 opens a marketplace with revenue share, content review process, and outcomes-based ranking. The marketplace is not pretended-into-existence in MVP.
 
 ## AI content production pipeline
 
