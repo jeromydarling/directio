@@ -262,6 +262,12 @@ export default function States({ loaderData, actionData }: Route.ComponentProps)
                 >
                   For schools →
                 </a>
+                <a
+                  href="/states/requests"
+                  className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-5 py-2.5 text-sm font-medium text-ink-700 hover:border-brand-300 hover:text-ink-900 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
+                >
+                  Open feature requests →
+                </a>
               </div>
 
               <PartnerIntake actionData={actionData} />
