@@ -79,6 +79,7 @@ export default [
     route("settings/btw-flow", "routes/admin.settings.btw-flow.tsx"),
     route("settings/public-listing", "routes/admin.settings.public-listing.tsx"),
     route("reports/quizzes", "routes/admin.reports.quizzes.tsx"),
+    route("reports/outcomes", "routes/admin.reports.outcomes.tsx"),
     route("documents", "routes/admin.documents.tsx"),
     route("audit", "routes/admin.audit.tsx"),
     route("fees", "routes/admin.fees.tsx"),

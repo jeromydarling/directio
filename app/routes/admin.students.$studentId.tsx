@@ -121,6 +121,37 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
 
+  if (intent === "upload_external_credential") {
+    const enrollmentId = String(formData.get("enrollmentId") ?? "");
+    const file = formData.get("file");
+    if (!enrollmentId) return data({ error: "Missing enrollment." }, { status: 400 });
+    if (!(file instanceof File) || file.size === 0) {
+      return data({ error: "Pick a file to upload." }, { status: 400 });
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return data({ error: "File too large (max 10 MB)." }, { status: 413 });
+    }
+    const storageKey = `external-credentials/${tenant.organization.id}/${enrollmentId}/${newId()}-${file.name.replace(/[^A-Za-z0-9._-]+/g, "_")}`;
+    await env.ASSETS.put(storageKey, await file.arrayBuffer(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+    });
+    await env.DB.prepare(
+      `UPDATE enrollment SET externalCredentialPdfKey = ?, updatedAt = ?
+        WHERE id = ? AND organizationId = ?`,
+    )
+      .bind(storageKey, Date.now(), enrollmentId, tenant.organization.id)
+      .run();
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "enrollment.external_credential_uploaded",
+      entityType: "enrollment",
+      entityId: enrollmentId,
+      payload: { sizeBytes: file.size, contentType: file.type },
+    });
+    return redirect(`/admin/students/${params.studentId}`);
+  }
+
   if (intent === "save_migration_details") {
     const enrollmentId = String(formData.get("enrollmentId") ?? "");
     if (!enrollmentId) return data({ error: "Missing enrollment." }, { status: 400 });
