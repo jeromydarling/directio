@@ -28,6 +28,9 @@ type KidRow = {
   studentId: string;
   firstName: string;
   lastName: string;
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string | null;
   journeyState: string | null;
   programName: string | null;
   packageName: string | null;
@@ -58,12 +61,21 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const db = context.cloudflare.env.DB;
   const now = Date.now();
 
-  // Find kids linked to this user: either via guardianStudent or
-  // (loose fallback) via shared email. Schools that haven't formally
-  // linked the guardian still surface kids the parent created/owns.
+  // Cross-school family identity per spec #6: surface kids from every
+  // school the parent has any linkage to, not just the currently-active
+  // tenant org. A parent enrolling a second child at a different
+  // directio school sees both kids in one portal view.
+  //
+  // Two paths combine:
+  //   1. Formal: guardian rows where g.userId = parent's user id;
+  //      may exist in any number of orgs.
+  //   2. Loose fallback: student rows whose email matches the parent's
+  //      email (older "I created my kid" pattern).
+  // Results union'd and de-duplicated by studentId.
   const linkedKids = await db
     .prepare(
       `SELECT s.id AS studentId, s.firstName, s.lastName,
+              s.organizationId, o.name AS organizationName, o.publicSlug AS organizationSlug,
               e.id AS enrollmentId, e.journeyState,
               p.name AS programName, pp.name AS packageName,
               (SELECT MIN(a.startsAt) FROM appointment a
@@ -72,39 +84,42 @@ export async function loader({ request, context }: Route.LoaderArgs) {
          FROM guardian g
          JOIN guardianStudent gs ON gs.guardianId = g.id
          JOIN student s ON s.id = gs.studentId
+         JOIN organization o ON o.id = s.organizationId
          LEFT JOIN enrollment e ON e.studentId = s.id AND e.status = 'active'
          LEFT JOIN program p ON p.id = e.programId
          LEFT JOIN programPackage pp ON pp.id = e.programPackageId
-         WHERE g.userId = ? AND g.organizationId = ?
-         ORDER BY s.lastName, s.firstName`,
+         WHERE g.userId = ?
+         ORDER BY o.name, s.lastName, s.firstName`,
     )
-    .bind(now, tenant.user.id, tenant.organization.id)
+    .bind(now, tenant.user.id)
     .all<KidRow>();
 
-  // Loose fallback: if no formal links exist, surface every student
-  // in the org whose email matches a user the parent claimed (via
-  // student.userId in the auto-link flow). This keeps the parent
-  // portal useful for schools that haven't built out households yet.
-  let kids = linkedKids.results;
-  if (kids.length === 0) {
-    const fallback = await db
-      .prepare(
-        `SELECT s.id AS studentId, s.firstName, s.lastName,
-                e.id AS enrollmentId, e.journeyState,
-                p.name AS programName, pp.name AS packageName,
-                (SELECT MIN(a.startsAt) FROM appointment a
-                   WHERE a.enrollmentId = e.id AND a.startsAt >= ?
-                     AND a.status IN ('scheduled','confirmed')) AS nextLessonAt
-           FROM student s
-           LEFT JOIN enrollment e ON e.studentId = s.id AND e.status = 'active'
-           LEFT JOIN program p ON p.id = e.programId
-           LEFT JOIN programPackage pp ON pp.id = e.programPackageId
-           WHERE s.email = ? AND s.organizationId = ?
-           ORDER BY s.lastName, s.firstName`,
-      )
-      .bind(now, tenant.user.email, tenant.organization.id)
-      .all<KidRow>();
-    kids = fallback.results;
+  const seen = new Set(linkedKids.results.map((k) => k.studentId));
+  let kids = [...linkedKids.results];
+  const fallback = await db
+    .prepare(
+      `SELECT s.id AS studentId, s.firstName, s.lastName,
+              s.organizationId, o.name AS organizationName, o.publicSlug AS organizationSlug,
+              e.id AS enrollmentId, e.journeyState,
+              p.name AS programName, pp.name AS packageName,
+              (SELECT MIN(a.startsAt) FROM appointment a
+                 WHERE a.enrollmentId = e.id AND a.startsAt >= ?
+                   AND a.status IN ('scheduled','confirmed')) AS nextLessonAt
+         FROM student s
+         JOIN organization o ON o.id = s.organizationId
+         LEFT JOIN enrollment e ON e.studentId = s.id AND e.status = 'active'
+         LEFT JOIN program p ON p.id = e.programId
+         LEFT JOIN programPackage pp ON pp.id = e.programPackageId
+         WHERE s.email = ?
+         ORDER BY o.name, s.lastName, s.firstName`,
+    )
+    .bind(now, tenant.user.email)
+    .all<KidRow>();
+  for (const k of fallback.results) {
+    if (!seen.has(k.studentId)) {
+      kids.push(k);
+      seen.add(k.studentId);
+    }
   }
 
   const stagesByKid: Record<string, JourneyStage[]> = {};
@@ -112,7 +127,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     if (!k.enrollmentId) continue;
     const summary = await getEnrollmentJourneySummary(context.cloudflare.env, {
       enrollmentId: k.enrollmentId,
-      organizationId: tenant.organization.id,
+      organizationId: k.organizationId,
     });
     if (summary) stagesByKid[k.studentId] = summaryToStages(summary);
   }
@@ -134,14 +149,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
            FROM lesson_suggestion s
            LEFT JOIN instructor i ON i.id = s.instructorId
            LEFT JOIN vehicle    v ON v.id = s.vehicleId
-          WHERE s.organizationId = ?
-            AND s.enrollmentId IN (${placeholders})
+          WHERE s.enrollmentId IN (${placeholders})
             AND s.dismissedAt IS NULL
             AND s.bookedAt IS NULL
             AND s.startsAt > ?
           ORDER BY s.score DESC, s.startsAt`,
       )
-      .bind(tenant.organization.id, ...enrollmentIds, now)
+      .bind(...enrollmentIds, now)
       .all<SuggestionRow>();
     for (const row of suggestionRows.results) {
       let bucket = suggestionsByEnrollment[row.enrollmentId];
@@ -169,15 +183,22 @@ export async function action({ request, context }: Route.ActionArgs) {
   const suggestionId = String(formData.get("suggestionId") ?? "");
   if (!suggestionId) return data({ error: "Missing suggestion." }, { status: 400 });
 
+  // Suggestion lookup is cross-org now (parents can act on suggestions
+  // for any of their kids regardless of which school) — but we then
+  // verify the user really owns the kid through guardian/email links
+  // before letting them book or dismiss.
   const suggestion = await env.DB.prepare(
-    `SELECT id, enrollmentId, studentId, startsAt, endsAt, instructorId, vehicleId, kind, durationMinutes
-       FROM lesson_suggestion
-      WHERE id = ? AND organizationId = ?
-        AND dismissedAt IS NULL AND bookedAt IS NULL`,
+    `SELECT s.id, s.organizationId, s.enrollmentId, s.studentId,
+            s.startsAt, s.endsAt, s.instructorId, s.vehicleId,
+            s.kind, s.durationMinutes
+       FROM lesson_suggestion s
+      WHERE s.id = ?
+        AND s.dismissedAt IS NULL AND s.bookedAt IS NULL`,
   )
-    .bind(suggestionId, tenant.organization.id)
+    .bind(suggestionId)
     .first<{
       id: string;
+      organizationId: string;
       enrollmentId: string;
       studentId: string;
       startsAt: number;
@@ -188,6 +209,18 @@ export async function action({ request, context }: Route.ActionArgs) {
       durationMinutes: number;
     }>();
   if (!suggestion) return data({ error: "Suggestion is no longer active." }, { status: 404 });
+  const ownership = await env.DB.prepare(
+    `SELECT 1 FROM student s
+        LEFT JOIN guardianStudent gs ON gs.studentId = s.id
+        LEFT JOIN guardian g ON g.id = gs.guardianId
+      WHERE s.id = ? AND (g.userId = ? OR s.email = ?)
+      LIMIT 1`,
+  )
+    .bind(suggestion.studentId, tenant.user.id, tenant.user.email)
+    .first<{ "1": number }>();
+  if (!ownership) {
+    return data({ error: "That suggestion isn't yours to book." }, { status: 403 });
+  }
 
   const now = Date.now();
 
@@ -205,7 +238,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     // got double-booked between sign-off and parent action) fails
     // closed and self-dismisses.
     const check = await checkSlot(env.DB, {
-      organizationId: tenant.organization.id,
+      organizationId: suggestion.organizationId,
       enrollmentId: suggestion.enrollmentId,
       instructorId: suggestion.instructorId,
       vehicleId: suggestion.vehicleId,
@@ -235,7 +268,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     )
       .bind(
         apptId,
-        tenant.organization.id,
+        suggestion.organizationId,
         suggestion.enrollmentId,
         suggestion.instructorId,
         suggestion.vehicleId,
@@ -249,7 +282,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
     await notifyBoard(env, {
       kind: "appointment.created",
-      orgId: tenant.organization.id,
+      orgId: suggestion.organizationId,
       appointmentId: apptId,
       startsAt: suggestion.startsAt,
       endsAt: suggestion.endsAt,
@@ -276,11 +309,11 @@ export async function action({ request, context }: Route.ActionArgs) {
           AND dismissedAt IS NULL
           AND bookedAt IS NULL`,
     )
-      .bind(now, tenant.organization.id, suggestion.enrollmentId, suggestion.id)
+      .bind(now, suggestion.organizationId, suggestion.enrollmentId, suggestion.id)
       .run();
 
     await recordAudit(env, {
-      organizationId: tenant.organization.id,
+      organizationId: suggestion.organizationId,
       actorUserId: tenant.user.id,
       action: "appointment.booked_from_suggestion",
       entityType: "appointment",
@@ -332,19 +365,12 @@ export default function FamilyIndex({ loaderData, actionData }: Route.ComponentP
           description="Once your school adds your kids, they show up here."
         />
       ) : (
-        <ul className="flex flex-col gap-4">
-          {kids.map((k) => (
-            <KidCard
-              key={k.studentId}
-              kid={k}
-              stages={stagesByKid[k.studentId]}
-              suggestions={
-                k.enrollmentId ? suggestionsByEnrollment[k.enrollmentId] : undefined
-              }
-              submitting={submitting}
-            />
-          ))}
-        </ul>
+        <KidsBySchool
+          kids={kids}
+          stagesByKid={stagesByKid}
+          suggestionsByEnrollment={suggestionsByEnrollment}
+          submitting={submitting}
+        />
       )}
 
       <Card>
@@ -369,6 +395,64 @@ export default function FamilyIndex({ loaderData, actionData }: Route.ComponentP
           </LinkButton>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function KidsBySchool({
+  kids,
+  stagesByKid,
+  suggestionsByEnrollment,
+  submitting,
+}: {
+  kids: KidRow[];
+  stagesByKid: Record<string, JourneyStage[]>;
+  suggestionsByEnrollment: Record<string, SuggestionRow[]>;
+  submitting: boolean;
+}) {
+  const groups = new Map<string, { name: string; slug: string | null; kids: KidRow[] }>();
+  for (const k of kids) {
+    let g = groups.get(k.organizationId);
+    if (!g) {
+      g = { name: k.organizationName, slug: k.organizationSlug, kids: [] };
+      groups.set(k.organizationId, g);
+    }
+    g.kids.push(k);
+  }
+  const groupList = [...groups.entries()];
+  const multipleSchools = groupList.length > 1;
+  return (
+    <div className="flex flex-col gap-6">
+      {groupList.map(([orgId, group]) => (
+        <section key={orgId}>
+          {multipleSchools && (
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-brand-700 dark:text-brand-200">
+              {group.name}
+              {group.slug && (
+                <Link
+                  to={`/schools/${group.slug}`}
+                  className="ml-2 font-normal text-ink-500 hover:underline dark:text-ink-400"
+                >
+                  visit school page →
+                </Link>
+              )}
+            </h2>
+          )}
+          <ul className="flex flex-col gap-4">
+            {group.kids.map((k) => (
+              <KidCard
+                key={k.studentId}
+                kid={k}
+                stages={stagesByKid[k.studentId]}
+                suggestions={
+                  k.enrollmentId ? suggestionsByEnrollment[k.enrollmentId] : undefined
+                }
+                submitting={submitting}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }
