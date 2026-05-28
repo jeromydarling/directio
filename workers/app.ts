@@ -1,6 +1,7 @@
 import { createRequestHandler } from "react-router";
 import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
 import { sendDailyDigests } from "../app/lib/daily-digest.server";
+import { sweepExpiredDemos } from "../app/lib/demo-seeder.server";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
 
@@ -142,6 +143,14 @@ export default {
           }
         } catch (err) {
           console.error("scheduled daily digest failed:", err);
+        }
+        try {
+          const result = await sweepExpiredDemos(env);
+          if (result.swept > 0) {
+            console.log(`[cron] swept ${result.swept} expired demo org(s)`);
+          }
+        } catch (err) {
+          console.error("scheduled demo sweep failed:", err);
         }
       })(),
     );
