@@ -55,6 +55,8 @@ type ApptRow = {
   rubric: RubricMap;
   btwLessonNumber: number | null;
   btwLessonPlan: BtwLessonPlan | null;
+  organizationName: string;
+  organizationId: string;
 };
 
 type InstructorCtx = {
@@ -77,14 +79,26 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   }
   const db = context.cloudflare.env.DB;
 
-  const instructor = await db
-    .prepare("SELECT id FROM instructor WHERE userId = ? AND organizationId = ?")
-    .bind(tenant.user.id, tenant.organization.id)
-    .first<{ id: string }>();
+  // Cross-tenant instructor identity per spec #1: surface today's
+  // lessons across every school where this user is a registered
+  // instructor, not just the currently-active tenant. The active org
+  // still owns the layout's branding; the today list aggregates.
+  const allInstructorRows = await db
+    .prepare(
+      "SELECT id, organizationId FROM instructor WHERE userId = ? AND active = 1",
+    )
+    .bind(tenant.user.id)
+    .all<{ id: string; organizationId: string }>();
+  const instructorIds = allInstructorRows.results.map((r) => r.id);
+  const instructor =
+    allInstructorRows.results.find(
+      (r) => r.organizationId === tenant.organization.id,
+    ) ?? allInstructorRows.results[0] ?? null;
 
-  if (!instructor) {
+  if (!instructor || instructorIds.length === 0) {
     return {
       instructorId: null,
+      instructorOrgCount: 0,
       todays: [] as ApptRow[],
       earnings: { cents: 0, lessons: 0, unpaidCents: 0 },
       openShift: null,
@@ -113,6 +127,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
+  const instructorIdPlaceholders = instructorIds.map(() => "?").join(",");
   const rows = await db
     .prepare(
       `SELECT a.id, a.kind, a.status, a.startsAt, a.endsAt, a.locationLabel,
@@ -121,6 +136,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
               s.phone AS studentPhone, s.email AS studentEmail,
               e.id AS enrollmentId, p.name AS programName,
               v.label AS vehicleLabel,
+              a.organizationId AS organizationId,
+              o.name AS organizationName,
               (SELECT prev.nextLessonFocus
                  FROM appointment prev
                  WHERE prev.enrollmentId = e.id
@@ -132,29 +149,31 @@ export async function loader({ request, context }: Route.LoaderArgs) {
          JOIN enrollment e ON e.id = a.enrollmentId
          JOIN student s ON s.id = e.studentId
          JOIN program p ON p.id = e.programId
+         JOIN organization o ON o.id = a.organizationId
          LEFT JOIN vehicle v ON v.id = a.vehicleId
-         WHERE a.instructorId = ? AND a.organizationId = ?
+         WHERE a.instructorId IN (${instructorIdPlaceholders})
            AND a.startsAt BETWEEN ? AND ?
          ORDER BY a.startsAt`,
     )
-    .bind(instructor.id, tenant.organization.id, startOfDay.getTime(), endOfDay.getTime())
+    .bind(...instructorIds, startOfDay.getTime(), endOfDay.getTime())
     .all<Omit<ApptRow, "rubric">>();
 
   // Rolling 30-day earnings — the instructor's pay transparency surface
   // per spec module #7. Always shows the running total + next payday
   // (TODO once the pay-period engine lands).
   const periodStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  // Aggregate earnings across every school this user is an
+  // instructor at — cross-tenant identity per spec #1.
   const earningsRow = await db
     .prepare(
       `SELECT COALESCE(SUM(totalCents), 0) AS cents,
               COUNT(*) AS lessons,
               COALESCE(SUM(CASE WHEN paidAt IS NULL THEN totalCents ELSE 0 END), 0) AS unpaidCents
          FROM lesson_payout
-        WHERE organizationId = ?
-          AND instructorId = ?
+        WHERE instructorId IN (${instructorIdPlaceholders})
           AND computedAt >= ?`,
     )
-    .bind(tenant.organization.id, instructor.id, periodStart)
+    .bind(...instructorIds, periodStart)
     .first<{ cents: number; lessons: number; unpaidCents: number }>();
 
   // Hydrate the BTW rubric for every BTW appointment in one query, then
@@ -246,7 +265,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         ORDER BY vs.startedAt DESC
         LIMIT 1`,
     )
-    .bind(tenant.organization.id, instructor.id)
+    .bind(tenant.organization.id, instructor?.id ?? "")
     .first<{
       id: string;
       vehicleId: string;
@@ -331,7 +350,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     }>();
 
   return {
-    instructorId: instructor.id,
+    instructorId: instructor?.id ?? null,
+    instructorOrgCount: allInstructorRows.results.length,
     todays,
     earnings: {
       cents: earningsRow?.cents ?? 0,
@@ -465,22 +485,41 @@ export async function action({ request, context }: Route.ActionArgs) {
   const apptId = String(formData.get("appointmentId") ?? "");
   if (!apptId) return data({ error: "Appointment missing." }, { status: 400 });
 
-  // Confirm this appointment belongs to this instructor in this org.
+  // Cross-tenant identity per spec #1: find the appointment first
+  // (anywhere), then resolve the user's instructor record at THAT
+  // org. So an instructor at multiple schools can act on any of
+  // their lessons regardless of which school is currently active.
+  const ownsAppt = await env.DB.prepare(
+    "SELECT id, instructorId, organizationId FROM appointment WHERE id = ?",
+  )
+    .bind(apptId)
+    .first<{ id: string; instructorId: string | null; organizationId: string }>();
+  if (!ownsAppt) return data({ error: "Not found." }, { status: 404 });
+  const apptOrgId = ownsAppt.organizationId;
   const instructor = await env.DB.prepare(
     "SELECT id FROM instructor WHERE userId = ? AND organizationId = ?",
   )
-    .bind(tenant.user.id, tenant.organization.id)
+    .bind(tenant.user.id, apptOrgId)
     .first<{ id: string }>();
-  // owners/admins can also act on appointments
-  const ownsAppt = await env.DB.prepare(
-    "SELECT id, instructorId FROM appointment WHERE id = ? AND organizationId = ?",
-  )
-    .bind(apptId, tenant.organization.id)
-    .first<{ id: string; instructorId: string | null }>();
-  if (!ownsAppt) return data({ error: "Not found." }, { status: 404 });
-  const isAdmin = tenant.role === "owner" || tenant.role === "admin";
+  // owners/admins can also act on appointments, but only for their own org.
+  const isAdmin =
+    apptOrgId === tenant.organization.id &&
+    (tenant.role === "owner" || tenant.role === "admin");
   if (!isAdmin && ownsAppt.instructorId !== instructor?.id) {
     return data({ error: "Not your appointment." }, { status: 403 });
+  }
+  // Cross-tenant actions: today list aggregates across orgs (so an
+  // instructor at multiple schools sees every school's lessons), but
+  // writing back requires the active session org to match the lesson's
+  // org. Switching schools is a follow-up.
+  if (!isAdmin && apptOrgId !== tenant.organization.id) {
+    return data(
+      {
+        error:
+          "This lesson is at a different school in your account. Switch to that school (log out and back in) to act on it.",
+      },
+      { status: 403 },
+    );
   }
 
   if (intent === "complete") {
@@ -1035,7 +1074,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function InstructorToday({ loaderData, actionData }: Route.ComponentProps) {
   const me = useOutletContext<InstructorCtx>();
-  const { instructorId, todays, earnings, openShift, bookableVehicles, geolocationPolicy, openShifts } = loaderData;
+  const { instructorId, instructorOrgCount, todays, earnings, openShift, bookableVehicles, geolocationPolicy, openShifts } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -1084,7 +1123,12 @@ export default function InstructorToday({ loaderData, actionData }: Route.Compon
         <ul className="flex flex-col gap-4">
           {todays.map((a) => (
             <li key={a.id}>
-              <AppointmentCard a={a} submitting={submitting} />
+              <AppointmentCard
+                a={a}
+                submitting={submitting}
+                showOrg={instructorOrgCount >= 2}
+                activeOrgId={me.organization.id}
+              />
             </li>
           ))}
         </ul>
@@ -1093,7 +1137,18 @@ export default function InstructorToday({ loaderData, actionData }: Route.Compon
   );
 }
 
-function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean }) {
+function AppointmentCard({
+  a,
+  submitting,
+  showOrg,
+  activeOrgId,
+}: {
+  a: ApptRow;
+  submitting: boolean;
+  showOrg: boolean;
+  activeOrgId: string;
+}) {
+  const isOtherOrg = a.organizationId !== activeOrgId;
   const start = new Date(a.startsAt);
   const end = new Date(a.endsAt);
   const completed =
@@ -1108,6 +1163,17 @@ function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean })
         <div>
           <p className="text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
             {a.kind.replace("_", " ")} · {a.programName}
+            {showOrg && (
+              <span
+                className={
+                  isOtherOrg
+                    ? "ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                    : "ml-2 rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200"
+                }
+              >
+                {a.organizationName}
+              </span>
+            )}
           </p>
           <p className="mt-1 font-display text-xl font-semibold text-ink-900 dark:text-ink-50">
             {a.studentFirst} {a.studentLast}
