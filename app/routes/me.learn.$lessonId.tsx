@@ -5,6 +5,7 @@ import { findStudentForUser, requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { youTubeEmbedUrl } from "~/lib/youtube";
 import { Card, LinkButton, Button } from "~/components/ui";
+import { LANG_LABELS } from "~/lib/lang-labels";
 
 type LessonRow = {
   id: string;
@@ -67,6 +68,9 @@ type LoaderData = {
     completedAt: number | null;
     attemptCount: number;
   };
+  availableLangs: string[];
+  activeLang: string | null;
+  isMachineTranslated: boolean;
 };
 
 type ActionData = {
@@ -77,9 +81,10 @@ type ActionData = {
     isCorrect: boolean;
     explanation: string | null;
   }>;
-  score: number;
+  score?: number;
+  scorePercent?: number;
   passed: boolean;
-  passingScore: number;
+  passingScore?: number;
 };
 
 export async function loader({
@@ -93,6 +98,7 @@ export async function loader({
   const lesson = await db
     .prepare(
       `SELECT sl.id, sl.title, sl.body, sl.estimatedSeatMinutes, sl.audioUrl,
+              sl.narrationAudioR2Key, sl.narrationAudioVoiceId,
               sm.title AS moduleTitle, sm.ordinal AS moduleOrdinal
          FROM school_lesson sl
          JOIN school_module sm ON sm.id = sl.schoolModuleId
@@ -101,6 +107,53 @@ export async function loader({
     .bind(params.lessonId, tenant.organization.id)
     .first<LessonRow>();
   if (!lesson) throw new Response("Lesson not found or not published", { status: 404 });
+
+  // What languages can this student read this lesson in? Plus the
+  // student's saved preferredLang, plus the optional `?lang=` query
+  // override. The student row's userId tie may be implicit via
+  // findStudentForUser; we fall back to user-row lookup of
+  // preferredLang stored under the student record.
+  const url = new URL(request.url);
+  const queryLang = (url.searchParams.get("lang") ?? "").toLowerCase();
+  const studentRow = await db
+    .prepare(
+      "SELECT id, preferredLang FROM student WHERE userId = ? AND organizationId = ? LIMIT 1",
+    )
+    .bind(tenant.user.id, tenant.organization.id)
+    .first<{ id: string; preferredLang: string | null }>();
+  const availableTranslations = await db
+    .prepare(
+      `SELECT lt.targetLang, lt.translatedTitle, lt.translatedBody
+         FROM school_lesson_translation slt
+         JOIN lesson_translation lt ON lt.id = slt.translationId
+        WHERE slt.schoolLessonId = ? AND slt.organizationId = ?
+        ORDER BY lt.targetLang`,
+    )
+    .bind(params.lessonId, tenant.organization.id)
+    .all<{ targetLang: string; translatedTitle: string; translatedBody: string }>();
+  const availableLangs = availableTranslations.results.map((t) => t.targetLang);
+
+  // Resolve which lang to actually serve:
+  // 1. ?lang=xx if it's available
+  // 2. student.preferredLang if it's available
+  // 3. English (no translation row)
+  let activeLang: string | null = null;
+  if (queryLang && availableLangs.includes(queryLang)) activeLang = queryLang;
+  else if (
+    studentRow?.preferredLang &&
+    availableLangs.includes(studentRow.preferredLang)
+  )
+    activeLang = studentRow.preferredLang;
+
+  let displayedTitle = lesson.title;
+  let displayedBody = lesson.body;
+  if (activeLang) {
+    const t = availableTranslations.results.find((x) => x.targetLang === activeLang);
+    if (t) {
+      displayedTitle = t.translatedTitle;
+      displayedBody = t.translatedBody;
+    }
+  }
 
   const quiz = await db
     .prepare(
@@ -167,7 +220,7 @@ export async function loader({
     return { id: a.id, kind: a.kind, url: a.url, caption: a.caption, videoId };
   });
 
-  const bodyHtml = await marked.parse(lesson.body, { async: true });
+  const bodyHtml = await marked.parse(displayedBody, { async: true });
 
   // Upsert lesson_progress so /me/learn can show "in progress / done".
   const now = Date.now();
@@ -199,7 +252,7 @@ export async function loader({
   }
 
   return {
-    lesson,
+    lesson: { ...lesson, title: displayedTitle },
     bodyHtml,
     assets,
     quiz: quiz ?? null,
@@ -213,6 +266,9 @@ export async function loader({
           attemptCount: existing.attemptCount,
         }
       : { bestScorePercent: null, completedAt: null, attemptCount: 0 },
+    availableLangs,
+    activeLang,
+    isMachineTranslated: activeLang !== null,
   };
 }
 
@@ -224,6 +280,19 @@ export async function action({
   const tenant = await requireTenant(request, context.cloudflare.env);
   const db = context.cloudflare.env.DB;
   const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "").trim();
+
+  // Persist preferred language without taking the quiz.
+  if (intent === "set-lang") {
+    const lang = String(formData.get("lang") ?? "").toLowerCase() || null;
+    await db
+      .prepare(
+        "UPDATE student SET preferredLang = ?, updatedAt = ? WHERE userId = ? AND organizationId = ?",
+      )
+      .bind(lang, Date.now(), tenant.user.id, tenant.organization.id)
+      .run();
+    return { results: [], passed: false, scorePercent: 0 };
+  }
 
   const quiz = await db
     .prepare(
@@ -355,7 +424,18 @@ export async function action({
 }
 
 export default function MeLearnLesson({ loaderData, actionData }: Route.ComponentProps) {
-  const { lesson, bodyHtml, assets, quiz, questions, prev, next } = loaderData;
+  const {
+    lesson,
+    bodyHtml,
+    assets,
+    quiz,
+    questions,
+    prev,
+    next,
+    availableLangs,
+    activeLang,
+    isMachineTranslated,
+  } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const results = actionData?.results;
@@ -373,12 +453,25 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
         <p className="mt-3 text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
           {lesson.moduleTitle}
         </p>
-        <h1 className="mt-1 font-display text-4xl font-semibold tracking-tight text-ink-900 dark:text-ink-50">
-          {lesson.title}
-        </h1>
+        <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+          <h1 className="font-display text-4xl font-semibold tracking-tight text-ink-900 dark:text-ink-50">
+            {lesson.title}
+          </h1>
+          {availableLangs.length > 0 && (
+            <StudentLangSwitcher
+              available={availableLangs}
+              active={activeLang}
+            />
+          )}
+        </div>
         <p className="mt-2 text-sm text-ink-500 dark:text-ink-400">
           {lesson.estimatedSeatMinutes} min
         </p>
+        {isMachineTranslated && (
+          <p className="mt-3 rounded-lg border border-amber-200/60 bg-amber-50/40 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
+            Machine-translated. If anything seems wrong, ask your school.
+          </p>
+        )}
       </header>
 
       {lesson.audioUrl && (
@@ -584,5 +677,55 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
         )}
       </nav>
     </div>
+  );
+}
+
+function StudentLangSwitcher({
+  available,
+  active,
+}: {
+  available: string[];
+  active: string | null;
+}) {
+  // Native chooser. On change, POST the set-lang intent to persist
+  // the student's preferredLang server-side, then reload with the new
+  // ?lang= so the swap happens server-rendered.
+  return (
+    <Form method="post" reloadDocument className="flex items-center gap-2">
+      <input type="hidden" name="intent" value="set-lang" />
+      <label className="sr-only" htmlFor="lang-picker">
+        Read in
+      </label>
+      <select
+        id="lang-picker"
+        name="lang"
+        defaultValue={active ?? ""}
+        onChange={(e) => {
+          // Submit the form so the server persists preferredLang, then
+          // navigate to the URL with the chosen query string so the
+          // loader picks it up.
+          const lang = e.currentTarget.value;
+          (e.currentTarget.form as HTMLFormElement).submit();
+          const url = new URL(window.location.href);
+          if (lang) url.searchParams.set("lang", lang);
+          else url.searchParams.delete("lang");
+          // The form submit will reloadDocument; we set the search
+          // here so the redirect lands at the right URL.
+          window.history.replaceState({}, "", url.toString());
+        }}
+        className="rounded-full border border-ink-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-ink-700 dark:border-ink-700 dark:bg-ink-900/60 dark:text-ink-200"
+      >
+        <option value="">English</option>
+        {available.map((l) => {
+          const label = LANG_LABELS[l];
+          return (
+            <option key={l} value={l}>
+              {label?.native ?? l.toUpperCase()}
+              {label?.english ? ` · ${label.english}` : ""}
+            </option>
+          );
+        })}
+      </select>
+    </Form>
   );
 }
