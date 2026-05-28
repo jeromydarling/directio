@@ -6,6 +6,7 @@ import type { JourneyStage } from "~/lib/journey-summary.server";
 import { JourneyTimeline } from "~/components/journey-timeline";
 import { PageHeader, Card, EmptyState, LinkButton, Button } from "~/components/ui";
 import { checkSlot } from "~/lib/scheduler";
+import { notifyBoard } from "~/lib/scheduling-board.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
 
@@ -245,6 +246,17 @@ export async function action({ request, context }: Route.ActionArgs) {
         now,
       )
       .run();
+
+    await notifyBoard(env, {
+      kind: "appointment.created",
+      orgId: tenant.organization.id,
+      appointmentId: apptId,
+      startsAt: suggestion.startsAt,
+      endsAt: suggestion.endsAt,
+      instructorId: suggestion.instructorId,
+      vehicleId: suggestion.vehicleId,
+      status: "scheduled",
+    });
 
     // Mark this suggestion booked and dismiss its siblings (parent
     // picked one — the others are no longer relevant).

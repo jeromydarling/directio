@@ -4,6 +4,7 @@ import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { assessNoShowFee, getFeePolicy } from "~/lib/fees.server";
 import { suggestSlots } from "~/lib/scheduler";
+import { notifyBoard } from "~/lib/scheduling-board.server";
 import {
   computeLessonPayout,
   getActiveCompRule,
@@ -352,6 +353,27 @@ export async function action({ request, context }: Route.ActionArgs) {
     )
       .bind(status, notes, canceledReason, nextLessonFocus, now, apptId)
       .run();
+
+    // Broadcast the status change so the live board updates within a second.
+    if (status === "completed") {
+      await notifyBoard(env, {
+        kind: "appointment.completed",
+        orgId: tenant.organization.id,
+        appointmentId: apptId,
+      });
+    } else if (status === "no_show") {
+      await notifyBoard(env, {
+        kind: "appointment.no_show",
+        orgId: tenant.organization.id,
+        appointmentId: apptId,
+      });
+    } else if (status === "canceled" || status === "weather_hold") {
+      await notifyBoard(env, {
+        kind: "appointment.canceled",
+        orgId: tenant.organization.id,
+        appointmentId: apptId,
+      });
+    }
 
     // Persist BTW rubric scores when the lesson was actually taught.
     let rubricScored = 0;

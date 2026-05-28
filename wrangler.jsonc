@@ -58,6 +58,16 @@
     }
   ],
 
+  "durable_objects": {
+    "bindings": [
+      { "name": "SCHEDULING_BOARD", "class_name": "SchedulingBoardDO" }
+    ]
+  },
+
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SchedulingBoardDO"] }
+  ],
+
   "ai_search": [
     {
       "binding": "STATE_KB",

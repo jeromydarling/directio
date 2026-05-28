@@ -3,6 +3,7 @@ import { runBtwReminderSweep } from "../app/lib/reminders.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
 
 export { StateAuditWorkflow } from "./state-audit-workflow";
+export { SchedulingBoardDO } from "./scheduling-board";
 
 declare module "react-router" {
   export interface AppLoadContext {

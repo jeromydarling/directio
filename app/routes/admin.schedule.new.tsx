@@ -4,6 +4,7 @@ import type { Route } from "./+types/admin.schedule.new";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { checkSlot, suggestSlots, type SlotProposal } from "~/lib/scheduler";
+import { notifyBoard } from "~/lib/scheduling-board.server";
 import { PageHeader, Button, LinkButton, Card } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
@@ -176,13 +177,14 @@ export async function action({ request, context }: Route.ActionArgs) {
     );
   }
 
+  const apptId = newId();
   await env.DB.prepare(
     `INSERT INTO appointment (id, organizationId, enrollmentId, instructorId, vehicleId,
                               kind, status, startsAt, endsAt, locationLabel, createdAt, updatedAt)
      VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)`,
   )
     .bind(
-      newId(),
+      apptId,
       tenant.organization.id,
       enrollmentId,
       instructorId,
@@ -195,6 +197,17 @@ export async function action({ request, context }: Route.ActionArgs) {
       Date.now(),
     )
     .run();
+
+  await notifyBoard(env, {
+    kind: "appointment.created",
+    orgId: tenant.organization.id,
+    appointmentId: apptId,
+    startsAt,
+    endsAt,
+    instructorId,
+    vehicleId,
+    status: "scheduled",
+  });
 
   return redirect("/admin/schedule");
 }

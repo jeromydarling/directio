@@ -53,6 +53,9 @@ export default function AdminSchedule({ loaderData }: Route.ComponentProps) {
         description="All upcoming lessons across your school."
         actions={
           <div className="flex gap-2">
+            <LinkButton to="/admin/schedule/board" variant="ghost">
+              Live board
+            </LinkButton>
             <LinkButton to="/admin/schedule/series/new" variant="secondary">
               Book a series
             </LinkButton>
