@@ -622,6 +622,44 @@ When directio encounters something a state could automate but doesn't, the gap i
 
 This is a positioning, copy, and surfacing exercise that protects retention on its own. It is not a deep architectural change. The rule-pack engine, state adapter model, and credential workflow already give us the substance; this section ensures we do not oversell that substance and lose customers in week 2.
 
+### National launch posture
+
+Directio launches nationally from day one. Self-serve signup is open to schools in any US state without geographic waitlist. The honesty work in the previous section is what makes this safe — schools see their state's adapter maturity on page one of onboarding and again on settings, and they choose to proceed with eyes open.
+
+#### Flat pricing
+
+One product, one price, regardless of the state's adapter maturity. Schools in Level 3 states do not pay more than schools in Level 1 states; the transparency happens in the disclosure, not in the line item.
+
+Premium value is monetized through clearly named **paid add-ons** rather than through pricing tiers:
+
+- Custom branded marketing website beyond the standard themed subdomain.
+- White-glove migration assistance (the white-glove migration program in the migration module).
+- Seeded curriculum packs beyond the included MN starter.
+- Optional annual curriculum update subscription for rule changes.
+- Premium support tiers if and when they're introduced.
+
+#### The narrow legal-blocker carveout
+
+The only gating is true legal blockers, scoped tightly:
+
+- **Mandatory state-provided LMS pathways.** Some states require their own LMS for certain driver-ed pathways (e.g. specific school-district programs). A school using directio for those pathways would be technically non-compliant. Signup still works for the school's other programs; the system surfaces the constraint per-program with a clear disclosure.
+- **Platform-level provider approval.** Some states require online driver-ed providers to be state-approved at the platform level (e.g. TX TDLR for online driver ed where applicable). Where this exists, the directio team pursues approval at the platform level rather than putting that burden on each school. Until approval lands, the affected program type is gated with clear disclosure and the school is welcome to use directio for everything else.
+- **Content-approval requirements.** Some states require curriculum approval, not platform approval. The directio MN starter is submitted for approval in any state that requires it; schools may also bring their own pre-approved curriculum via the import-and-layer flow.
+
+The list of true legal blockers is short, named, and surfaced at signup. We do not pretend a state is blocked when it is merely Level 1.
+
+#### State adapter design-partner program
+
+When schools in a Level 1 state want to move their state's adapter to Level 2 or 3, the directio team works with one or two of them as design partners. They get product input weight on what the next adapter level prioritizes; they do not get a pricing discount. The product is the same price for everyone.
+
+#### Public state coverage page
+
+A maintained public page lists every state with current adapter maturity, last-verified-with-DPS date, any legal-blocker disclosures, and what's needed to move the state up the maturity ladder (typically a feature on the state's end, sometimes platform-provider approval directio is pursuing). Schools shopping the product see exactly what to expect for their state before they buy.
+
+#### Sales conversation discipline
+
+Internal: any sales conversation surfaces the adapter level and the legal-blocker disclosures on screen before the payment ask. The same transparency applied in the product is applied to humans-in-the-loop. Better to lose a sale than to oversell into a churn.
+
 ## Branding and school customization
 
 Every school should be able to customize the system without code changes.
