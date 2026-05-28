@@ -1,6 +1,6 @@
 import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/signup";
-import { getAuth } from "~/lib/auth.server";
+import { generateClaimPendingPassword, getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
 import { newId } from "~/lib/ids";
 import { AuthShell } from "~/components/auth-shell";
@@ -18,21 +18,38 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 export async function action({ request, context }: Route.ActionArgs) {
   const formData = await request.formData();
   const email = String(formData.get("email") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
   const name = String(formData.get("name") ?? "").trim();
 
-  if (!email || !password || !name) {
-    return data({ error: "All fields are required." }, { status: 400 });
-  }
-  if (password.length < 8) {
-    return data({ error: "Password must be at least 8 characters." }, { status: 400 });
+  if (!email || !name) {
+    return data({ error: "Name and email are required." }, { status: 400 });
   }
 
   const env = context.cloudflare.env;
   const auth = getAuth(env);
+
+  // Account-merge path: if an account already exists at this email, we
+  // can't sign them up again. Magic-link them in instead — same result
+  // for the parent, zero friction.
+  const existing = await env.DB.prepare("SELECT id FROM user WHERE email = ?")
+    .bind(email)
+    .first<{ id: string }>();
+
+  if (existing) {
+    try {
+      await auth.api.signInMagicLink({
+        body: { email, callbackURL: "/admin" },
+        headers: request.headers,
+        asResponse: true,
+      });
+    } catch (err) {
+      console.warn("[signup] magic link send failed:", err);
+    }
+    return data({ magicLinkSent: email });
+  }
+
   try {
     const response = await auth.api.signUpEmail({
-      body: { email, password, name },
+      body: { email, password: generateClaimPendingPassword(), name },
       headers: request.headers,
       asResponse: true,
     });
@@ -94,6 +111,17 @@ export async function action({ request, context }: Route.ActionArgs) {
         await env.DB.batch(stmts);
         destination = instructorMatches.results.length > 0 ? "/instructor" : "/me";
       }
+
+      // Send a magic-link as the canonical sign-in method for next time.
+      try {
+        await auth.api.signInMagicLink({
+          body: { email, callbackURL: destination },
+          headers: request.headers,
+          asResponse: true,
+        });
+      } catch (err) {
+        console.warn("[signup] magic link backup send failed:", err);
+      }
     }
 
     return redirect(destination, { headers });
@@ -117,43 +145,57 @@ async function readErrorMessage(response: Response): Promise<string> {
 export default function Signup({ actionData }: Route.ComponentProps) {
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
+  const magicLinkSent =
+    actionData && "magicLinkSent" in actionData ? actionData.magicLinkSent : null;
+
   return (
     <AuthShell
       title="Create your school account"
-      subtitle="One login, one timeline. Get started in under a minute."
+      subtitle="One login, one timeline. No password to choose — we'll email you a sign-in link."
       footer={
         <>
           Already have an account?{" "}
-          <Link to="/login" className="font-medium text-brand-600 hover:text-brand-500 dark:text-brand-300">
+          <Link
+            to="/login"
+            className="font-medium text-brand-600 hover:text-brand-500 dark:text-brand-300"
+          >
             Sign in
           </Link>
         </>
       }
     >
-      <Form method="post" className="flex flex-col gap-4">
-        <Field label="Your name" name="name" type="text" autoComplete="name" required />
-        <Field label="Email" name="email" type="email" autoComplete="email" required />
-        <Field
-          label="Password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          hint="At least 8 characters."
-        />
-        {actionData && "error" in actionData && actionData.error && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
-            {actionData.error}
+      {magicLinkSent ? (
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50/40 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
+          <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+            Looks like you're already with us.
           </p>
-        )}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="mt-2 inline-flex items-center justify-center rounded-full bg-ink-900 px-5 py-3 text-sm font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 disabled:opacity-60 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
-        >
-          {submitting ? "Creating account…" : "Create account"}
-        </button>
-      </Form>
+          <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
+            We sent a sign-in link to <strong>{magicLinkSent}</strong>. Tap it
+            within the next hour to open your portal.
+          </p>
+        </div>
+      ) : (
+        <Form method="post" className="flex flex-col gap-4">
+          <Field label="Your name" name="name" type="text" autoComplete="name" required />
+          <Field label="Email" name="email" type="email" autoComplete="email" required />
+          {actionData && "error" in actionData && actionData.error && (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+              {actionData.error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="mt-2 inline-flex items-center justify-center rounded-full bg-ink-900 px-5 py-3 text-sm font-medium text-ink-50 shadow-sm transition hover:bg-ink-800 disabled:opacity-60 dark:bg-ink-50 dark:text-ink-900 dark:hover:bg-ink-100"
+          >
+            {submitting ? "Creating account…" : "Create account"}
+          </button>
+          <p className="text-xs text-ink-500 dark:text-ink-400">
+            We'll send you a one-tap sign-in link by email. You can set a
+            password later in account settings if you prefer one.
+          </p>
+        </Form>
+      )}
     </AuthShell>
   );
 }

@@ -1,6 +1,6 @@
 import { Form, Link, data, redirect, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/schools.$slug.enroll";
-import { getAuth } from "~/lib/auth.server";
+import { generateClaimPendingPassword, getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
@@ -77,7 +77,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const parentName = String(formData.get("parentName") ?? "").trim();
   const parentEmail = String(formData.get("parentEmail") ?? "").trim();
   const parentPhone = String(formData.get("parentPhone") ?? "").trim() || null;
-  const password = String(formData.get("password") ?? "");
 
   if (!packageId || !studentFirst || !studentLast || !parentName || !parentEmail) {
     return data(
@@ -104,49 +103,69 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     }>();
   if (!pkg) return data({ error: "That package is no longer available." }, { status: 400 });
 
-  // Get or create the parent user. If they're signed in, use that session.
+  // Guest checkout per spec #6: parents never see a password field.
+  // Three paths:
+  //   1. Signed in already → use that session.
+  //   2. Email already has an account → don't sign them in (no password),
+  //      but proceed with enrollment under that account; send a magic-link
+  //      email so they can open the portal after paying.
+  //   3. Fresh email → create the account behind the scenes with a
+  //      server-generated throwaway password, mint a session cookie so
+  //      they land in the portal immediately, AND send a magic link as
+  //      a permanent backup login.
   const session = await getSession(request, env);
+  const auth = getAuth(env);
   let parentUserId: string | null = session?.user?.id ?? null;
   let cookieHeaders: Headers | null = null;
+  let accountFlow: "signed_in" | "merged_existing" | "fresh_account" = "signed_in";
+
   if (!parentUserId) {
-    if (!password || password.length < 8) {
-      return data(
-        { error: "Set a password (8+ characters) so you can sign in later." },
-        { status: 400 },
-      );
-    }
-    const auth = getAuth(env);
-    try {
-      const response = await auth.api.signUpEmail({
-        body: { email: parentEmail, password, name: parentName },
-        headers: request.headers,
-        asResponse: true,
-      });
-      if (!response.ok) {
-        const body = await response.text();
-        let msg = "Could not create your account. Maybe you already have one — try signing in.";
-        try {
-          const parsed = JSON.parse(body) as { message?: string };
-          if (parsed.message) msg = parsed.message;
-        } catch {
-          /* ignore */
+    const existing = await db
+      .prepare("SELECT id FROM user WHERE email = ?")
+      .bind(parentEmail)
+      .first<{ id: string }>();
+    if (existing) {
+      parentUserId = existing.id;
+      accountFlow = "merged_existing";
+    } else {
+      try {
+        const response = await auth.api.signUpEmail({
+          body: {
+            email: parentEmail,
+            password: generateClaimPendingPassword(),
+            name: parentName,
+          },
+          headers: request.headers,
+          asResponse: true,
+        });
+        if (!response.ok) {
+          const body = await response.text();
+          let msg = "Could not create your account. Try the magic-link sign-in option.";
+          try {
+            const parsed = JSON.parse(body) as { message?: string };
+            if (parsed.message) msg = parsed.message;
+          } catch {
+            /* ignore */
+          }
+          return data({ error: msg }, { status: response.status });
         }
-        return data({ error: msg }, { status: response.status });
+        cookieHeaders = new Headers();
+        response.headers.forEach((value, key) => {
+          if (key.toLowerCase() === "set-cookie")
+            cookieHeaders!.append("Set-Cookie", value);
+        });
+        const newUser = await db
+          .prepare("SELECT id FROM user WHERE email = ?")
+          .bind(parentEmail)
+          .first<{ id: string }>();
+        parentUserId = newUser?.id ?? null;
+        accountFlow = "fresh_account";
+      } catch (err) {
+        return data(
+          { error: err instanceof Error ? err.message : "Sign-up failed." },
+          { status: 400 },
+        );
       }
-      cookieHeaders = new Headers();
-      response.headers.forEach((value, key) => {
-        if (key.toLowerCase() === "set-cookie") cookieHeaders!.append("Set-Cookie", value);
-      });
-      const newUser = await db
-        .prepare("SELECT id FROM user WHERE email = ?")
-        .bind(parentEmail)
-        .first<{ id: string }>();
-      parentUserId = newUser?.id ?? null;
-    } catch (err) {
-      return data(
-        { error: err instanceof Error ? err.message : "Sign-up failed." },
-        { status: 400 },
-      );
     }
   }
   if (!parentUserId) return data({ error: "Could not resolve account." }, { status: 500 });
@@ -235,14 +254,39 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       packageId: pkg.packageId,
       studentId,
       source: "public_catalog",
+      accountFlow,
     },
   });
 
-  // Send the parent to the family payments view with the enrollment
-  // teed up for checkout. If we created a fresh account, forward the
-  // Set-Cookie header so the next request is authenticated.
+  const checkoutPath = `/me/checkout/${enrollmentId}`;
+
+  // Always email a magic-link sign-in option. For the signed-in and
+  // fresh-account paths it's a permanent backup login; for the merged-
+  // existing path it's the only way the parent can finish checkout (we
+  // never received their password). Errors here are non-fatal — the
+  // signed-in / fresh paths still redirect into the portal.
+  try {
+    await auth.api.signInMagicLink({
+      body: { email: parentEmail, callbackURL: checkoutPath },
+      headers: request.headers,
+      asResponse: true,
+    });
+  } catch (err) {
+    console.warn("[enroll] magic link send failed:", err);
+  }
+
+  if (accountFlow === "merged_existing") {
+    return data({
+      magicLinkSent: parentEmail,
+      enrollmentId,
+      schoolName: org.name,
+    });
+  }
+
+  // signed_in or fresh_account: forward the cookie header (if any) and
+  // drop the parent into checkout immediately.
   const headers = cookieHeaders ?? undefined;
-  return redirect(`/me/checkout/${enrollmentId}`, headers ? { headers } : undefined);
+  return redirect(checkoutPath, headers ? { headers } : undefined);
 }
 
 export default function PublicEnrollment({ loaderData, actionData }: Route.ComponentProps) {
@@ -251,6 +295,52 @@ export default function PublicEnrollment({ loaderData, actionData }: Route.Compo
   const preselectedPackage = params.get("package");
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
+  const magicLinkSent =
+    actionData && "magicLinkSent" in actionData ? actionData.magicLinkSent : null;
+
+  if (magicLinkSent) {
+    return (
+      <div className="min-h-dvh bg-ink-50 text-ink-900 dark:bg-ink-950 dark:text-ink-100">
+        <header className="border-b border-ink-200/60 dark:border-ink-800/60">
+          <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-5">
+            <Link
+              to={`/schools/${org.publicSlug}`}
+              className="text-sm text-ink-500 hover:text-ink-900 dark:text-ink-400"
+            >
+              ← {org.name}
+            </Link>
+            <Link
+              to="/"
+              className="font-display text-base font-semibold tracking-tight text-ink-900 dark:text-ink-50"
+            >
+              directio
+            </Link>
+          </div>
+        </header>
+        <main className="mx-auto max-w-2xl px-6 py-16">
+          <Card className="border-emerald-300 bg-emerald-50/40 dark:border-emerald-800 dark:bg-emerald-950/30">
+            <p className="text-xs uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-200">
+              We've enrolled your driver. One more step.
+            </p>
+            <h1 className="mt-2 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+              Check your email
+            </h1>
+            <p className="mt-2 text-sm text-ink-700 dark:text-ink-200">
+              An account at this email — <strong>{magicLinkSent}</strong> — already exists.
+              We sent a one-tap sign-in link there so you can open your portal and pay {org.name} for this enrollment. The link works for one hour.
+            </p>
+            <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+              If you don't see the email in a minute or two, check spam. You can also{" "}
+              <Link to="/login" className="text-brand-600 hover:underline dark:text-brand-300">
+                sign in another way
+              </Link>{" "}
+              — the enrollment is saved either way.
+            </p>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-ink-50 text-ink-900 dark:bg-ink-950 dark:text-ink-100">
@@ -325,18 +415,15 @@ export default function PublicEnrollment({ loaderData, actionData }: Route.Compo
                     readOnly={Boolean(signedInUserId)}
                   />
                 </Field>
-                {!signedInUserId && (
-                  <Field label="Choose a password" hint="8+ characters.">
-                    <TextInput
-                      name="password"
-                      type="password"
-                      autoComplete="new-password"
-                      required
-                      minLength={8}
-                    />
-                  </Field>
-                )}
               </div>
+              {!signedInUserId && (
+                <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+                  No password to choose. After you finish enrolling we'll
+                  email you a one-tap sign-in link — the same link will
+                  work every time you come back, unless you decide to set
+                  a password later.
+                </p>
+              )}
               {signedInUserId && (
                 <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
                   Already signed in.{" "}
