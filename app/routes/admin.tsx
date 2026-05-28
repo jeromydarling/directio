@@ -24,6 +24,7 @@ const NAV = [
   { to: "/admin/road-tests", label: "Road tests", icon: "◑" },
   { to: "/admin/state-coverage", label: "State coverage", icon: "✦" },
   { to: "/admin/documents", label: "Documents", icon: "◰" },
+  { to: "/admin/audit", label: "Audit log", icon: "◬" },
   { to: "/admin/payments", label: "Payments", icon: "◉" },
   { to: "/admin/payroll", label: "Payroll", icon: "◇" },
   { to: "/admin/fees", label: "Fees", icon: "◎" },

@@ -64,6 +64,7 @@ export default [
     route("settings/public-listing", "routes/admin.settings.public-listing.tsx"),
     route("reports/quizzes", "routes/admin.reports.quizzes.tsx"),
     route("documents", "routes/admin.documents.tsx"),
+    route("audit", "routes/admin.audit.tsx"),
     route("fees", "routes/admin.fees.tsx"),
     route("road-tests", "routes/admin.road-tests.tsx"),
     route("state-coverage", "routes/admin.state-coverage.tsx"),
