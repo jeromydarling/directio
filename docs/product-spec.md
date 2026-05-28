@@ -523,11 +523,134 @@ The handoff originally proposed:
 
 ### Instructor
 
-- Today's lessons
-- Student roster
-- Lesson details
-- Completion and notes
-- Availability settings
+The instructor is the daily user whose engagement determines whether the platform lives. They are state-certified, frequently 1099, often work across multiple schools, and spend most of their working hours in a car. The mobile experience is the product for them.
+
+#### Identity model
+
+Instructor identity is platform-level, not tenant-scoped. One person, one login, one mobile app, one merged calendar across every school they work for.
+
+- State instructor credential (e.g. MN DPS instructor license) lives once on the instructor profile.
+- Each school they join is a separate org membership carrying that school's pay rules, vehicle access, and student roster.
+- Cross-tenant double-booking is detected and prevented by the platform.
+- This is the one documented exception to the otherwise-strict "scope every query by organization_id" rule. The exception is narrow (the user's own profile and calendar merge) and audited.
+
+#### Daily UX (mobile-first, in-car)
+
+The "Today" surface is the entire app for most days. Design constraint: every daily action works one-handed, in three taps, with poor cell signal, and survives a parking-lot interruption.
+
+- **Today list**: time, student name + age, pickup address (one-tap to maps), vehicle assigned, lesson number in their progression, current skill focus, parent contact button, last lesson's notes inline.
+- **Pre-lesson**: one-tap "I'm en route" fires an SMS to parent with ETA. One-tap "I'm here." One-tap "We started" (starts timer, prompts for start odometer, captures start-ping if school policy enables it).
+- **Mid-lesson**: structured rubric tap-entry. Big "incident" button (minor curb, near miss, accident).
+- **Post-lesson**: end timer, prompt for end odometer, run the rubric, one-tap "send progress summary to parent," sign-off (captures end-ping if school policy enables it).
+- **Between lessons**: see next student's prep info, route to next pickup, accept or decline pushed open shifts.
+
+Works offline. Notes, timers, rubric entries, and odometer readings buffer locally (IndexedDB) and sync when signal returns. Rural cellular dead zones are not optional to handle.
+
+#### Skill assessment — structured rubric
+
+Lesson notes are a structured rubric tied to the state's BTW competencies, not a freeform textarea. Rubric questions are prefilled and the instructor taps proficiency levels; freeform notes exist as a secondary field for context. Voice-to-text relies on the phone's native dictation rather than custom audio infrastructure.
+
+The rubric powers:
+
+- The Blue Card / permit-eligibility credential recommendation.
+- Parent-facing progress summaries.
+- Pass-rate-by-instructor analytics for the school.
+- Audit defense if a student fails badly and the state asks how they were certified.
+
+#### Authorities held
+
+The instructor is a delegated certifier, not just a worker. Explicit authorities:
+
+- Mark a BTW hour as completed and credit-worthy (state-audit-relevant, logged immutably).
+- Recommend permit-eligibility credential readiness with required rubric justification. School admin still issues; instructor's recommendation is the substantive judgment.
+- Cancel a lesson with a reason code (affects instructor pay and student fees differently than student-initiated cancel).
+- Refuse a student for safety reasons (impairment, unsafe behavior); routes to admin follow-up.
+- Document an incident, which triggers admin alert, insurance workflow, and vehicle status change.
+- Adjust the lesson plan within the school's curriculum constraints.
+
+#### Communications
+
+Two-way SMS through the platform, not a portal. Instructor sees a thread per family in the app; parents and students see threads that look like the school texting them.
+
+- Pre-canned messages for the four most common cases: en-route, running late, no-show alert, post-lesson summary.
+- Voice-call button proxies through a school number so the instructor's personal cell stays private. This privacy point is a retention feature: instructors quit when their personal number ends up in 200 teenagers' contacts.
+
+#### Pay and operations transparency
+
+Pay transparency is retention. Always visible to the instructor:
+
+- Hours logged and lessons completed this pay period.
+- Computed payout for the period broken down by rate type (per-lesson, per-hour, mileage, pickup-distance differential, weekend/evening differential).
+- Next payout date and last payout receipt.
+- Year-to-date earnings for 1099 prep.
+- Mileage log auto-derived from lesson odometer entries, exportable for taxes.
+
+Compensation rules are a tenant-configured, versioned rule set with the same shape as the state rule-pack engine.
+
+#### Availability and the open-shift market
+
+- Recurring weekly availability plus one-off blackouts (PTO, family commitments, medical).
+- Service-area / pickup-radius preferences.
+- **Open-shift offers**: when admin opens an extra lesson or a no-show creates a gap, eligible instructors get a push notification with the lesson details, pay, and location. First to accept (or admin-assigned) gets it. This recovers no-show economics for the instructor, not just the school.
+- **Substitute coverage requests**: an instructor can flag "I need coverage for Tuesday 4pm" and the request hits other qualified instructors in the same school.
+
+#### Vehicle workflow
+
+The instructor is the operator of a school asset during their shift. This is a first-class workflow:
+
+- **Vehicle check-out** at shift start: which car, current mileage, fuel level, walk-around inspection (tires, lights, dual-controls functioning). 30-second checklist.
+- **Vehicle check-in** at shift end: end mileage, fuel level, any flagged issues.
+- **Mid-day flag**: "this car has a problem" routes to admin, marks vehicle as needs-review, and triggers auto-reassignment of upcoming lessons to another available car if possible.
+- **Fuel and maintenance receipt** capture for reimbursement.
+
+#### Geolocation breadcrumbs (optional, configurable)
+
+Two-ping evidence — one GPS reading at lesson-start sign-off, one at lesson-end sign-off. Not a tracked route, not live tracking visible to parents.
+
+- **School-level policy**: off / opt-in / required, configured per school.
+- **Instructor consent** captured at school-join; opt-in policy means the instructor chooses per shift, required means they accepted as a condition of joining the school.
+- Stored on the lesson record with the rest of the audit trail; same retention as the lesson.
+- Used for fraud defense (catches both "ghost lessons" and false accusations against good instructors), insurance evidence at incident time, and DPS audit defense.
+- The platform never builds live parent-visible tracking; that is an explicitly out-of-scope surveillance product.
+
+#### Lifecycle
+
+- **Onboarding**: state instructor license upload and verification, background check status, vehicle familiarization, pay rate setup, first-shift shadow.
+- **Certification tracking**: instructor license expiration with renewal reminders at 90 / 60 / 30 days. Scheduling is automatically blocked when license lapses.
+- **Continuing education**: state-required CE hours tracked with proof-of-completion uploads.
+- **Performance signals** (visible to admin, and to instructor for their own data): student pass rates, on-time arrival rate, incident frequency, parent ratings in aggregate.
+- **Offboarding**: open lessons reassigned, student histories preserved with original instructor attribution intact.
+
+#### Ratings (handled with care)
+
+Parent and student ratings are collected but not publicly displayed in MVP. Admin sees aggregate; instructor sees their own aggregate plus comments filtered for abuse. No public five-star surface in Phase 1. Schools differentiate on instructor reputation by word of mouth, and we do not want to invent a Yelp problem.
+
+#### Compliance artifacts generated
+
+Every BTW hour signed off by an instructor is an audit-relevant event. The data model captures, immutably:
+
+- Who taught, who learned, vehicle, start and end time, start and end odometer, route summary, rubric scores, instructor sign-off timestamp.
+- Optional start and end geolocation breadcrumb (subject to school policy and instructor consent).
+- Any incidents logged.
+
+#### Explicit non-goals for MVP
+
+Deferred to Phase 2 or later:
+
+- AI-generated lesson notes or rubric scores.
+- In-cabin video or dashcam ingestion.
+- Public instructor rating leaderboards.
+- Direct student-to-instructor booking (admin owns scheduling in MVP).
+- Multi-language instructor UI beyond English and Spanish.
+
+#### Architectural implications
+
+1. Platform-level instructor identity with org memberships — the single audited exception to strict tenant scoping.
+2. Real-time scheduling state — when an instructor accepts an open shift on their phone, the admin's board updates within a second. Implies Durable Objects (or equivalent) for the scheduling board, not request-response polling.
+3. Mobile is a PWA on Cloudflare for MVP with a native-app upgrade path. Push notifications via Web Push with SMS fallback.
+4. Offline-first lesson capture via IndexedDB queue with sync on reconnect.
+5. Geolocation is consent-gated and policy-gated, stored as compliance breadcrumbs only, never as a live tracking stream.
+6. Compensation rules engine is declarative, per-school, versioned — same shape as the state rule-pack engine.
 
 ## Non-negotiable differentiators
 
