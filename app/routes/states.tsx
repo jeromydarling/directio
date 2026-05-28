@@ -50,31 +50,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
-const STATE_LABEL: Record<string, string> = {
-  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
-  CO: "Colorado", CT: "Connecticut", DC: "District of Columbia", DE: "Delaware",
-  FL: "Florida", GA: "Georgia", HI: "Hawaii", IA: "Iowa", ID: "Idaho",
-  IL: "Illinois", IN: "Indiana", KS: "Kansas", KY: "Kentucky", LA: "Louisiana",
-  MA: "Massachusetts", MD: "Maryland", ME: "Maine", MI: "Michigan", MN: "Minnesota",
-  MO: "Missouri", MS: "Mississippi", MT: "Montana", NC: "North Carolina",
-  ND: "North Dakota", NE: "Nebraska", NH: "New Hampshire", NJ: "New Jersey",
-  NM: "New Mexico", NV: "Nevada", NY: "New York", OH: "Ohio", OK: "Oklahoma",
-  OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
-  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VA: "Virginia",
-  VT: "Vermont", WA: "Washington", WI: "Wisconsin", WV: "West Virginia", WY: "Wyoming",
-};
+import { STATE_LABEL, STATE_MATURITY } from "~/lib/state-coverage";
 
-// Maturity levels per state. MN is the lead implementation.
-const MATURITY: Record<string, { level: 1 | 2 | 3; credentialLabel?: string; note?: string }> = {
-  MN: { level: 2, credentialLabel: "Blue Card", note: "Deep implementation with Blue Card credential modeled, fees, all three GDL stages." },
-  TX: { level: 2, credentialLabel: "ITTD slip", note: "Parent-taught BTW pathway supported." },
-  CA: { level: 1, credentialLabel: "Completion certificate" },
-  NY: { level: 1, credentialLabel: "MV-285" },
-  FL: { level: 1, credentialLabel: "FLHSMV certificate" },
-  OH: { level: 1, credentialLabel: "Completion certificate", note: "2025 under-21 expansion supported." },
-  IL: { level: 1, credentialLabel: "PDPS card" },
-  WA: { level: 1, credentialLabel: "Completion certificate", note: "HB 1878 phased coverage modeled." },
-};
+// Maturity levels per state — read from the shared lib so the public
+// coverage page and the per-school settings card never drift.
+const MATURITY = STATE_MATURITY;
 
 export default function States({ loaderData }: Route.ComponentProps) {
   const dest = loaderData.destination ?? "/signup";

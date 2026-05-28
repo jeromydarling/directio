@@ -6,6 +6,12 @@ import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
 import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select } from "~/components/form";
+import {
+  MATURITY_LABEL,
+  maturityForJurisdiction,
+  whatWeHandle,
+  whatYouStillDo,
+} from "~/lib/state-coverage";
 
 type RulePackOption = {
   versionId: string;
@@ -80,10 +86,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(tenant.organization.id)
     .all<AuditRow>();
 
+  // Per-school adapter maturity for the page-one disclosure card. Derived
+  // from the installed rule pack's jurisdiction (or the organization's
+  // own jurisdiction column if set), so the school sees their reality
+  // without us guessing.
+  const orgRow = await db
+    .prepare("SELECT jurisdiction FROM organization WHERE id = ?")
+    .bind(tenant.organization.id)
+    .first<{ jurisdiction: string | null }>();
+  const installedJurisdiction = installed.results[0]?.jurisdiction ?? null;
+  const adapter = maturityForJurisdiction(
+    orgRow?.jurisdiction ?? installedJurisdiction,
+  );
+
   return {
     available: availablePacks.results,
     installed: installed.results,
     audit: audit.results,
+    adapter,
   };
 }
 
@@ -132,7 +152,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function AdminSettings({ loaderData, actionData }: Route.ComponentProps) {
   const { tenant } = useOutletContext<{ tenant: ActiveTenant }>();
-  const { available, installed, audit } = loaderData;
+  const { available, installed, audit, adapter } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -161,6 +181,76 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
           </div>
         }
       />
+
+      {adapter && (
+        <section>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+            Your state's adapter coverage
+          </h2>
+          <Card>
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-700 dark:text-brand-200">
+                  {adapter.name} ({adapter.code})
+                </p>
+                <p className="mt-1 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+                  Level {adapter.maturity.level} ·{" "}
+                  {MATURITY_LABEL[adapter.maturity.level]}
+                </p>
+                {adapter.maturity.credentialLabel && (
+                  <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+                    Permit-eligibility credential:{" "}
+                    <strong>{adapter.maturity.credentialLabel}</strong>
+                  </p>
+                )}
+                {adapter.maturity.lastVerifiedAt && (
+                  <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">
+                    Last verified with state DPS:{" "}
+                    {adapter.maturity.lastVerifiedAt}
+                  </p>
+                )}
+              </div>
+              <LinkButton to="/states" variant="ghost">
+                All states →
+              </LinkButton>
+            </div>
+
+            {adapter.maturity.legalBlocker && (
+              <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50/40 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-100">
+                <p className="text-xs font-semibold uppercase tracking-wider">
+                  Disclosure
+                </p>
+                <p className="mt-1">{adapter.maturity.legalBlocker}</p>
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-200">
+                  What directio handles for you
+                </p>
+                <p className="mt-1 text-sm text-ink-700 dark:text-ink-200">
+                  {whatWeHandle(adapter.maturity)}.
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+                  What you still do
+                </p>
+                <p className="mt-1 text-sm text-ink-700 dark:text-ink-200">
+                  {whatYouStillDo(adapter.maturity)}.
+                </p>
+              </div>
+            </div>
+
+            {adapter.maturity.note && (
+              <p className="mt-4 text-xs italic text-ink-500 dark:text-ink-400">
+                Note: {adapter.maturity.note}
+              </p>
+            )}
+          </Card>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
