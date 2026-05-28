@@ -79,6 +79,7 @@
     "RESEND_API_KEY": "set-in-keys-pass",
     "RESEND_FROM": "directio <no-reply@directio.app>",
     "AI_GATEWAY_ACCOUNT_ID": "f84f7181c051be0040e972dcad48e697",
-    "AI_GATEWAY_NAME": "directio-llm"
+    "AI_GATEWAY_NAME": "directio-llm",
+    "SAAS_ZONE_ID": "set-when-zone-is-chosen"
   }
 }

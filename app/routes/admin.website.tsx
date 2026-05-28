@@ -8,6 +8,15 @@ import {
   type WebsiteIntake,
   type WebsiteSections,
 } from "~/lib/website-generator.server";
+import {
+  createCustomHostname,
+  deleteCustomHostname,
+  findCustomHostnameByName,
+  getCustomHostname,
+  isSaasConfigured,
+  SaasNotConfigured,
+} from "~/lib/saas.server";
+import { describeHostnameStatus, isHostnameLive, type CustomHostname } from "~/lib/saas";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select, TextArea, TextInput } from "~/components/form";
 
@@ -46,6 +55,10 @@ type WebsiteRow = {
   customDomain: string | null;
   customDomainVerifiedAt: number | null;
   customDomainVerifyToken: string | null;
+  saasHostnameId: string | null;
+  saasStatus: string | null;
+  saasSslStatus: string | null;
+  saasLastSyncedAt: number | null;
   tier: string;
   createdAt: number;
   updatedAt: number;
@@ -78,13 +91,27 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const website = await context.cloudflare.env.DB.prepare(
     `SELECT id, organizationId, intakeJson, intakeUpdatedAt, sectionsJson,
             sectionsModel, sectionsGeneratedAt, theme, customDomain,
-            customDomainVerifiedAt, customDomainVerifyToken, tier, createdAt, updatedAt
+            customDomainVerifiedAt, customDomainVerifyToken,
+            saasHostnameId, saasStatus, saasSslStatus, saasLastSyncedAt,
+            tier, createdAt, updatedAt
        FROM school_website WHERE organizationId = ?`,
   )
     .bind(tenant.organization.id)
     .first<WebsiteRow>();
 
-  return { org, website };
+  // If SaaS is configured and we have a hostname id, refresh status
+  // from CF so the UI shows the current state without an action POST.
+  let saasHostname: CustomHostname | null = null;
+  const saasOn = isSaasConfigured(context.cloudflare.env);
+  if (saasOn && website?.saasHostnameId) {
+    try {
+      saasHostname = await getCustomHostname(context.cloudflare.env, website.saasHostnameId);
+    } catch {
+      saasHostname = null;
+    }
+  }
+
+  return { org, website, saasHostname, saasOn };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -228,32 +255,94 @@ export async function action({ request, context }: Route.ActionArgs) {
       .toLowerCase()
       .replace(/^https?:\/\//, "")
       .replace(/\/.*$/, "");
+
+    // Clear path: remove the domain. Also delete any SaaS hostname.
     if (!domain) {
-      // Clear it
+      const existing = await env.DB.prepare(
+        "SELECT saasHostnameId FROM school_website WHERE organizationId = ?",
+      )
+        .bind(orgId)
+        .first<{ saasHostnameId: string | null }>();
+      if (existing?.saasHostnameId && isSaasConfigured(env)) {
+        try {
+          await deleteCustomHostname(env, existing.saasHostnameId);
+        } catch {
+          // ignore — we still clear our row
+        }
+      }
       await env.DB.prepare(
         `UPDATE school_website
             SET customDomain = NULL, customDomainVerifiedAt = NULL,
-                customDomainVerifyToken = NULL, updatedAt = ?
+                customDomainVerifyToken = NULL,
+                saasHostnameId = NULL, saasStatus = NULL,
+                saasSslStatus = NULL, saasLastSyncedAt = NULL,
+                updatedAt = ?
           WHERE organizationId = ?`,
       )
         .bind(now, orgId)
         .run();
       return redirect("/admin/website");
     }
+
     if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(domain))
       return data(
         { error: "Looks like an invalid domain. Try yourschool.com (no http://, no slash)." },
         { status: 400 },
       );
 
-    const token = "directio-verify-" + newId().slice(0, 16).toLowerCase();
+    // SaaS path: register with Cloudflare Custom Hostnames and let
+    // them handle SSL + validation. Fall back to manual TXT verify
+    // if SaaS isn't configured.
+    let saasHostnameId: string | null = null;
+    let saasStatus: string | null = null;
+    let saasSslStatus: string | null = null;
+    let fallbackToken: string | null = null;
+
+    if (isSaasConfigured(env)) {
+      try {
+        // If the hostname already exists in CF (re-add after delete, etc.),
+        // pick it up rather than creating a duplicate.
+        const existing = await findCustomHostnameByName(env, domain);
+        const ch = existing ?? (await createCustomHostname(env, domain));
+        saasHostnameId = ch.id;
+        saasStatus = ch.status;
+        saasSslStatus = ch.ssl?.status ?? null;
+      } catch (err) {
+        if (err instanceof SaasNotConfigured) {
+          // fall through to manual
+        } else {
+          const msg = err instanceof Error ? err.message : "SaaS registration failed";
+          return data({ error: msg }, { status: 500 });
+        }
+      }
+    }
+    if (!saasHostnameId) {
+      // Manual fallback — generate a verify token
+      fallbackToken = "directio-verify-" + newId().slice(0, 16).toLowerCase();
+    }
+
     await env.DB.prepare(
       `UPDATE school_website
-          SET customDomain = ?, customDomainVerifyToken = ?,
-              customDomainVerifiedAt = NULL, updatedAt = ?
+          SET customDomain = ?,
+              customDomainVerifyToken = ?,
+              customDomainVerifiedAt = NULL,
+              saasHostnameId = ?,
+              saasStatus = ?,
+              saasSslStatus = ?,
+              saasLastSyncedAt = ?,
+              updatedAt = ?
         WHERE organizationId = ?`,
     )
-      .bind(domain, token, now, orgId)
+      .bind(
+        domain,
+        fallbackToken,
+        saasHostnameId,
+        saasStatus,
+        saasSslStatus,
+        saasHostnameId ? now : null,
+        now,
+        orgId,
+      )
       .run();
     await recordAudit(env, {
       organizationId: orgId,
@@ -261,12 +350,57 @@ export async function action({ request, context }: Route.ActionArgs) {
       action: "website.custom_domain_set",
       entityType: "school_website",
       entityId: null,
-      payload: { domain },
+      payload: { domain, saas: Boolean(saasHostnameId) },
     });
     return redirect("/admin/website");
   }
 
+  if (intent === "refresh-saas-status") {
+    const row = await env.DB.prepare(
+      "SELECT saasHostnameId, customDomain FROM school_website WHERE organizationId = ?",
+    )
+      .bind(orgId)
+      .first<{ saasHostnameId: string | null; customDomain: string | null }>();
+    if (!row?.saasHostnameId || !isSaasConfigured(env))
+      return data({ error: "No SaaS hostname registered." }, { status: 400 });
+
+    try {
+      const ch = await getCustomHostname(env, row.saasHostnameId);
+      const live = isHostnameLive(ch);
+      await env.DB.prepare(
+        `UPDATE school_website
+            SET saasStatus = ?, saasSslStatus = ?, saasLastSyncedAt = ?,
+                customDomainVerifiedAt = ?, updatedAt = ?
+          WHERE organizationId = ?`,
+      )
+        .bind(
+          ch.status,
+          ch.ssl?.status ?? null,
+          now,
+          live ? now : null,
+          now,
+          orgId,
+        )
+        .run();
+      if (live) {
+        await recordAudit(env, {
+          organizationId: orgId,
+          actorUserId: tenant.user.id,
+          action: "website.custom_domain_verified",
+          entityType: "school_website",
+          entityId: null,
+          payload: { domain: row.customDomain, via: "saas" },
+        });
+      }
+      return redirect("/admin/website");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "SaaS status check failed";
+      return data({ error: msg }, { status: 500 });
+    }
+  }
+
   if (intent === "verify-custom-domain") {
+    // Manual-TXT verify path (used only when SaaS isn't configured).
     const row = await env.DB.prepare(
       "SELECT customDomain, customDomainVerifyToken FROM school_website WHERE organizationId = ?",
     )
@@ -275,7 +409,6 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!row?.customDomain || !row.customDomainVerifyToken)
       return data({ error: "Set a domain first." }, { status: 400 });
 
-    // Use Cloudflare DoH to check for the TXT verify record
     try {
       const dohUrl = `https://cloudflare-dns.com/dns-query?name=_directio-verify.${encodeURIComponent(row.customDomain)}&type=TXT`;
       const dohRes = await fetch(dohUrl, {
@@ -299,7 +432,7 @@ export async function action({ request, context }: Route.ActionArgs) {
           action: "website.custom_domain_verified",
           entityType: "school_website",
           entityId: null,
-          payload: { domain: row.customDomain },
+          payload: { domain: row.customDomain, via: "manual" },
         });
         return redirect("/admin/website");
       } else {
@@ -321,7 +454,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function AdminWebsite({ loaderData, actionData }: Route.ComponentProps) {
-  const { org, website } = loaderData;
+  const { org, website, saasHostname, saasOn } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   let intake: Partial<WebsiteIntake> = {};
@@ -549,55 +682,187 @@ export default function AdminWebsite({ loaderData, actionData }: Route.Component
           </Button>
         </Form>
 
+        {!saasOn && (
+          <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+            Cloudflare for SaaS isn't configured yet — custom domains will use the manual
+            TXT-verify path without automatic HTTPS. Set <code className="font-mono">SAAS_ZONE_ID</code> and{" "}
+            <code className="font-mono">SAAS_API_TOKEN</code> as Worker secrets to enable
+            auto-SSL.
+          </p>
+        )}
+
         {website?.customDomain && (
           <div className="mt-6 rounded-2xl border border-ink-200 bg-ink-50/60 p-5 dark:border-ink-800 dark:bg-ink-900/40">
             {website.customDomainVerifiedAt ? (
               <div>
                 <p className="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
-                  ✓ Verified · {new Date(website.customDomainVerifiedAt).toLocaleString()}
+                  ✓ Live with HTTPS · {new Date(website.customDomainVerifiedAt).toLocaleString()}
                 </p>
                 <p className="mt-1 text-base font-semibold text-ink-900 dark:text-ink-50">
                   https://{website.customDomain}
                 </p>
                 <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
-                  Your site is live at your custom domain. SSL is auto-provisioned by Cloudflare;
-                  give it up to an hour if HTTPS isn't responding yet.
+                  SSL certificate issued by Cloudflare. Your site is live and indexed.
                 </p>
               </div>
-            ) : (
+            ) : saasHostname ? (
+              <SaasHostnamePanel
+                hostname={website.customDomain}
+                ch={saasHostname}
+                submitting={submitting}
+              />
+            ) : website.saasHostnameId ? (
               <div className="flex flex-col gap-3 text-sm text-ink-700 dark:text-ink-200">
-                <p className="font-medium text-ink-900 dark:text-ink-50">
-                  Two DNS records to add at your registrar:
-                </p>
-                <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">
-                  <p>
-                    <strong>1) CNAME</strong> — point your domain at our site host:
-                  </p>
-                  <p className="mt-1">
-                    {website.customDomain} &nbsp;→&nbsp; sites.directio.app
-                  </p>
-                </div>
-                <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">
-                  <p>
-                    <strong>2) TXT</strong> — at _directio-verify.{website.customDomain}:
-                  </p>
-                  <p className="mt-1 break-all">{website.customDomainVerifyToken}</p>
-                </div>
+                <p>Looking up SaaS hostname status…</p>
                 <Form method="post">
-                  <input type="hidden" name="intent" value="verify-custom-domain" />
+                  <input type="hidden" name="intent" value="refresh-saas-status" />
                   <Button type="submit" disabled={submitting}>
-                    Check DNS now
+                    Refresh status
                   </Button>
                 </Form>
-                <p className="text-xs text-ink-500 dark:text-ink-400">
-                  DNS usually propagates in a few minutes; rarely up to an hour. Once we see the
-                  TXT record, your site goes live with HTTPS on your domain.
-                </p>
               </div>
+            ) : (
+              <ManualVerifyPanel
+                domain={website.customDomain}
+                token={website.customDomainVerifyToken ?? ""}
+                submitting={submitting}
+              />
             )}
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+function SaasHostnamePanel({
+  hostname,
+  ch,
+  submitting,
+}: {
+  hostname: string;
+  ch: CustomHostname;
+  submitting: boolean;
+}) {
+  const status = describeHostnameStatus(ch);
+  const validations = ch.ssl?.validation_records ?? [];
+  const ownership = ch.ownership_verification;
+  const toneClasses = {
+    amber: "border-amber-300 bg-amber-50/40 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100",
+    emerald: "border-emerald-300 bg-emerald-50/40 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100",
+    rose: "border-rose-300 bg-rose-50/40 text-rose-900 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-100",
+    ink: "border-ink-200 bg-ink-50/60 text-ink-800 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-100",
+  } as const;
+  return (
+    <div className="flex flex-col gap-4 text-sm text-ink-700 dark:text-ink-200">
+      <div className={`rounded-xl border p-3 text-sm ${toneClasses[status.tone]}`}>
+        <p className="font-semibold">{status.label}</p>
+        <p className="text-xs opacity-80">{status.detail}</p>
+      </div>
+
+      <p className="font-medium text-ink-900 dark:text-ink-50">
+        DNS records to add at your registrar:
+      </p>
+
+      <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">
+        <p>
+          <strong>CNAME</strong> — point your domain at our SaaS host:
+        </p>
+        <p className="mt-1">
+          {hostname} &nbsp;→&nbsp; sites.directio.app
+        </p>
+        <p className="mt-2 text-[10px] uppercase tracking-wider opacity-60">
+          (If your DNS provider doesn't allow CNAME at the apex, use a www subdomain or an ALIAS/ANAME record instead.)
+        </p>
+      </div>
+
+      {ownership?.name && ownership?.value && (
+        <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">
+          <p>
+            <strong>TXT</strong> — hostname ownership (this is what Cloudflare checks):
+          </p>
+          <p className="mt-1 break-all">
+            <span className="opacity-70">Name:</span> {ownership.name}
+          </p>
+          <p className="break-all">
+            <span className="opacity-70">Value:</span> {ownership.value}
+          </p>
+        </div>
+      )}
+
+      {validations.map((v, i) => (
+        <div
+          key={i}
+          className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60"
+        >
+          <p>
+            <strong>TXT</strong> — SSL validation #{i + 1}:
+          </p>
+          {v.txt_name && (
+            <p className="mt-1 break-all">
+              <span className="opacity-70">Name:</span> {v.txt_name}
+            </p>
+          )}
+          {v.txt_value && (
+            <p className="break-all">
+              <span className="opacity-70">Value:</span> {v.txt_value}
+            </p>
+          )}
+        </div>
+      ))}
+
+      <Form method="post">
+        <input type="hidden" name="intent" value="refresh-saas-status" />
+        <Button type="submit" disabled={submitting}>
+          Refresh status
+        </Button>
+      </Form>
+      <p className="text-xs text-ink-500 dark:text-ink-400">
+        Cloudflare automatically validates the records and issues a Let's Encrypt certificate
+        within a few minutes once they propagate. No intervention required from you.
+      </p>
+    </div>
+  );
+}
+
+function ManualVerifyPanel({
+  domain,
+  token,
+  submitting,
+}: {
+  domain: string;
+  token: string;
+  submitting: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-3 text-sm text-ink-700 dark:text-ink-200">
+      <p className="font-medium text-ink-900 dark:text-ink-50">
+        Two DNS records to add at your registrar:
+      </p>
+      <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">
+        <p>
+          <strong>1) CNAME</strong> — point your domain at our site host:
+        </p>
+        <p className="mt-1">
+          {domain} &nbsp;→&nbsp; sites.directio.app
+        </p>
+      </div>
+      <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">
+        <p>
+          <strong>2) TXT</strong> — at _directio-verify.{domain}:
+        </p>
+        <p className="mt-1 break-all">{token}</p>
+      </div>
+      <Form method="post">
+        <input type="hidden" name="intent" value="verify-custom-domain" />
+        <Button type="submit" disabled={submitting}>
+          Check DNS now
+        </Button>
+      </Form>
+      <p className="text-xs text-amber-700 dark:text-amber-300">
+        Heads up: without Cloudflare for SaaS configured, your domain is reachable over HTTP
+        but HTTPS will not work automatically. Set up SaaS to get auto-SSL.
+      </p>
     </div>
   );
 }
