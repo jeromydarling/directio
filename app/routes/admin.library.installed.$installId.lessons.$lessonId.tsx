@@ -28,6 +28,7 @@ type LessonRow = {
   narrationAudioR2Key: string | null;
   narrationAudioVoiceId: string | null;
   narrationAudioGeneratedAt: number | null;
+  bodyHashCurrent: string | null;
   moduleTitle: string;
 };
 
@@ -35,6 +36,7 @@ type QuizRow = {
   quizId: string;
   title: string;
   passingScore: number;
+  bodyHashAtAuthoring: string | null;
 };
 
 type QuestionRow = {
@@ -65,6 +67,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
               sl.estimatedSeatMinutes, sl.published, sl.audioUrl,
               sl.audioGeneratedAt, sl.narrationAudioR2Key,
               sl.narrationAudioVoiceId, sl.narrationAudioGeneratedAt,
+              sl.bodyHashCurrent,
               sm.title AS moduleTitle
          FROM school_lesson sl
          JOIN school_module sm ON sm.id = sl.schoolModuleId
@@ -77,7 +80,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const quiz = await db
     .prepare(
-      "SELECT id AS quizId, title, passingScore FROM school_quiz WHERE schoolLessonId = ? AND organizationId = ?",
+      "SELECT id AS quizId, title, passingScore, bodyHashAtAuthoring FROM school_quiz WHERE schoolLessonId = ? AND organizationId = ?",
     )
     .bind(params.lessonId, tenant.organization.id)
     .first<QuizRow>();
@@ -124,6 +127,14 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     .bind(tenant.organization.id)
     .first<{ bal: number }>();
 
+  // Quiz drift detection. If we have a quiz, and we have hashes on
+  // both sides, and they differ — flag the editor. Missing hashes
+  // (legacy data) → no badge; the next save will populate them.
+  const quizDrift =
+    quiz?.bodyHashAtAuthoring && lesson.bodyHashCurrent
+      ? quiz.bodyHashAtAuthoring !== lesson.bodyHashCurrent
+      : false;
+
   return {
     lesson,
     quiz,
@@ -131,6 +142,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     assets,
     translations: translations.results,
     creditBalanceCents: balanceRow?.bal ?? 0,
+    quizDrift,
   };
 }
 
@@ -157,10 +169,11 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     const body = String(formData.get("body") ?? "");
     const minutes = parseInt(String(formData.get("estimatedSeatMinutes") ?? "10"), 10);
     if (!title || !body) return data({ error: "Title and body required." }, { status: 400 });
+    const bodyHash = await sha256Hex(body);
     await env.DB.prepare(
-      "UPDATE school_lesson SET title = ?, body = ?, estimatedSeatMinutes = ?, updatedAt = ? WHERE id = ?",
+      "UPDATE school_lesson SET title = ?, body = ?, estimatedSeatMinutes = ?, bodyHashCurrent = ?, updatedAt = ? WHERE id = ?",
     )
-      .bind(title, body, minutes, now, params.lessonId)
+      .bind(title, body, minutes, bodyHash, now, params.lessonId)
       .run();
     await recordAudit(env, {
       organizationId: tenant.organization.id,
@@ -187,9 +200,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       return data({ error: "Prompt and all four choices required." }, { status: 400 });
     if (correctIndex < 0 || correctIndex > 3)
       return data({ error: "Pick a correct answer." }, { status: 400 });
+    // Saving a question re-aligns the quiz with the current body —
+    // stamp the bodyHashAtAuthoring on both the quiz and the question.
+    const currentLesson = await env.DB.prepare(
+      "SELECT body, bodyHashCurrent FROM school_lesson WHERE id = ?",
+    )
+      .bind(params.lessonId)
+      .first<{ body: string; bodyHashCurrent: string | null }>();
+    const currentHash =
+      currentLesson?.bodyHashCurrent ?? (await sha256Hex(currentLesson?.body ?? ""));
     await env.DB.prepare(
       `UPDATE school_quiz_question
-          SET prompt = ?, choices = ?, correctIndex = ?, explanation = ?, updatedAt = ?
+          SET prompt = ?, choices = ?, correctIndex = ?, explanation = ?,
+              bodyHashAtAuthoring = ?, updatedAt = ?
         WHERE id = ? AND organizationId = ?`,
     )
       .bind(
@@ -197,10 +220,18 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         JSON.stringify(choices),
         correctIndex,
         explanation,
+        currentHash,
         now,
         questionId,
         tenant.organization.id,
       )
+      .run();
+    await env.DB.prepare(
+      `UPDATE school_quiz
+          SET bodyHashAtAuthoring = ?
+        WHERE schoolLessonId = ? AND organizationId = ?`,
+    )
+      .bind(currentHash, params.lessonId, tenant.organization.id)
       .run();
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
@@ -375,7 +406,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 }
 
 export default function LessonEditor({ loaderData, actionData }: Route.ComponentProps) {
-  const { lesson, quiz, questions, assets, translations, creditBalanceCents } = loaderData;
+  const { lesson, quiz, questions, assets, translations, creditBalanceCents, quizDrift } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -654,6 +685,14 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
           Quiz ({questions.length} question{questions.length === 1 ? "" : "s"})
         </h2>
+        {quizDrift && (
+          <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50/60 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
+            <strong>Heads up:</strong> you edited the lesson body since these
+            quiz questions were last reviewed. Open each question, scan that
+            its answer still matches the new content, and save — that re-
+            aligns the quiz. The badge clears as soon as a question is saved.
+          </div>
+        )}
         {questions.length === 0 ? (
           <Card>No quiz attached to this lesson.</Card>
         ) : (
@@ -729,4 +768,12 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
       </section>
     </div>
   );
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

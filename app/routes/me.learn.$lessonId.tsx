@@ -6,6 +6,8 @@ import { newId } from "~/lib/ids";
 import { youTubeEmbedUrl } from "~/lib/youtube";
 import { Card, LinkButton, Button } from "~/components/ui";
 import { LANG_LABELS } from "~/lib/lang-labels";
+import { renderLessonHtml } from "~/lib/lesson-shortcodes";
+import { TrackedAudioPlayer } from "~/components/tracked-audio-player";
 
 type LessonRow = {
   id: string;
@@ -71,6 +73,7 @@ type LoaderData = {
   availableLangs: string[];
   activeLang: string | null;
   isMachineTranslated: boolean;
+  audioTotalSeconds: number;
 };
 
 type ActionData = {
@@ -226,7 +229,7 @@ export async function loader({
   const now = Date.now();
   const existing = await db
     .prepare(
-      "SELECT id, attemptCount, bestScorePercent, completedAt FROM lesson_progress WHERE userId = ? AND schoolLessonId = ?",
+      "SELECT id, attemptCount, bestScorePercent, completedAt, audioTotalSeconds, audioCompletedAt FROM lesson_progress WHERE userId = ? AND schoolLessonId = ?",
     )
     .bind(tenant.user.id, params.lessonId)
     .first<{
@@ -234,6 +237,8 @@ export async function loader({
       attemptCount: number;
       bestScorePercent: number | null;
       completedAt: number | null;
+      audioTotalSeconds: number | null;
+      audioCompletedAt: number | null;
     }>();
   if (!existing) {
     await db
@@ -269,6 +274,7 @@ export async function loader({
     availableLangs,
     activeLang,
     isMachineTranslated: activeLang !== null,
+    audioTotalSeconds: existing?.audioTotalSeconds ?? 0,
   };
 }
 
@@ -435,6 +441,7 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
     availableLangs,
     activeLang,
     isMachineTranslated,
+    audioTotalSeconds,
   } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
@@ -479,14 +486,18 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
           <p className="mb-2 text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">
             Listen along
           </p>
-          <audio controls src={lesson.audioUrl} className="w-full" />
+          <TrackedAudioPlayer
+            src={lesson.audioUrl}
+            lessonId={lesson.id}
+            estimatedSeatMinutes={lesson.estimatedSeatMinutes}
+            initialTotalSeconds={audioTotalSeconds}
+          />
         </Card>
       )}
 
-      <article
-        className="prose prose-ink max-w-none text-ink-800 dark:text-ink-100"
-        dangerouslySetInnerHTML={{ __html: bodyHtml }}
-      />
+      <article className="prose prose-ink max-w-none text-ink-800 dark:text-ink-100">
+        {renderLessonHtml(bodyHtml)}
+      </article>
 
       {assets.length > 0 && (
         <section className="flex flex-col gap-5">
