@@ -34,6 +34,8 @@ export default [
     route("vehicles/:vehicleId", "routes/admin.vehicles.$vehicleId.tsx"),
     route("schedule", "routes/admin.schedule.tsx"),
     route("schedule/new", "routes/admin.schedule.new.tsx"),
+    route("schedule/series/new", "routes/admin.schedule.series.new.tsx"),
+    route("schedule/series/:seriesId", "routes/admin.schedule.series.$seriesId.tsx"),
     route("programs", "routes/admin.programs.tsx"),
     route("programs/new", "routes/admin.programs.new.tsx"),
     route("programs/:programId", "routes/admin.programs.$programId.tsx"),
