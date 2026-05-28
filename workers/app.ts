@@ -23,10 +23,10 @@ const requestHandler = createRequestHandler(
 const PLATFORM_HOSTS = new Set<string>([
   "localhost",
   "127.0.0.1",
-  "directio.app",
-  "www.directio.app",
+  "godirectio.com",
+  "www.godirectio.com",
   "directio.jer-f84.workers.dev",
-  "sites.directio.app", // CNAME target — bare-host hits go to platform
+  "sites.godirectio.com", // CNAME target — bare-host hits go to platform
 ]);
 
 function isPlatformHost(host: string): boolean {
@@ -38,7 +38,7 @@ function isPlatformHost(host: string): boolean {
 
 /**
  * If the request is coming in on a school's verified custom domain
- * (CNAMEd to sites.directio.app), rewrite the URL so React Router
+ * (CNAMEd to sites.godirectio.com), rewrite the URL so React Router
  * routes it to the school's public marketing page. We pass-through
  * /api/, /assets/, /admin/ etc. unchanged so the school's own
  * checkout, enrollment, and signed-asset routes keep working.

@@ -5,14 +5,14 @@
  *  1. School enters their domain at /admin/website
  *  2. We register the hostname with CF Custom Hostnames API
  *  3. CF returns an SSL validation challenge (HTTP or TXT)
- *  4. We show the school: CNAME → sites.directio.app + the
+ *  4. We show the school: CNAME → sites.godirectio.com + the
  *     validation challenge if they're not on Cloudflare DNS
  *  5. CF auto-detects when CNAME + challenge are in place, issues
  *     a Let's Encrypt cert
  *  6. We poll the hostname status and flip customDomainVerifiedAt
  *     once SSL is active
  *
- * The directio platform zone (e.g. directio.app) needs to be added
+ * The directio platform zone (e.g. godirectio.com) needs to be added
  * to Cloudflare with Cloudflare for SaaS enabled on it, and the
  * SAAS_ZONE_ID env var set. If SAAS_ZONE_ID is not set, the helpers
  * degrade gracefully and the manual TXT-verify path still works.

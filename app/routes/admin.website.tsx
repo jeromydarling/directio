@@ -769,7 +769,7 @@ function SaasHostnamePanel({
           <strong>CNAME</strong> — point your domain at our SaaS host:
         </p>
         <p className="mt-1">
-          {hostname} &nbsp;→&nbsp; sites.directio.app
+          {hostname} &nbsp;→&nbsp; sites.godirectio.com
         </p>
         <p className="mt-2 text-[10px] uppercase tracking-wider opacity-60">
           (If your DNS provider doesn't allow CNAME at the apex, use a www subdomain or an ALIAS/ANAME record instead.)
@@ -844,7 +844,7 @@ function ManualVerifyPanel({
           <strong>1) CNAME</strong> — point your domain at our site host:
         </p>
         <p className="mt-1">
-          {domain} &nbsp;→&nbsp; sites.directio.app
+          {domain} &nbsp;→&nbsp; sites.godirectio.com
         </p>
       </div>
       <div className="rounded-xl border border-ink-200 bg-white/70 p-3 font-mono text-xs dark:border-ink-800 dark:bg-ink-900/60">

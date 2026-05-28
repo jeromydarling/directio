@@ -202,7 +202,7 @@ export async function fetchStatePage(
     const res = await fetch(url, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; directio-state-monitor/1.0; +https://directio.app)",
+          "Mozilla/5.0 (compatible; directio-state-monitor/1.0; +https://godirectio.com)",
         Accept: "text/html,application/xhtml+xml",
       },
     });
