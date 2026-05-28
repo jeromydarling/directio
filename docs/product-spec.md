@@ -450,6 +450,82 @@ This is the narrative that lets an owner answer "is directio paying for itself?"
 
 W-9 (for 1099 instructors) and W-4 + I-9 (for W-2 instructors) collected during onboarding and stored in R2 with audit-logged access. The school stops keeping a binder of payroll paperwork; directio is the system of record.
 
+### 10. Owner dashboard — the weekly love letter
+
+Owners log in weekly to answer one question: "is this thing making me money?" If the dashboard doesn't answer it in 30 seconds, they don't feel ROI even when retention is technically improving. The owner dashboard is not analytics — it is the surface that justifies the subscription on every visit. Most of the underlying data is already specced across other modules (vehicles, payroll, scheduling, outcomes, auth); this section makes the surface itself first-class.
+
+#### The 30-second answer
+
+The top of the dashboard answers one question before the owner scrolls: is the business healthy this week? One large card with revenue this period vs. last period, a single green/amber/red status indicator, and one click to drill in. The owner who has 30 seconds gets the answer; the owner with more time goes deeper.
+
+#### The dollars-recovered story
+
+Three named numbers, pulled from the payroll module, that together demonstrate directio paying for itself:
+
+- No-show fees collected this period.
+- Slots backfilled from the waitlist with recovered revenue.
+- Open-shift acceptances with extra revenue captured.
+
+Ideally their sum exceeds the subscription cost. When it does, "is directio worth it" answers itself.
+
+#### Capacity utilization at a glance
+
+A next-14-day heatmap (pulled from scheduling) with gap callouts. The owner instantly sees "Tuesday afternoons are open across three instructors" and decides whether to promote those slots. Heatmap toggles between instructor view and vehicle view.
+
+#### Instructor scorecard
+
+Per-instructor row showing lessons completed, on-time arrival rate, no-show rate, incident count, parent rating aggregate (private, never public per the instructor section), and student pass-rate where measurable. Color-coded for situational awareness, not performance theater — the dashboard exists to inform the owner, not to weaponize against the instructor. Drill-down to per-instructor detail is available; default view is summary.
+
+#### Vehicle utilization and economics
+
+Per-vehicle row showing lessons supported, fuel and maintenance cost, revenue contribution, days out-of-service. Pulled from the vehicles cost model. Identifies the under-utilized car the owner is paying insurance on for no reason.
+
+#### Outstanding A/R and payment health
+
+The owner's chase list: unpaid invoices, payment-method-failed parents, payment plans behind schedule. Each row has a one-tap "send reminder" action. This is operational money the dashboard surfaces because nobody enjoys hunting for it manually.
+
+#### Compliance health
+
+The "what might bite me next week" surface:
+
+- Credentials pending issuance.
+- Students approaching milestones with missing prerequisites.
+- Instructor licenses expiring within 30 days.
+- Vehicle insurance or registration expiring within 30 days.
+- Maintenance items approaching auto-block thresholds.
+
+#### Funnel and pipeline
+
+For owners with a marketing-aware mindset:
+
+- Time-to-paid trend (the north-star metric from the auth section).
+- Enrollment trend over the past 90 days.
+- Current open enrollments by program.
+- Drop-off points in the public funnel.
+
+#### Customizable but not overwhelming
+
+Default layout works for 90% of owners out of the box. Per-card toggles let an owner hide what they don't care about. No widget-builder, no drag-and-drop dashboard editor — explicit anti-pattern. The same sleek-and-simple posture set for the vehicles module applies here.
+
+#### Daily digest email
+
+Owners who don't log in daily get a morning email with the same top-line numbers plus anything that needs attention. The dashboard surface comes to them when they're not coming to it. Powered by the platform's email infrastructure.
+
+#### Mobile dashboard
+
+Owners check their phone. The dashboard's top-card answer works one-glance on mobile. Detail drilling is acceptable as a secondary mobile experience but the top answer is the must-have mobile shape.
+
+#### Comparison views
+
+- Period over period (this month vs. last).
+- Year over year once enough history exists.
+- Multi-location schools compare locations against each other.
+- Anonymized platform-aggregate benchmarking is deferred to Phase 2 and worth considering as a long-term retention story (every owner wants to know how they stack up against the average school).
+
+#### Export everything
+
+Every view exports to CSV or PDF. Owners working with accountants, boards, or partners want defensible numbers. Exporting is a trust signal as well as a feature.
+
 ## Multi-tenant architecture
 
 The platform should be multi-tenant from day one. Every school should operate inside its own tenant with configurable branding, pricing, terminology, messaging, and state rule configuration.[cite:27][cite:3]
