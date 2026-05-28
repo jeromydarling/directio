@@ -26,6 +26,12 @@ import { newId } from "~/lib/ids";
 type RubricEntry = { level: BtwProficiencyLevel; note: string | null };
 type RubricMap = Partial<Record<BtwRubricSkillKey, RubricEntry>>;
 
+type BtwLessonPlan = {
+  ordinal: number;
+  title: string;
+  body: string;
+};
+
 type ApptRow = {
   id: string;
   kind: string;
@@ -45,6 +51,8 @@ type ApptRow = {
   vehicleLabel: string | null;
   prevFocus: string | null;
   rubric: RubricMap;
+  btwLessonNumber: number | null;
+  btwLessonPlan: BtwLessonPlan | null;
 };
 
 type InstructorCtx = {
@@ -155,10 +163,55 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     }
   }
 
-  const todays: ApptRow[] = rows.results.map((r) => ({
-    ...r,
-    rubric: rubricMaps.get(r.id) ?? {},
-  }));
+  // Compute the BTW lesson number for each BTW appointment by counting
+  // prior completed BTW lessons for the same enrollment, and fetch the
+  // corresponding lesson plan from the platform-owned progression pack
+  // (seeded in migration 0026). One round-trip per appointment is fine
+  // at MVP scale — instructor day rarely has >6 lessons.
+  const btwAppointments = rows.results.filter((r) => r.kind === "btw");
+  const btwLessonByAppt = new Map<string, { number: number; plan: BtwLessonPlan | null }>();
+  for (const a of btwAppointments) {
+    const priorRow = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM appointment
+          WHERE organizationId = ?
+            AND enrollmentId = ?
+            AND kind = 'btw'
+            AND status = 'completed'
+            AND startsAt < ?`,
+      )
+      .bind(tenant.organization.id, a.enrollmentId, a.startsAt)
+      .first<{ n: number }>();
+    const number = (priorRow?.n ?? 0) + 1;
+    // Lesson plan ordinal is 0-indexed; cap lookup at 6 (extra practice
+    // lessons beyond 6 reuse the last plan as guidance).
+    const ordinal = Math.min(number - 1, 5);
+    const planRow = await db
+      .prepare(
+        `SELECT l.ordinal, l.title, l.body
+           FROM lesson l
+           JOIN module m ON m.id = l.moduleId
+          WHERE m.id = 'module_btw_progression_v1'
+            AND l.ordinal = ?
+          LIMIT 1`,
+      )
+      .bind(ordinal)
+      .first<{ ordinal: number; title: string; body: string }>();
+    btwLessonByAppt.set(a.id, {
+      number,
+      plan: planRow ?? null,
+    });
+  }
+
+  const todays: ApptRow[] = rows.results.map((r) => {
+    const btwInfo = btwLessonByAppt.get(r.id);
+    return {
+      ...r,
+      rubric: rubricMaps.get(r.id) ?? {},
+      btwLessonNumber: btwInfo?.number ?? null,
+      btwLessonPlan: btwInfo?.plan ?? null,
+    };
+  });
 
   return {
     instructorId: instructor.id,
@@ -533,6 +586,19 @@ function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean })
         <StatusPill status={a.status} />
       </div>
 
+      {a.btwLessonPlan && a.btwLessonNumber !== null && (
+        <details className="mt-3 rounded-lg border border-accent-300 bg-accent-50/50 dark:border-accent-800 dark:bg-accent-950/20">
+          <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-accent-800 dark:text-accent-200">
+            BTW lesson {a.btwLessonNumber}
+            {a.btwLessonNumber > 6 ? " (extra practice)" : ""} ·{" "}
+            <span className="font-normal">{a.btwLessonPlan.title}</span>
+          </summary>
+          <div className="prose prose-sm max-w-none px-3 pb-3 text-ink-700 dark:prose-invert dark:text-ink-200">
+            <BtwLessonBody body={a.btwLessonPlan.body} />
+          </div>
+        </details>
+      )}
+
       {a.prevFocus && (
         <p className="mt-3 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2 text-sm text-ink-700 dark:border-brand-800 dark:bg-brand-950/30 dark:text-ink-200">
           <strong className="text-brand-700 dark:text-brand-200">Carry over: </strong>
@@ -809,6 +875,113 @@ function StatusPill({ status }: { status: string }) {
       {status.replace("_", " ")}
     </span>
   );
+}
+
+/**
+ * Render the BTW lesson plan markdown with a light touch — preserves
+ * headings and bullets without pulling in a markdown library. Each
+ * lesson body is platform-controlled so we trust the content.
+ */
+function BtwLessonBody({ body }: { body: string }) {
+  const blocks: Array<{ kind: "h"; level: number; text: string } | { kind: "p"; text: string } | { kind: "ul"; items: string[] }> = [];
+  let currentList: string[] | null = null;
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) {
+      if (currentList) {
+        blocks.push({ kind: "ul", items: currentList });
+        currentList = null;
+      }
+      continue;
+    }
+    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (heading) {
+      if (currentList) {
+        blocks.push({ kind: "ul", items: currentList });
+        currentList = null;
+      }
+      blocks.push({ kind: "h", level: heading[1].length, text: heading[2] });
+      continue;
+    }
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (bullet) {
+      currentList = currentList ?? [];
+      currentList.push(bullet[1]);
+      continue;
+    }
+    if (currentList) {
+      blocks.push({ kind: "ul", items: currentList });
+      currentList = null;
+    }
+    blocks.push({ kind: "p", text: line });
+  }
+  if (currentList) blocks.push({ kind: "ul", items: currentList });
+
+  return (
+    <div className="space-y-2 pt-1">
+      {blocks.map((b, i) => {
+        if (b.kind === "h") {
+          const cls =
+            b.level === 1
+              ? "text-base font-semibold"
+              : b.level === 2
+                ? "text-sm font-semibold"
+                : "text-xs font-semibold uppercase tracking-wider";
+          return (
+            <p key={i} className={`${cls} text-ink-900 dark:text-ink-50`}>
+              {renderInline(b.text)}
+            </p>
+          );
+        }
+        if (b.kind === "ul") {
+          return (
+            <ul key={i} className="list-disc space-y-1 pl-5 text-sm">
+              {b.items.map((it, j) => (
+                <li key={j}>{renderInline(it)}</li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={i} className="text-sm">
+            {renderInline(b.text)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderInline(text: string): React.ReactNode {
+  // Render **bold**, `code`, and leave the rest as-is.
+  const parts: React.ReactNode[] = [];
+  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let last = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const token = match[0];
+    if (token.startsWith("**")) {
+      parts.push(
+        <strong key={++key} className="font-semibold">
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    } else if (token.startsWith("`")) {
+      parts.push(
+        <code
+          key={++key}
+          className="rounded bg-ink-100 px-1 py-0.5 font-mono text-xs dark:bg-ink-800"
+        >
+          {token.slice(1, -1)}
+        </code>,
+      );
+    }
+    last = match.index + token.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
 }
 
 function fmtTime(d: Date): string {
