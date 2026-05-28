@@ -249,6 +249,63 @@ Credential workflow features:
 - Parent/student status visibility.
 - Audit trail for issuance and submission events.
 
+### 7. Migration and data portability
+
+Existing schools have years of in-flight enrollments, partial completions, lesson logs, hour totals, payment history, and audit trail. Without a real importer, switching to directio means abandoning students mid-program and breaking the audit bridge to the old system. Status quo wins by default. This module is the difference between "interested" and "signed."
+
+The hard part is not the file format. It is the **audit-bridge problem**: a student who completed 4 of 6 BTW hours under their previous school's system and finishes the rest with us must end up with a single defensible record if the state audits. The system must be able to represent "hours 1–4 happened in System X, hours 5–6 happened here, here is the original instructor sign-off for each" without lying or losing context.
+
+#### Universal CSV importer
+
+A CSV-first importer covering the universal entities, with mappable column headers, a validation preview, and a dry-run before commit:
+
+- Students and parent/guardian records, with family linkage preserved.
+- Enrollments with their current state and any past status changes.
+- Instructor roster (carries forward into a separate workflow to invite real users; see below).
+- Vehicle list.
+- Appointment history — completed, scheduled, canceled, no-show — with timestamps and outcome notes where available.
+- Payment ledger entries to date.
+- Credential records already issued.
+
+#### Imported-record provenance
+
+Every imported row carries an `imported_from` reference: source system name, source ID, import batch ID, original timestamps. That reference flows through to audit logs and to any record that descends from an imported row. A lesson imported as "completed elsewhere" is visually marked in the journey timeline so parents, students, and admins always know which milestones happened where.
+
+#### Partial-state students as first-class
+
+"Joined mid-journey" is modeled as a first-class enrollment shape, not a workaround. The journey timeline shows imported milestones with a different visual treatment and a "completed in previous system" caveat. The credential eligibility engine treats imported hours as satisfying the same requirements as native hours, provided the import carried sufficient attribution.
+
+#### Instructor sign-off bridging
+
+Imported BTW hours typically lack a directio user to attribute to. The data model accepts a placeholder attribution carrying the original instructor's name and license number if known, marked clearly as an external attribution. Native hours after migration carry full instructor-user attribution. Both forms satisfy audit requirements; the distinction is visible.
+
+#### Credential bridging
+
+A student already credentialed by their previous school (e.g. Blue Card already issued) is modeled as "credentialed by external authority" with the issuance proof attached as an uploaded PDF. The eligibility engine respects the external credential the same way it respects a native one; the audit trail makes the source explicit.
+
+#### Payment ledger import
+
+Past payments and outstanding balances import as ledger entries for historical visibility. Stripe-managed payments go forward from cutover; prior payments are reference-only and never re-attempted. Outstanding balances flow into the active ledger and can be collected through directio if the school chooses.
+
+#### Live cutover playbook
+
+A documented playbook accompanies the importer (operational doc, not a feature):
+
+1. Freeze writes in the old system at an agreed cutover time.
+2. Snapshot the source data.
+3. Run the dry-run import; resolve validation issues.
+4. Commit the import.
+5. Reconcile a small sample manually with the school owner present.
+6. Go live; old system becomes read-only reference.
+
+#### White-glove migration for the first cohort
+
+The first N customer migrations are run as a paid white-glove service by the directio team. This is intentional: it surfaces the edge cases that productize the self-serve importer, builds the playbook, and removes friction from the most important early conversions. Productized self-serve import lands in Phase 1.5 once the playbook is battle-tested.
+
+#### Export parity
+
+A symmetric exporter ships from day one so a school can leave with their data intact. This is a trust signal during the sales conversation and a hedge against lock-in concerns. The exporter covers every entity the importer covers, in the same CSV shape, plus credential PDFs and any attached receipts as a zip bundle.
+
 ## Multi-tenant architecture
 
 The platform should be multi-tenant from day one. Every school should operate inside its own tenant with configurable branding, pricing, terminology, messaging, and state rule configuration.[cite:27][cite:3]
