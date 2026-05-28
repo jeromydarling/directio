@@ -68,6 +68,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     priorRecoveredRow,
     priorPayrollRow,
     funnelRow,
+    locationRows,
   ] = await Promise.all([
     db
       .prepare(
@@ -277,6 +278,22 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         fastestMs: number | null;
         avgMs: number | null;
       }>(),
+    // Per-location utilization comparison — only meaningful when the
+    // school has 2+ active locations.
+    db
+      .prepare(
+        `SELECT l.id, l.name,
+                COUNT(CASE WHEN a.status = 'completed' AND a.startsAt >= ? THEN 1 END) AS completed,
+                COUNT(CASE WHEN a.status IN ('scheduled','confirmed') AND a.startsAt >= ? AND a.startsAt < ? THEN 1 END) AS upcoming
+           FROM location l
+           LEFT JOIN vehicle v ON v.locationId = l.id
+           LEFT JOIN appointment a ON a.vehicleId = v.id AND a.organizationId = l.organizationId
+          WHERE l.organizationId = ? AND l.active = 1
+          GROUP BY l.id, l.name
+          ORDER BY completed DESC, l.name`,
+      )
+      .bind(periodStart, now, horizonEnd, orgId)
+      .all<{ id: string; name: string; completed: number; upcoming: number }>(),
   ]);
 
   const revenueCents = revenueRow?.cents ?? 0;
@@ -341,6 +358,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       fastestMs: funnelRow?.fastestMs ?? null,
       avgMs: funnelRow?.avgMs ?? null,
     },
+    locations: locationRows.results,
     counts: {
       students: studentRow?.n ?? 0,
       activeEnrollments: activeEnrollRow?.n ?? 0,
@@ -438,6 +456,8 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
       <RecoveredSection data={data} />
 
       <PayrollSection data={data} />
+
+      {data.locations.length >= 2 && <LocationsSection data={data} />}
 
       <CapacitySection data={data} />
 
@@ -665,6 +685,42 @@ function PayrollSection({ data }: { data: Loader }) {
               : "pay accrued exceeds fees collected"
           }
         />
+      </div>
+    </section>
+  );
+}
+
+function LocationsSection({ data }: { data: Loader }) {
+  return (
+    <section>
+      <div className="mb-3 flex items-end justify-between">
+        <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
+          Locations, {data.period.label.toLowerCase()}
+        </h2>
+        <Link
+          to="/admin/locations"
+          className="text-xs text-brand-600 hover:underline dark:text-brand-300"
+        >
+          Manage locations →
+        </Link>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {data.locations.map((l) => (
+          <Card key={l.id} className="p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-brand-700 dark:text-brand-200">
+              {l.name}
+            </p>
+            <p className="mt-2 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+              {l.completed}
+              <span className="ml-2 text-sm font-normal text-ink-500 dark:text-ink-400">
+                completed
+              </span>
+            </p>
+            <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">
+              {l.upcoming} upcoming (next 14d)
+            </p>
+          </Card>
+        ))}
       </div>
     </section>
   );
