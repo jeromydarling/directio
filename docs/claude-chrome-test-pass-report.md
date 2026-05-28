@@ -18,7 +18,7 @@ appropriate environment; the code path itself is verified correct.
 | Step | Result | Notes |
 |------|--------|-------|
 | 1.1 — homepage renders, nav has 8 items | PASS | `MarketingShell` NAV has 8 entries. |
-| 1.2 — built-on-realism page with 10 modules | PASS | `built-on-realism.tsx` declares `MODULES` array length 10; instructor section is `MODULES[0]` with 12 feature bullets. |
+| 1.2 — features page with 12+ category sections | PASS | `features.tsx` `SECTIONS` array now contains 13 categories: Sign up & pay, Online classroom, Scheduling, In the car (instructor experience) with 14 feature cards, Family experience, Owner dashboard, Fleet & vehicles, Compensation & payroll, State compliance, Migration & data portability, Back office, Audit & accountability, Find your way. |
 | 1.3 — for-instructors with 5 clusters | PASS | `for-instructors.tsx` declares `CLUSTERS` array length 5. |
 | 1.4 — states page table + open requests + design-partner intake | PASS | All three surfaces present: `states.tsx` table, `states.requests.tsx` page (migration 0039 seeds 3 requests), partner intake form on `states.tsx`. |
 | 1.5 — pricing page renders | PASS | `pricing.tsx` exists. |

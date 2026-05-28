@@ -4,7 +4,6 @@ import { useEffect, useState, type ReactNode } from "react";
 const NAV = [
   { to: "/start-a-school", label: "Start a school" },
   { to: "/for-schools", label: "Migrate" },
-  { to: "/built-on-realism", label: "How we built it" },
   { to: "/features", label: "Features" },
   { to: "/for-families", label: "Family experience" },
   { to: "/for-instructors", label: "For instructors" },
@@ -210,7 +209,6 @@ function MarketingFooter({ env }: { env: string }) {
           title="Product"
           links={[
             { label: "Features", to: "/features" },
-            { label: "How we built it", to: "/built-on-realism" },
             { label: "Pricing", to: "/pricing" },
             { label: "State coverage", to: "/states" },
             { label: "Sign in", to: "/login" },

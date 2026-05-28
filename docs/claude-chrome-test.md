@@ -35,20 +35,34 @@ Anonymous browser. No login.
 
 1. **DO** load `/`.
 2. **VERIFY** the page renders without JS errors. Hero copy is visible.
-3. **VERIFY** the marketing nav contains: Start a school, Migrate, How we
-   built it, Features, Family experience, For instructors, State coverage,
-   Pricing.
+3. **VERIFY** the marketing nav contains: Start a school, Migrate,
+   Features, Family experience, For instructors, State coverage, Pricing.
 
-### 1.2 Built on realism (10-module page)
+### 1.2 Features page (full feature index)
 
-1. **DO** click "How we built it" in the marketing nav.
-2. **VERIFY** the page heading reads "We imagined our own six-month
-   failure. Then built every feature to prevent it." (or similar).
-3. **VERIFY** the table-of-contents lists exactly 10 modules.
-4. **VERIFY** the instructor module section (#instructor) shows at least
-   10 feature bullets.
-5. **DO** click each TOC entry in order; **VERIFY** the page scrolls to
-   each anchor and the module title is visible.
+1. **DO** click "Features" in the marketing nav.
+2. **VERIFY** the page heading reads "Everything in the box." with the
+   "Features" eyebrow.
+3. **VERIFY** the in-page nav row at the top lists at least 12 category
+   chips: Sign up & pay, Online classroom, Scheduling, In the car
+   (instructor experience), Family experience, Owner dashboard,
+   Fleet & vehicles, Compensation & payroll, State compliance,
+   Migration & data portability, Back office, Audit & accountability,
+   Find your way.
+4. **VERIFY** the "In the car (instructor experience)" category renders
+   at least 12 feature cards including BTW lesson plan auto-surface,
+   structured 15-skill BTW rubric, two-ping geolocation breadcrumbs,
+   vehicle check-out / check-in, open-shift offers, substitute coverage
+   requests, cross-school identity, pay transparency.
+5. **VERIFY** the "Owner dashboard" category includes the dollars-
+   recovered story, period selector, capacity heatmap with gap callouts,
+   daily digest, CSV snapshot, multi-location comparison,
+   customizable card toggles.
+6. **VERIFY** the "Compensation & payroll" category covers the rules
+   engine, versioning, pay periods, drafts, adjustment audit history,
+   payroll-ready CSV, 1099-NEC summary, tax document storage.
+7. **DO** click each TOC chip in order; **VERIFY** the page scrolls
+   to each section anchor.
 
 ### 1.3 For instructors
 

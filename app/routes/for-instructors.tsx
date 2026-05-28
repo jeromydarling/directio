@@ -223,7 +223,7 @@ export default function ForInstructors({ loaderData }: Route.ComponentProps) {
                 Sign in / get invited <span aria-hidden>→</span>
               </a>
               <Link
-                to="/built-on-realism#instructor"
+                to="/features#in-the-car-instructor-experience"
                 className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-5 py-2.5 text-sm font-medium text-ink-700 hover:border-brand-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
               >
                 Full feature index →
