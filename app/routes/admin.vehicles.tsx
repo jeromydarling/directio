@@ -2,7 +2,7 @@ import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.vehicles";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
-import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
+import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput, Select } from "~/components/form";
 import {
   VEHICLE_STATUSES,
@@ -171,6 +171,11 @@ export default function AdminVehicles({ loaderData, actionData }: Route.Componen
         eyebrow="Fleet"
         title={vehicles.length === 0 ? "No vehicles yet" : `${vehicles.length} vehicles`}
         description="Insurance, registration, and maintenance keep your cars on the schedule. Anything expired auto-removes the vehicle from booking until you resolve it."
+        actions={
+          <LinkButton to="/admin/import/fleet" variant="secondary">
+            Import CSV
+          </LinkButton>
+        }
       />
 
       {(blockedCount > 0 || warningCount > 0) && (
