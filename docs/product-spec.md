@@ -92,18 +92,70 @@ The core product object is not simply a course enrollment. It is a student journ
 
 This timeline should be visible to admins, parents, students, and instructors in role-appropriate ways.[cite:34][cite:38][cite:58]
 
-### 4. Scheduling and no-show reduction
+### 4. Scheduling — the core product surface
 
-Scheduling should include:
+For a driving school the scheduling board is not a feature; it is the business. Calendars decide whether revenue happens, whether instructors stay, whether parents trust the school. A merely-okay scheduler loses to the whiteboard and group text most schools already use. This section is treated with the weight that reality demands.
 
-- Instructor availability management.[cite:66][cite:75]
-- Vehicle assignment.
-- Geographic service area preferences.
-- Student self-scheduling rules.
-- Waitlists and slot backfilling.
-- Automated reminders via email/SMS.[cite:34][cite:73]
-- Confirmation workflows to reduce no-shows.[cite:66][cite:73]
-- Lesson status capture: scheduled, confirmed, completed, canceled, no-show, weather-hold.
+#### One constraint engine, three booking surfaces
+
+The architectural core is a single constraint engine, server-side on Workers, with the signature:
+
+`(student, next-lesson-spec, school-policies, time-window) → ranked list of valid slots`
+
+The engine consumes:
+
+- Instructor availability and certifications (BTW vs classroom, adult vs teen, language, special endorsements).
+- Vehicle availability, assignment, and maintenance windows.
+- Pickup-location geography — drive-time-aware, so a 4pm in Stillwater followed by a 5pm in Eden Prairie is rejected as impossible, not just flagged.
+- Student curriculum progression — no night driving before lesson 4, lesson-series ordering, prerequisite gates.
+- Student preferences — instructor gender, no-freeway-yet, preferred language, accessibility needs.
+- Family time windows — school hours, parent work windows, custody-schedule blocks.
+- Cross-tenant instructor double-booking guard (per the instructor identity model).
+- School business rules — min/max lessons per week per student, max consecutive hours per instructor, mandatory rest gaps.
+
+Constraint violations resolve as either **hard errors** (never bookable by any surface) or **warnings** (overridable by admin only). The engine returns ranked slots in under 500ms target; ranking factors in student preferences, instructor familiarity with the student, geographic efficiency, and utilization smoothing.
+
+All three booking surfaces ride this engine:
+
+**Admin board (drag-and-drop with live validation).** The 7am and 4pm screen for every dispatcher. Instructors as columns, time as rows, lessons as draggable cards, color-coded by status. Drop a card anywhere and the engine validates in real time; warnings surface inline, hard errors block the drop. An open-shift queue runs down the side for gaps and no-show backfills. Real-time via Durable Objects, so any change made by a parent, instructor, or another admin lands on the board within a second.
+
+**Parent self-serve.** "Book Sarah's next lesson." Parent sees the top eight to twelve valid slots in their preferred window, already filtered by every rule. One tap to book. Reschedule and cancel live in the same surface with fee disclosure baked in per the transparent-fees UX non-negotiable.
+
+**AI auto-suggest at sign-off.** The moment an instructor signs off on a lesson, the engine pre-computes the top three next-lesson slots for that student and pushes a "Book Sarah's next lesson?" notification to the parent within 60 seconds. One-tap confirm or pick an alternative. This is the no-show economics fix at the source: the next lesson lands while the parent's attention is still on driver ed, not three days later when motivation has decayed.
+
+All three surfaces write to the same `appointments` table, respect the same constraint engine, and update the same real-time board.
+
+#### Lesson series as first-class
+
+Many schools sell packages — "Tuesday and Thursday at 4pm for six weeks." The data model treats a lesson series as one logical booking that contains six linked appointments. When a series is rescheduled, the system asks "just this lesson or the rest of the series?" When progress is tracked, the series is the unit. When pricing is shown, the series is what the parent sees on the invoice.
+
+#### Capacity and utilization
+
+A forward-looking utilization view is MVP, not Phase 2. Owners log in weekly to answer "am I running a business?" and that answer lives here:
+
+- Next 14-day heatmap by instructor and by vehicle.
+- Gap callouts ("Tuesday 4pm Bob has three open slots — promote on the public booking page?").
+- Pacing against revenue targets if the school configures them.
+- No-show rate, on-time arrival rate, and reschedule rate as the operational health metrics.
+
+#### Statuses, reminders, no-show recovery
+
+- Lesson statuses: scheduled, confirmed, in-progress, completed, canceled, no-show, weather-hold, instructor-canceled, vehicle-canceled.
+- Automated reminders via SMS and email at configurable intervals (default: 24h reminder, 2h confirmation ask, 15min "instructor en route").
+- No-show handling: auto-fee per school rules, immediate open-shift offer to other students on the waitlist or to parents who requested earlier dates, recovery analytics so admins can see the dollars saved.
+- Weather-hold: school-wide or location-wide cancellation flow with one-click parent notification and automatic reschedule suggestions.
+
+#### Geographic intelligence
+
+Drive-time between consecutive pickups is computed and cached. The engine refuses sequences that exceed the drive-time budget; the board displays travel time between cards so dispatchers see the day's geography at a glance. Service-area preferences per instructor are honored as hard constraints unless the admin explicitly overrides.
+
+#### Architectural implications
+
+1. Constraint engine is pure and server-side; same code serves all three booking surfaces.
+2. Real-time board state lives in Durable Objects, not request-response polling.
+3. Drive-time matrix is cached in KV with periodic refresh; cold misses fall back to a maps API.
+4. The `appointments` table is the single source of truth; series are a sibling table that links member appointments.
+5. Notifications fan out through Cloudflare Queues so the booking write returns fast and reminders/confirmations dispatch asynchronously.
 
 ### 5. Permit-eligibility credential workflow
 
