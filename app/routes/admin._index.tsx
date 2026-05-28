@@ -67,6 +67,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     instructorLicenseRow,
     priorRecoveredRow,
     priorPayrollRow,
+    funnelRow,
   ] = await Promise.all([
     db
       .prepare(
@@ -251,6 +252,31 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       )
       .bind(orgId, priorStart, priorEnd)
       .first<{ cents: number }>(),
+    // Time-to-paid funnel: enrollments created this period, how many
+    // ended up with a succeeded payment, and the median time from
+    // enrollment creation to first succeeded payment.
+    db
+      .prepare(
+        `SELECT
+           COUNT(DISTINCT e.id) AS enrolled,
+           COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN e.id END) AS paid,
+           MIN(p.createdAt - e.createdAt) AS fastestMs,
+           AVG(p.createdAt - e.createdAt) AS avgMs
+         FROM enrollment e
+         LEFT JOIN payment p
+           ON p.enrollmentId = e.id
+          AND p.status = 'succeeded'
+          AND p.organizationId = e.organizationId
+         WHERE e.organizationId = ?
+           AND e.createdAt >= ?`,
+      )
+      .bind(orgId, periodStart)
+      .first<{
+        enrolled: number;
+        paid: number;
+        fastestMs: number | null;
+        avgMs: number | null;
+      }>(),
   ]);
 
   const revenueCents = revenueRow?.cents ?? 0;
@@ -309,6 +335,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     periodPresets: PERIOD_PRESETS,
     priorRecoveredCents: priorRecoveredRow?.cents ?? 0,
     priorPayrollCents: priorPayrollRow?.cents ?? 0,
+    funnel: {
+      enrolled: funnelRow?.enrolled ?? 0,
+      paid: funnelRow?.paid ?? 0,
+      fastestMs: funnelRow?.fastestMs ?? null,
+      avgMs: funnelRow?.avgMs ?? null,
+    },
     counts: {
       students: studentRow?.n ?? 0,
       activeEnrollments: activeEnrollRow?.n ?? 0,
@@ -392,6 +424,8 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
       />
 
       <HealthBanner data={data} />
+
+      <FunnelSection data={data} />
 
       <RecoveredSection data={data} />
 
@@ -483,6 +517,50 @@ function HealthBanner({ data }: { data: Loader }) {
       </div>
     </Card>
   );
+}
+
+function FunnelSection({ data }: { data: Loader }) {
+  const { funnel } = data;
+  if (funnel.enrolled === 0) return null;
+  const conversion = funnel.enrolled > 0 ? funnel.paid / funnel.enrolled : 0;
+  const fastest = funnel.fastestMs ? humanDuration(funnel.fastestMs) : null;
+  const avg = funnel.avgMs ? humanDuration(Math.round(funnel.avgMs)) : null;
+  return (
+    <section>
+      <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
+        Enrollment funnel, {data.period.label.toLowerCase()}
+      </h2>
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatTile
+          label="Enrolled"
+          value={funnel.enrolled}
+          hint="new enrollment records created"
+        />
+        <StatTile
+          tone={conversion >= 0.8 ? "emerald" : conversion >= 0.5 ? "amber" : "rose"}
+          label="Paid through"
+          value={`${funnel.paid} (${Math.round(conversion * 100)}%)`}
+          hint={
+            funnel.paid === funnel.enrolled
+              ? "every enrollment paid"
+              : "of enrollments produced a paid payment"
+          }
+        />
+        <StatTile
+          label="Time to paid"
+          value={avg ?? "—"}
+          hint={fastest ? `Fastest: ${fastest}` : "average from enrollment to paid"}
+        />
+      </div>
+    </section>
+  );
+}
+
+function humanDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 60 * 60_000) return `${Math.round(ms / 60_000)}m`;
+  if (ms < 24 * 60 * 60_000) return `${Math.round(ms / (60 * 60_000))}h`;
+  return `${Math.round(ms / (24 * 60 * 60_000))}d`;
 }
 
 function RecoveredSection({ data }: { data: Loader }) {
