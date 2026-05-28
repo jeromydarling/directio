@@ -443,24 +443,10 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
           <VoiceRecorder
             uploadUrl="/api/lesson/narration/upload"
             uploadFields={{ lessonId: lesson.id }}
-            label={`Record your own narration: ${lesson.title}`}
-            prompt={
-              lesson.narrationScript
-                ? "Read the narration script below. We'll clean up your audio in your browser before saving — high-pass filter, soft noise gate, and a compressor so quiet and loud passages match."
-                : "Read the lesson body in your own words. We clean up your audio in your browser — high-pass, soft noise gate, and a compressor — before saving."
-            }
+            label={`Record narration: ${lesson.title}`}
+            prompt="Read the script below at a comfortable pace. We clean up the audio in your browser before saving — high-pass filter, soft noise gate, compressor — so you don't need a studio mic."
+            script={lesson.narrationScript ?? undefined}
           />
-
-          {lesson.narrationScript && (
-            <Card>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-brand-600 dark:text-brand-300">
-                Narration script
-              </p>
-              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-ink-700 dark:text-ink-200">
-                {lesson.narrationScript}
-              </pre>
-            </Card>
-          )}
         </div>
       </section>
 

@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * In-browser voice recorder with a real audio-cleanup chain.
+ * In-browser voice recorder with a real audio-cleanup chain and a
+ * teleprompter for the narration script.
  *
- * Pipeline (Web Audio API, runs in the user's browser):
+ * Audio pipeline (runs in the user's browser before any byte leaves):
  *
  *   getUserMedia (with noiseSuppression / echoCancellation /
- *      autoGainControl flags — browser native cleanup)
+ *      autoGainControl flags — browser-native cleanup)
  *     │
  *     ▼
  *   MediaStreamSource
@@ -16,14 +17,13 @@ import { useEffect, useRef, useState } from "react";
  *      handling thumps, mic-stand resonance)
  *     │
  *     ▼
- *   Soft noise gate (threshold-based attenuation via a custom
- *      GainNode driven by an AnalyserNode RMS reading) — drops
- *      background room hiss between sentences
+ *   Soft noise gate (threshold-based attenuation driven by an
+ *      AnalyserNode RMS reading) — drops background hiss between
+ *      sentences
  *     │
  *     ▼
  *   DynamicsCompressorNode (ratio 3:1, knee 30 dB, threshold -24 dB,
- *      attack 5 ms, release 250 ms — evens out shouted vs whispered
- *      passages, makes the recording broadcast-consistent)
+ *      attack 5 ms, release 250 ms — evens shouted vs whispered)
  *     │
  *     ▼
  *   GainNode (post-compressor makeup gain)
@@ -31,16 +31,16 @@ import { useEffect, useRef, useState } from "react";
  *     ▼
  *   MediaStreamDestination → MediaRecorder → Opus in WebM
  *
- * The AnalyserNode also drives the live level meter so the user can
- * see they're picking up sound and aren't clipping.
+ * Teleprompter:
+ *  - If a `script` is provided, it renders large-type with auto-scroll
+ *    while recording. Pace is user-adjustable (slow / normal / fast).
+ *  - The current paragraph is highlighted; the rest dim slightly so
+ *    the eye knows where to go without thinking.
+ *  - Position is calculated from elapsed time × words-per-minute, not
+ *    from voice-recognition. Simpler and works offline.
  *
- * Works on:
- *  - Desktop Chrome, Firefox, Edge, Safari 14+
- *  - iOS Safari 14.5+ (MediaRecorder shipped)
- *  - Android Chrome / Samsung Internet
- *
- * Not supported: legacy iOS Safari (<14.5). We feature-detect and
- * show a friendly "use a desktop or update iOS" message.
+ * Browser support: desktop Chrome, Firefox, Edge, Safari 14+; iOS
+ * Safari 14.5+; Android Chrome.
  */
 
 type RecorderState = "idle" | "requesting" | "ready" | "recording" | "uploading" | "done" | "error";
@@ -54,9 +54,21 @@ export type VoiceRecorderProps = {
   onUploaded?: (response: { audioUrl: string; durationSec: number }) => void;
   /** Display label, e.g. "Record narration for: Reading traffic signs". */
   label?: string;
-  /** Hint about what to say. */
+  /** Hint about what to do. */
   prompt?: string;
+  /**
+   * The script to read. Plain text with `\n\n` between paragraphs.
+   * When present, the recorder shows a teleprompter that auto-scrolls
+   * while recording.
+   */
+  script?: string;
 };
+
+const PACE_PRESETS: Array<{ key: "slow" | "normal" | "fast"; label: string; wpm: number }> = [
+  { key: "slow", label: "Slow", wpm: 130 },
+  { key: "normal", label: "Normal", wpm: 150 },
+  { key: "fast", label: "Fast", wpm: 175 },
+];
 
 export function VoiceRecorder({
   uploadUrl,
@@ -64,13 +76,15 @@ export function VoiceRecorder({
   onUploaded,
   label,
   prompt,
+  script,
 }: VoiceRecorderProps) {
   const [state, setState] = useState<RecorderState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [level, setLevel] = useState(0); // 0..1 instant RMS for the meter
+  const [level, setLevel] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [paceKey, setPaceKey] = useState<"slow" | "normal" | "fast">("normal");
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -79,13 +93,82 @@ export function VoiceRecorder({
   const gateGainRef = useRef<GainNode | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartRef = useRef<number>(0);
-  const rafRef = useRef<number | null>(null);
+  const meterRafRef = useRef<number | null>(null);
+  const elapsedRafRef = useRef<number | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
+  const scriptContainerRef = useRef<HTMLDivElement | null>(null);
+  const paragraphRefs = useRef<Array<HTMLParagraphElement | null>>([]);
 
   const browserSupported =
     typeof window !== "undefined" &&
     typeof navigator !== "undefined" &&
     !!navigator.mediaDevices?.getUserMedia &&
     typeof MediaRecorder !== "undefined";
+
+  // Break the script into paragraphs and pre-compute the cumulative
+  // word count up to each paragraph. We use that to figure out which
+  // paragraph the reader should be on at time T given a target wpm.
+  const paragraphs = useMemo(() => {
+    if (!script) return [] as Array<{ text: string; cumulativeWords: number; words: number }>;
+    const paras = script.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
+    let cum = 0;
+    return paras.map((text) => {
+      const words = text.split(/\s+/).length;
+      cum += words;
+      return { text, cumulativeWords: cum, words };
+    });
+  }, [script]);
+  const totalWords = paragraphs.length ? paragraphs[paragraphs.length - 1].cumulativeWords : 0;
+  const pace = PACE_PRESETS.find((p) => p.key === paceKey)!;
+
+  // Which paragraph is "active" right now (based on elapsed time × wpm)?
+  const activeParagraphIndex = useMemo(() => {
+    if (!paragraphs.length || state !== "recording") return -1;
+    const minutesIn = elapsedMs / 60_000;
+    const wordsRead = minutesIn * pace.wpm;
+    // Find the first paragraph whose cumulative end > wordsRead.
+    for (let i = 0; i < paragraphs.length; i++) {
+      if (paragraphs[i].cumulativeWords > wordsRead) return i;
+    }
+    return paragraphs.length - 1;
+  }, [elapsedMs, paragraphs, pace.wpm, state]);
+
+  // Auto-scroll loop: smoothly move scrollTop toward the active
+  // paragraph's position ~40% down the viewport.
+  useEffect(() => {
+    if (state !== "recording" || activeParagraphIndex < 0) {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+      return;
+    }
+    const container = scriptContainerRef.current;
+    const target = paragraphRefs.current[activeParagraphIndex];
+    if (!container || !target) return;
+
+    const tick = () => {
+      const cont = scriptContainerRef.current;
+      const tgt = paragraphRefs.current[activeParagraphIndex];
+      if (!cont || !tgt) return;
+      const desired =
+        tgt.offsetTop - cont.clientHeight * 0.4 + tgt.clientHeight / 2;
+      const current = cont.scrollTop;
+      const delta = desired - current;
+      if (Math.abs(delta) < 0.5) {
+        cont.scrollTop = desired;
+        scrollRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      cont.scrollTop = current + delta * 0.08; // ease toward target
+      scrollRafRef.current = requestAnimationFrame(tick);
+    };
+    scrollRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    };
+  }, [state, activeParagraphIndex]);
 
   // Cleanup on unmount.
   useEffect(() => {
@@ -97,8 +180,12 @@ export function VoiceRecorder({
   }, []);
 
   function teardown() {
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
+    if (meterRafRef.current !== null) cancelAnimationFrame(meterRafRef.current);
+    if (elapsedRafRef.current !== null) cancelAnimationFrame(elapsedRafRef.current);
+    if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+    meterRafRef.current = null;
+    elapsedRafRef.current = null;
+    scrollRafRef.current = null;
     recorderRef.current?.state === "recording" && recorderRef.current.stop();
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -113,9 +200,6 @@ export function VoiceRecorder({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          // Browser-native cleanup — these are honored by Chrome,
-          // Firefox, Edge, and Safari 17+ to varying depths. They run
-          // before our Web Audio chain so we layer on top of them.
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
@@ -123,29 +207,21 @@ export function VoiceRecorder({
           channelCount: 1,
         },
       });
-
       streamRef.current = stream;
 
-      // Build the cleanup chain.
       const audioContext = new AudioContext({ sampleRate: 48000 });
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
 
-      // High-pass at 85 Hz — strips rumble / footsteps / HVAC.
       const highpass = audioContext.createBiquadFilter();
       highpass.type = "highpass";
       highpass.frequency.value = 85;
       highpass.Q.value = 0.7;
 
-      // Soft noise gate — driven below by an analyzer RMS loop.
-      // Starts at unity gain; rAF loop attenuates when RMS is low.
       const gateGain = audioContext.createGain();
       gateGain.gain.value = 1;
       gateGainRef.current = gateGain;
 
-      // Compressor — typical voice settings. The compressor smooths
-      // dynamic range so loud and quiet passages even out, and acts
-      // as a safety brake against clipping.
       const compressor = audioContext.createDynamicsCompressor();
       compressor.threshold.value = -24;
       compressor.knee.value = 30;
@@ -153,19 +229,13 @@ export function VoiceRecorder({
       compressor.attack.value = 0.005;
       compressor.release.value = 0.25;
 
-      // Makeup gain (slight boost so the post-compressor signal sits
-      // around -16 dB FS where ElevenLabs and other downstream
-      // processors expect it).
       const makeup = audioContext.createGain();
       makeup.gain.value = 1.6;
 
-      // Analyzer for the gate decision + the visible level meter.
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 1024;
       analyserRef.current = analyser;
 
-      // Wire it: source → highpass → gateGain → compressor → makeup →
-      // analyser → destination.
       const dest = audioContext.createMediaStreamDestination();
       source.connect(highpass);
       highpass.connect(gateGain);
@@ -174,26 +244,21 @@ export function VoiceRecorder({
       makeup.connect(analyser);
       analyser.connect(dest);
 
-      // Drive the gate + level meter from the analyser.
       const buf = new Float32Array(analyser.fftSize);
-      const tick = () => {
+      const meterTick = () => {
         analyser.getFloatTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
         const rms = Math.sqrt(sum / buf.length);
-        // Smooth meter and clamp to 0..1.
         const meter = Math.min(1, rms * 4);
         setLevel((prev) => prev * 0.7 + meter * 0.3);
-        // Soft gate: below RMS 0.012 attenuate to 30% gain. Smooth
-        // attack to avoid clicks.
         const targetGain = rms < 0.012 ? 0.3 : 1;
         const now = audioContext.currentTime;
         gateGain.gain.setTargetAtTime(targetGain, now, 0.08);
-        rafRef.current = requestAnimationFrame(tick);
+        meterRafRef.current = requestAnimationFrame(meterTick);
       };
-      tick();
+      meterTick();
 
-      // MediaRecorder records the processed stream.
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/webm")
@@ -233,13 +298,16 @@ export function VoiceRecorder({
     setPreviewUrl(null);
     setPreviewBlob(null);
     recordingChunksRef.current = [];
+    // Reset teleprompter to top.
+    if (scriptContainerRef.current) scriptContainerRef.current.scrollTop = 0;
     recordingStartRef.current = Date.now();
-    recorderRef.current.start(250); // 250ms slices
+    setElapsedMs(0);
+    recorderRef.current.start(250);
     setState("recording");
     const tick = () => {
       setElapsedMs(Date.now() - recordingStartRef.current);
       if (recorderRef.current?.state === "recording") {
-        rafRef.current = requestAnimationFrame(tick);
+        elapsedRafRef.current = requestAnimationFrame(tick);
       }
     };
     tick();
@@ -247,6 +315,10 @@ export function VoiceRecorder({
 
   function stopRecording() {
     recorderRef.current?.stop();
+    if (elapsedRafRef.current !== null) {
+      cancelAnimationFrame(elapsedRafRef.current);
+      elapsedRafRef.current = null;
+    }
   }
 
   async function uploadRecording() {
@@ -291,30 +363,115 @@ export function VoiceRecorder({
 
   const seconds = Math.floor(elapsedMs / 1000);
   const meterPct = Math.round(level * 100);
+  const isRecording = state === "recording";
+  const showTeleprompter = paragraphs.length > 0 && (state === "ready" || state === "recording");
+
+  // Estimated total reading time at current pace, for the operator's planning.
+  const estMinutes = totalWords / pace.wpm;
+  const estMin = Math.floor(estMinutes);
+  const estSec = Math.round((estMinutes - estMin) * 60);
 
   return (
-    <div className="rounded-2xl border border-ink-200 bg-white/70 p-5 backdrop-blur-sm dark:border-ink-800 dark:bg-ink-900/40">
-      {label && (
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
-          Record your own narration
-        </p>
-      )}
-      {label && (
-        <h3 className="mt-1 font-display text-lg font-semibold text-ink-900 dark:text-ink-50">
-          {label}
-        </h3>
-      )}
-      {prompt && (
-        <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">{prompt}</p>
+    <div
+      className={[
+        "overflow-hidden rounded-2xl border bg-white/70 backdrop-blur-sm transition-all dark:bg-ink-900/40",
+        isRecording
+          ? "border-rose-400/60 shadow-[0_0_0_4px_rgba(244,63,94,0.08)]"
+          : "border-ink-200 dark:border-ink-800",
+      ].join(" ")}
+    >
+      {/* Header */}
+      <div className="border-b border-ink-200/60 px-5 py-4 dark:border-ink-800/60">
+        {label && (
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-brand-600 dark:text-brand-300">
+            Record your own narration
+          </p>
+        )}
+        {label && (
+          <h3 className="mt-1 font-display text-lg font-semibold text-ink-900 dark:text-ink-50">
+            {label}
+          </h3>
+        )}
+        {prompt && (
+          <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">{prompt}</p>
+        )}
+        {error && (
+          <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </p>
+        )}
+      </div>
+
+      {/* Teleprompter */}
+      {showTeleprompter && (
+        <div className="relative border-b border-ink-200/60 dark:border-ink-800/60">
+          {/* Top + bottom fade for focus */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-white/95 to-transparent dark:from-ink-900/95"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-white/95 to-transparent dark:from-ink-900/95"
+          />
+          <div
+            ref={scriptContainerRef}
+            className="relative max-h-[55vh] min-h-[260px] overflow-y-auto px-6 py-12 sm:px-10 sm:py-16"
+            style={{ scrollBehavior: "auto" }}
+          >
+            {paragraphs.map((p, i) => (
+              <p
+                key={i}
+                ref={(el) => {
+                  paragraphRefs.current[i] = el;
+                }}
+                className={[
+                  "mx-auto max-w-2xl text-balance text-center font-display text-2xl leading-relaxed tracking-tight transition-all duration-500 sm:text-3xl sm:leading-[1.4]",
+                  i === activeParagraphIndex
+                    ? "text-ink-900 dark:text-ink-50"
+                    : isRecording
+                      ? "text-ink-400/60 dark:text-ink-500/60"
+                      : "text-ink-700 dark:text-ink-200",
+                  i === 0 ? "mt-0" : "mt-10",
+                ].join(" ")}
+              >
+                {p.text}
+              </p>
+            ))}
+          </div>
+          {/* Pace + total time */}
+          <div className="flex items-center justify-between gap-3 border-t border-ink-200/60 bg-ink-50/60 px-5 py-2.5 text-xs text-ink-500 backdrop-blur dark:border-ink-800/60 dark:bg-ink-950/60 dark:text-ink-400">
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium uppercase tracking-wider">Pace</span>
+              {PACE_PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => setPaceKey(p.key)}
+                  className={[
+                    "rounded-full px-2.5 py-0.5 text-xs font-medium transition",
+                    paceKey === p.key
+                      ? "bg-brand-500 text-white"
+                      : "text-ink-600 hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800/60",
+                  ].join(" ")}
+                >
+                  {p.label} <span className="opacity-60">· {p.wpm}wpm</span>
+                </button>
+              ))}
+            </div>
+            <div>
+              {totalWords} words ·{" "}
+              <span className="font-mono">
+                ~{estMin}:{estSec.toString().padStart(2, "0")}
+              </span>{" "}
+              at this pace
+            </div>
+          </div>
+        </div>
       )}
 
-      {error && (
-        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300">
-          {error}
-        </p>
-      )}
-
-      <div className="mt-4 flex flex-col gap-4">
+      {/* Controls + meter */}
+      <div className="px-5 py-4">
         {state === "idle" && (
           <div className="flex flex-col items-start gap-2">
             <button
@@ -338,8 +495,8 @@ export function VoiceRecorder({
         )}
 
         {(state === "ready" || state === "recording") && (
-          <>
-            <LevelMeter level={level} active={state === "recording"} />
+          <div className="flex flex-col gap-3">
+            <LevelMeter level={level} active={isRecording} />
             <div className="flex flex-wrap items-center gap-3">
               {state === "ready" ? (
                 <button
@@ -347,7 +504,10 @@ export function VoiceRecorder({
                   onClick={startRecording}
                   className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-5 py-2.5 text-sm font-medium text-white shadow-[0_4px_16px_-4px_rgba(225,29,72,0.6)]"
                 >
-                  <span aria-hidden className="grid h-2 w-2 place-items-center rounded-full bg-white" />
+                  <span
+                    aria-hidden
+                    className="grid h-2 w-2 place-items-center rounded-full bg-white"
+                  />
                   Start recording
                 </button>
               ) : (
@@ -360,16 +520,19 @@ export function VoiceRecorder({
                 </button>
               )}
               <p className="text-xs text-ink-500 dark:text-ink-400">
-                Level meter: {meterPct}%{" "}
-                {meterPct < 8 && state === "recording" ? "(very quiet — speak up)" : ""}
+                {meterPct}%{" "}
+                {meterPct < 8 && isRecording ? "(very quiet — speak up)" : ""}
                 {meterPct > 90 ? "(clipping — back off the mic)" : ""}
+                {showTeleprompter && isRecording && activeParagraphIndex >= 0
+                  ? ` · paragraph ${activeParagraphIndex + 1} / ${paragraphs.length}`
+                  : ""}
               </p>
             </div>
-          </>
+          </div>
         )}
 
         {state === "done" && previewUrl && (
-          <>
+          <div className="flex flex-col gap-3">
             <audio
               controls
               src={previewUrl}
@@ -406,7 +569,7 @@ export function VoiceRecorder({
               Duration: {format(Math.floor(elapsedMs / 1000))}. The cleanup chain
               already ran on the audio above — what you hear is what gets saved.
             </p>
-          </>
+          </div>
         )}
 
         {state === "uploading" && (
@@ -418,7 +581,6 @@ export function VoiceRecorder({
 }
 
 function LevelMeter({ level, active }: { level: number; active: boolean }) {
-  // 24 segments lit progressively.
   const segments = 24;
   const litCount = Math.round(level * segments);
   return (
