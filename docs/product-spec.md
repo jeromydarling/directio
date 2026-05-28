@@ -424,6 +424,60 @@ To honestly support all states from day one, use maturity levels:
 
 This gives full national coverage without pretending every state is fully automated at launch.[cite:47][cite:80][cite:88]
 
+### Honest positioning — what compliance actually does
+
+Driver-ed compliance is mostly a state problem, not a product problem. Most state DPS offices do not offer APIs; some don't offer electronic submission at all. The product cannot make a non-existent state API exist. What it can do is make the manual work less awful, make the audit trail bulletproof, and remove the cognitive load of "what does my state require."
+
+Schools that buy "compliance engine" and find out in week 2 that they're still typing into a DPS browser session will churn fast and angry. The positioning fix is non-negotiable, and most of it is product copy and surfacing — not deep architectural work.
+
+#### Honest language across the product and marketing
+
+- "Compliance engine" is reserved for Level 3 (real API integration) only.
+- "Compliance workflow" is used for Level 1 and Level 2.
+- The product is positioned as "the platform that knows your state's rules and walks you through them," not "the platform that talks to your state on your behalf." When and where we do talk to a state directly, we say so explicitly.
+
+#### Per-school adapter transparency
+
+Every school's settings page shows their state's current adapter maturity in plain English:
+
+- A maturity badge (Level 1 / 2 / 3).
+- A short description of what directio handles automatically for this state.
+- A short description of what the school still does themselves.
+- A "last verified with state DPS" date so schools know we're keeping the picture current.
+
+Onboarding for any non-MN-deep state surfaces this on page one. Better to lose the sale than to fake the depth.
+
+#### What we deliver at Level 1 — named explicitly
+
+Even at the manual maturity level, directio is meaningfully better than the whiteboard and the file cabinet. The pitch names this concretely:
+
+- Rule-pack-driven eligibility checks — credentials cannot be issued to students who do not qualify, removing a whole class of unintentional violations.
+- Immutable audit trail of every compliance-relevant action, defending issuance if the state asks how.
+- PDF generation for state forms where the form template is known, so nobody is retyping into Word.
+- Parent- and student-facing transparency on what's pending and why, eliminating the "is my kid ready" phone tree.
+- Reminder and deadline tracking so nothing slips past a renewal or filing window.
+
+These are real wins. The framing problem is letting customers imagine they're getting Level 3 when they're not.
+
+#### MN as the proof case
+
+Minnesota ships with the deepest integration directio's MN team can build given DPS's actual capabilities. Where DPS supports electronic submission (electronic Blue Slip and equivalents), directio uses it. Where DPS does not, MN still ships with PDF generation, submission tracking, and an audit log that exceeds anything a school could maintain on their own. MN is the proof that directio is better than the status quo even when the state itself is not a great API partner.
+
+#### Roadmap visibility per state
+
+A maintained state coverage page lists every supported state and its current adapter maturity, honestly updated. Schools shopping the product see exactly what to expect for their state. The page also lists which states are on the path to a level-up and what's blocking — usually a feature on the state's end, not ours.
+
+#### Feature-request log directed at states
+
+When directio encounters something a state could automate but doesn't, the gap is logged visibly in the coverage page. Customer schools can co-sign requests. This serves two purposes:
+
+- It signals seriousness to state DPS offices when the directio team approaches them with a co-signed list of school-level demand.
+- It gives schools a story to tell parents and instructors: "we're working with DPS to fix X, here's where we are."
+
+#### What this section is not
+
+This is a positioning, copy, and surfacing exercise that protects retention on its own. It is not a deep architectural change. The rule-pack engine, state adapter model, and credential workflow already give us the substance; this section ensures we do not oversell that substance and lose customers in week 2.
+
 ## Branding and school customization
 
 Every school should be able to customize the system without code changes.
