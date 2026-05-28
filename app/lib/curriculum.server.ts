@@ -317,6 +317,8 @@ export async function addSchoolLesson(
     title: string;
     body?: string;
     estimatedSeatMinutes?: number;
+    /** When set, marks the lesson as AI-segmented and records the approver. */
+    aiApprovedByUserId?: string | null;
   },
 ): Promise<string> {
   const last = await env.DB.prepare(
@@ -331,14 +333,32 @@ export async function addSchoolLesson(
   const now = Date.now();
   const body = args.body ?? `# ${args.title}\n\nWrite your lesson content here.\n`;
   const minutes = args.estimatedSeatMinutes ?? 10;
+  const aiAssisted = args.aiApprovedByUserId ? 1 : 0;
+  const aiApprovedByUserId = args.aiApprovedByUserId ?? null;
+  const aiApprovedAt = args.aiApprovedByUserId ? now : null;
 
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO school_lesson (id, organizationId, schoolModuleId, sourceLessonId,
                                   slug, title, body, estimatedSeatMinutes, ordinal,
-                                  published, createdAt, updatedAt)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?)`,
-    ).bind(id, args.organizationId, args.schoolModuleId, slug, args.title, body, minutes, ordinal, now, now),
+                                  published, createdAt, updatedAt,
+                                  aiAssisted, aiApprovedByUserId, aiApprovedAt)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+    ).bind(
+      id,
+      args.organizationId,
+      args.schoolModuleId,
+      slug,
+      args.title,
+      body,
+      minutes,
+      ordinal,
+      now,
+      now,
+      aiAssisted,
+      aiApprovedByUserId,
+      aiApprovedAt,
+    ),
     env.DB.prepare(
       `INSERT INTO school_quiz (id, organizationId, schoolLessonId, sourceQuizId,
                                 title, passingScore, shuffleQuestions, createdAt, updatedAt)

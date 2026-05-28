@@ -40,6 +40,8 @@ type LessonRow = {
   published: number;
   audioUrl: string | null;
   isSchoolAdded: number;
+  aiAssisted: number;
+  aiApprovedByUserId: string | null;
 };
 
 export async function loader({ params, request, context }: Route.LoaderArgs) {
@@ -78,7 +80,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     .prepare(
       `SELECT sl.id, sl.schoolModuleId, sl.title, sl.estimatedSeatMinutes, sl.ordinal,
               sl.published, sl.audioUrl,
-              CASE WHEN sl.sourceLessonId IS NULL THEN 1 ELSE 0 END AS isSchoolAdded
+              CASE WHEN sl.sourceLessonId IS NULL THEN 1 ELSE 0 END AS isSchoolAdded,
+              sl.aiAssisted, sl.aiApprovedByUserId
          FROM school_lesson sl
          JOIN school_module sm ON sm.id = sl.schoolModuleId
          JOIN school_course sc ON sc.id = sm.schoolCourseId
@@ -299,6 +302,14 @@ export default function InstalledPack({ loaderData, actionData }: Route.Componen
                             >
                               {l.title}
                             </Link>
+                            {Boolean(l.aiAssisted) && (
+                              <span
+                                title="Created from AI-segmented content"
+                                className="ml-2 inline-flex items-center rounded-full bg-accent-100 px-2 py-0.5 text-[10px] font-medium text-accent-800 dark:bg-accent-900/40 dark:text-accent-200"
+                              >
+                                AI-assisted
+                              </span>
+                            )}
                             <p className="text-xs text-ink-500 dark:text-ink-400">
                               {l.estimatedSeatMinutes} min
                               {l.audioUrl ? " · audio ready" : ""}

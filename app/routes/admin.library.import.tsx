@@ -326,6 +326,7 @@ export async function action({ request, context }: Route.ActionArgs) {
           title: seg.title,
           body: seg.body,
           estimatedSeatMinutes: estimateSeatMinutes(seg.body),
+          aiApprovedByUserId: tenant.user.id,
         });
         next.schoolLessonId = lessonId;
         committed++;
