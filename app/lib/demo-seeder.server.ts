@@ -752,8 +752,46 @@ export async function seedDemoOrg(
     );
   }
 
-  // Execute it all.
+  // Execute the main seed.
   await env.DB.batch(stmts);
+
+  // Install the national-core curriculum pack so the demo student
+  // actually has lessons to read. Looks up the latest published
+  // version of the platform's national pack and deep-copies it into
+  // the org's school_* tables.
+  try {
+    const nationalVersion = await env.DB.prepare(
+      `SELECT cpv.id AS versionId
+         FROM content_pack cp
+         JOIN content_pack_version cpv ON cpv.contentPackId = cp.id
+        WHERE cp.scope = 'national' AND cpv.publishedAt IS NOT NULL
+        ORDER BY cpv.publishedAt DESC
+        LIMIT 1`,
+    ).first<{ versionId: string }>();
+    if (nationalVersion?.versionId) {
+      const installId = newId();
+      await env.DB.prepare(
+        `INSERT INTO school_pack_install (id, organizationId, contentPackVersionId, installedAt)
+         VALUES (?, ?, ?, ?)`,
+      )
+        .bind(installId, orgId, nationalVersion.versionId, now)
+        .run();
+      const { deepCopyPackToSchool } = await import("./curriculum.server");
+      await deepCopyPackToSchool(env, {
+        organizationId: orgId,
+        schoolPackInstallId: installId,
+        contentPackVersionId: nationalVersion.versionId,
+      });
+      // Publish every copied lesson so the student-side view sees them.
+      await env.DB.prepare(
+        "UPDATE school_lesson SET published = 1, updatedAt = ? WHERE organizationId = ?",
+      )
+        .bind(now, orgId)
+        .run();
+    }
+  } catch (err) {
+    console.warn("[demo-seeder] curriculum install failed:", err);
+  }
 
   return { organizationId: orgId, userId, slug, expiresAt };
 }
