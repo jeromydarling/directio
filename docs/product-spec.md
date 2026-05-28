@@ -157,7 +157,86 @@ Drive-time between consecutive pickups is computed and cached. The engine refuse
 4. The `appointments` table is the single source of truth; series are a sibling table that links member appointments.
 5. Notifications fan out through Cloudflare Queues so the booking write returns fast and reminders/confirmations dispatch asynchronously.
 
-### 5. Permit-eligibility credential workflow
+### 5. Vehicles and fleet
+
+Vehicles constrain revenue more directly than people do. A car out for service collapses the day; an instructor license that expired without notice can take down a week. The fleet module is modeled with the same weight as instructors, with a UX bar of **sleek and simple** — short forms, smart defaults, and one-tap status changes. The data model is rich; the surfaces stay minimal.
+
+#### Entity shape
+
+A vehicle record carries:
+
+- Make, model, year, color, VIN, plate.
+- Dual-controls equipment flag and any other safety endorsements.
+- Insurance policy carrier, number, and expiration.
+- Registration number and expiration.
+- Current odometer (kept current by daily check-out/check-in entries).
+- Fuel type or EV state; current fuel level or charge level as last reported.
+- Assigned home location (location-scoped within a multi-location school).
+- Photo and free-text "quirks" note (e.g. "passenger window sticky," "auto-stop is touchy").
+- Status enum: active, in-service, out-of-service, retired.
+
+#### Auto-blockers
+
+Same pattern as the instructor license expiration block: scheduling is automatically blocked when a vehicle's hard requirements are not in good standing. The system blocks at expiry and sends reminders at 90 / 60 / 30 / 7 days ahead for:
+
+- Insurance expiration.
+- Registration expiration.
+- Overdue maintenance against odometer thresholds (oil, tires, brakes, dual-controls inspection).
+
+A blocked vehicle disappears from the constraint engine's valid-slot set automatically. Admins can override with a documented reason; overrides are audit-logged.
+
+#### Maintenance schedule
+
+Per-vehicle intervals (oil, tires, brakes, dual-controls inspection, state safety inspection where applicable) tracked against odometer with optional time-based backstops. When an interval is approaching, the vehicle gets a soft warning surface; when it's overdue, the auto-block engages. Maintenance events are logged with date, odometer at service, cost, vendor, and optional receipt photo.
+
+#### Daily check-out and check-in
+
+Formalized from the instructor section as the data-model side:
+
+- Each shift produces a `vehicle_shift` record linking instructor + vehicle + start-time + start-odometer + start-fuel + walk-around checklist results, and on completion adds end-time + end-odometer + end-fuel + any flagged issues.
+- The odometer chain is continuous: if today's start-odometer doesn't match yesterday's end-odometer (within tolerance), the discrepancy surfaces for admin reconciliation. This is light-touch fraud and accident detection.
+
+#### Mid-shift out-of-service flag
+
+An instructor reporting a problem mid-day triggers:
+
+1. Vehicle status flips to out-of-service automatically.
+2. The constraint engine recomputes affected upcoming lessons.
+3. If a swap-in vehicle exists, the system suggests reassignment with one-tap admin approval.
+4. If no swap-in exists, affected parents get an immediate notification with reschedule options.
+
+The instructor never has to think beyond "this car has a problem." Admin gets a single screen with the chain of consequences and one decision to make per affected lesson.
+
+#### Assignment models
+
+Both supported:
+
+- **One-to-one pairing**: instructor X drives vehicle Y permanently. Pairing is a soft constraint — the engine prefers it but can break it for coverage.
+- **Shared pool**: instructors are assigned a vehicle per shift from the available pool. The engine factors home-location proximity and recent familiarity into its assignment ranking.
+
+Switching between models is a school setting, not a code change.
+
+#### Multi-location fleet
+
+Vehicles belong to a location, not just to the school. The constraint engine respects home-location when ranking slots, and parent self-serve only sees pickup locations served by an available vehicle at that location. Cross-location vehicle borrowing is supported but requires admin action.
+
+#### Cost and revenue tracking
+
+The owner's utilization story needs vehicle-level economics, not just instructor:
+
+- Fuel and maintenance receipts roll up to total cost per vehicle per period.
+- Revenue-per-vehicle derived from completed lessons assigned to it.
+- Cost-per-lesson and revenue-per-lesson surfaced in the capacity view as secondary metrics.
+
+#### Retirement
+
+When a vehicle leaves the fleet (resale, totaled, lease return), status flips to retired. The record stays for audit-trail integrity; every lesson it ever supported keeps its vehicle reference intact. Retired vehicles never appear in active schedules but remain queryable for historical reporting.
+
+#### UX bar
+
+Adding a vehicle, editing it, and logging a maintenance event are each single-screen flows with sane defaults. The fleet list is a clean grid with status dots, expiration warnings inline, and a "today" filter that shows only vehicles currently in service. Nothing here should feel like an enterprise fleet-management system.
+
+### 6. Permit-eligibility credential workflow
 
 The system should model a generic **permit eligibility credential** rather than hardcoding terms like "blue slip." Minnesota can map this to Blue Card or electronic blue slip, while other states can map it to their own required certificate or proof-of-completion artifact.[cite:47][cite:48][cite:55][cite:88]
 
