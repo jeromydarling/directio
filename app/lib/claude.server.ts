@@ -31,7 +31,7 @@ function requireKey(env: Env): string {
   return key;
 }
 
-async function claudeMessages(
+export async function claudeMessages(
   env: Env,
   args: {
     system: string;

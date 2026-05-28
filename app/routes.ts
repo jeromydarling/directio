@@ -46,6 +46,7 @@ export default [
     route("export.csv", "routes/admin.export[.csv].tsx"),
     route("reminders", "routes/admin.reminders.tsx"),
     route("library", "routes/admin.library.tsx"),
+    route("library/import", "routes/admin.library.import.tsx"),
     route("library/media", "routes/admin.library.media.tsx"),
     route("library/places", "routes/admin.library.places.tsx"),
     route("library/installed/:installId", "routes/admin.library.installed.$installId.tsx"),
