@@ -368,6 +368,88 @@ Not every role needs platform-level identity. School admins and office managers 
 
 Time-to-paid is instrumented from first landing-page hit through confirmed payment + first lesson scheduled. The funnel is observable per school so each school can see their own conversion rate and where parents drop off. Friction added anywhere in this flow — required fields, password setup, account verification gates — must be justified against its measured cost in funnel drop-off, not added by default.
 
+### 9. Payroll, payouts, and no-show economics
+
+The product is load-bearing only when the school stops keeping a spreadsheet. If owners are still running instructor payroll in Excel and chasing no-show fees by hand, directio is additive — and therefore cancellable. This module is the financial substrate that justifies the subscription cost.
+
+#### Compensation rules engine
+
+A sibling to the state rule-pack engine, with the same declarative-versioned-per-school shape:
+
+- Rate types: per-lesson, per-hour, per-mile, per-pickup-distance, flat shift differential, no-show stipend, training/CE rate.
+- Conditions: weekend, evening, holiday, certain student types (adult vs teen, special-needs endorsement), certain locations, certain vehicle types.
+- Per-instructor overrides that layer on the base policy.
+- Versioned so a rate change applies to lessons going forward without rewriting history.
+- Every rule and override is audit-logged.
+
+The engine computes each lesson's payout components as the lesson is signed off, so the instructor's running pay number is always current — not waiting for end-of-period accounting.
+
+#### Pay period engine
+
+The school configures pay cadence — weekly, biweekly, semi-monthly, monthly — and the engine closes a period on its own. At close, each instructor gets a payout draft showing every contributing lesson, mileage, differentials, and any adjustments. The admin reviews the draft, edits if needed (with audit logging), and approves. Approval kicks the payout to the payout rail.
+
+#### Stripe Connect as the default payout rail
+
+Instructors onboard once to Stripe Connect through directio; approved payouts land in their bank account through Stripe. Schools that prefer to keep paying via check or external payroll can opt out and use directio's reports as a payroll input instead, but Stripe Connect is the recommended path and the default offered at school setup.
+
+Stripe Connect benefits the school directly: no printed checks, no "I didn't get paid" calls, no 1099 reconciliation friction. Funds flow from the school's directio-attached Stripe account to the instructor's connected account.
+
+#### 1099-NEC generation at year-end
+
+YTD earnings are tracked continuously (instructor section). At year-end the system generates 1099-NEC PDFs for every 1099 instructor over the IRS threshold, stored in R2 and emailed to both the school and the instructor. Schools without their own accountant get the IRS-ready document plus a filing-deadline reminder. Schools with accountants get the same PDF plus a CSV export shaped for common payroll software.
+
+#### W-2 instructor support
+
+For schools that classify instructors as W-2, directio is not a full payroll service in MVP. It does:
+
+- Track hours, lessons, and computed gross pay.
+- Export a payroll-ready CSV to feed Gusto, Justworks, ADP, or QuickBooks Payroll.
+- Store W-4 and I-9 documents in R2 with audit-logged access.
+
+Full payroll-tax handling is explicitly out of scope; directio integrates with the school's payroll provider rather than becoming one.
+
+#### No-show fee engine
+
+Per-school configurable:
+
+- Definition of no-show (how late = no-show; e.g. 15 minutes past start time with no contact).
+- Fee amount or percentage of lesson price.
+- Who bears the fee (student/family is the default).
+- Whether the instructor still gets paid for the no-show slot — and at what percentage.
+- Grace exceptions (weather, illness with documentation, first-offense waiver).
+
+When a lesson is marked no-show, the fee is automatically charged via Stripe against the parent's payment method on file (which they authorized at enrollment for exactly this purpose; see Commerce). The instructor's payout for the slot is computed per the policy. The event lands in the family's payment history as a clear, named line item — never a mystery charge.
+
+#### Waitlist auto-backfill
+
+When a lesson cancels or no-shows with enough lead time, the system pushes the open slot to the waitlist in priority order, first-to-accept-wins style. Eligible parents get an instant-message-class notification with one-tap accept.
+
+If no waitlist match exists, the slot pushes to the instructor open-shift queue defined in the scheduling section — instructors looking for extra hours can pick it up. The school recovers slot revenue that would otherwise be lost. Both pathways are tracked so the owner can see recovered revenue explicitly.
+
+#### Predictive overbooking — explicit non-goal for MVP
+
+Tempting but high-risk. A parent showing up to a lesson and being told it's double-booked is an immediate trust failure that can sink a school's reputation. The capability is deferred to Phase 2 with deliberate guardrails (limited rollout, clear cancellation paths, opt-in).
+
+#### Instructor payout transparency (restated)
+
+Already covered in the instructor section but worth naming as the bridge to retention: every instructor sees every dollar they are owed, when it pays out, and the breakdown of how it was computed. No black box. Disputes are filed in-app with the relevant lesson record attached, not by email.
+
+#### Owner ROI dashboard math
+
+The owner's dashboard surfaces the recovered-dollars story explicitly:
+
+- No-show fees collected this period.
+- Slots backfilled from waitlist, with recovered revenue.
+- Open-shift acceptances, with extra revenue captured.
+- Payroll hours and dollars by instructor and by location.
+- Cost per lesson and revenue per lesson, by instructor and by vehicle (pulling from the vehicles cost model).
+
+This is the narrative that lets an owner answer "is directio paying for itself?" in 30 seconds.
+
+#### Tax document storage
+
+W-9 (for 1099 instructors) and W-4 + I-9 (for W-2 instructors) collected during onboarding and stored in R2 with audit-logged access. The school stops keeping a binder of payroll paperwork; directio is the system of record.
+
 ## Multi-tenant architecture
 
 The platform should be multi-tenant from day one. Every school should operate inside its own tenant with configurable branding, pricing, terminology, messaging, and state rule configuration.[cite:27][cite:3]
