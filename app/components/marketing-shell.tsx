@@ -7,6 +7,7 @@ const NAV = [
   { to: "/built-on-realism", label: "How we built it" },
   { to: "/features", label: "Features" },
   { to: "/for-families", label: "Family experience" },
+  { to: "/for-instructors", label: "For instructors" },
   { to: "/states", label: "State coverage" },
   { to: "/pricing", label: "Pricing" },
 ];

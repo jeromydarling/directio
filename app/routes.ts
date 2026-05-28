@@ -7,6 +7,7 @@ export default [
   route("start-a-school", "routes/start-a-school.tsx"),
   route("for-schools", "routes/for-schools.tsx"),
   route("for-families", "routes/for-families.tsx"),
+  route("for-instructors", "routes/for-instructors.tsx"),
   route("states", "routes/states.tsx"),
   route("states/requests", "routes/states.requests.tsx"),
   route("why", "routes/why.tsx"),
