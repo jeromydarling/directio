@@ -36,7 +36,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 type Cell = "yes" | "no" | "partial" | string;
 
-const COLS = ["directio", "DriveScout", "TopDriver", "Aceable", "Spreadsheets + Stripe"] as const;
+const COLS = [
+  "directio",
+  "DriveScout",
+  "Teachworks",
+  "Drivers Ed Solutions",
+  "Spreadsheets + Stripe",
+] as const;
 
 type Row = {
   feature: string;
@@ -52,40 +58,62 @@ const ROWS: { section: string; rows: Row[] }[] = [
         feature: "Starting price",
         cells: {
           directio: "$0/mo + 2%",
-          DriveScout: "$99–$249/mo + seats",
-          TopDriver: "Quote-based",
-          Aceable: "Per-course fee",
+          DriveScout: "$50/seat/mo, 5-seat min",
+          Teachworks: "$16/mo + $0.32/lesson",
+          "Drivers Ed Solutions": "$150/mo × 4–8 mo term",
           "Spreadsheets + Stripe": "$0 + 2.9%",
         },
       },
       {
+        feature: "Setup fee",
+        cells: {
+          directio: "no",
+          DriveScout: "$250",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "+$275 for online payments",
+          "Spreadsheets + Stripe": "no",
+        },
+      },
+      {
+        feature: "Per-student or per-lesson fees",
+        cells: {
+          directio: "no",
+          DriveScout: "no (but per-seat scales)",
+          Teachworks: "yes",
+          "Drivers Ed Solutions": "$6.25/student",
+          "Spreadsheets + Stripe": "no",
+        },
+      },
+      {
+        feature: "Annual cash upfront",
+        detail: "DriveScout's discount tier requires the year paid on day one.",
+        cells: {
+          directio: "no",
+          DriveScout: "$2,400 prepay for discount",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "yes (term-prepay)",
+          "Spreadsheets + Stripe": "no",
+        },
+      },
+      {
         feature: "Custom marketing site included",
-        detail: "Your school's marketing site, auto-synced from your data.",
+        detail: "An AI-built site on your domain, auto-synced from your school data.",
         cells: {
           directio: "$29/mo Studio",
           DriveScout: "no",
-          TopDriver: "no",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "$750+ as a service",
           "Spreadsheets + Stripe": "no",
         },
       },
       {
-        feature: "Per-student fees",
+        feature: "Published pricing on the website",
+        detail: "If you have to 'talk to sales' to find out the price, that's the price.",
         cells: {
-          directio: "no",
+          directio: "yes",
           DriveScout: "yes",
-          TopDriver: "yes",
-          Aceable: "yes",
-          "Spreadsheets + Stripe": "no",
-        },
-      },
-      {
-        feature: "Surcharges on family checkout",
-        cells: {
-          directio: "no",
-          DriveScout: "varies",
-          TopDriver: "varies",
-          Aceable: "yes",
+          Teachworks: "yes",
+          "Drivers Ed Solutions": "yes",
           "Spreadsheets + Stripe": "yes",
         },
       },
@@ -98,30 +126,30 @@ const ROWS: { section: string; rows: Row[] }[] = [
         feature: "Built-in lessons, quizzes, video",
         cells: {
           directio: "yes",
-          DriveScout: "partial",
-          TopDriver: "yes",
-          Aceable: "yes",
+          DriveScout: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "partial",
           "Spreadsheets + Stripe": "no",
         },
       },
       {
-        feature: "Edit your own curriculum",
-        detail: "Install a copy, edit freely, never lose your work on platform updates.",
+        feature: "Install-copy-edit your curriculum",
+        detail: "Pull a content pack into your school, edit freely, keep your edits when the pack updates.",
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "partial",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "no",
         },
       },
       {
-        feature: "Family/parent portal",
+        feature: "Family / parent portal",
         cells: {
           directio: "yes",
           DriveScout: "partial",
-          TopDriver: "yes",
-          Aceable: "no",
+          Teachworks: "partial",
+          "Drivers Ed Solutions": "yes",
           "Spreadsheets + Stripe": "no",
         },
       },
@@ -130,8 +158,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "no",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "no",
         },
       },
@@ -145,8 +173,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "yes",
-          TopDriver: "yes",
-          Aceable: "no",
+          Teachworks: "yes",
+          "Drivers Ed Solutions": "partial",
           "Spreadsheets + Stripe": "no",
         },
       },
@@ -155,8 +183,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "partial",
-          TopDriver: "partial",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "no",
         },
       },
@@ -165,8 +193,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "manual",
-          TopDriver: "manual",
-          Aceable: "n/a",
+          Teachworks: "manual",
+          "Drivers Ed Solutions": "manual",
           "Spreadsheets + Stripe": "manual",
         },
       },
@@ -175,9 +203,20 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "partial",
-          TopDriver: "yes",
-          Aceable: "no",
+          Teachworks: "partial",
+          "Drivers Ed Solutions": "yes",
           "Spreadsheets + Stripe": "no",
+        },
+      },
+      {
+        feature: "Two-way Google Calendar sync",
+        detail: "Teachworks' #1 multi-year complaint is the lack of two-way sync.",
+        cells: {
+          directio: "yes",
+          DriveScout: "partial",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
+          "Spreadsheets + Stripe": "yes",
         },
       },
     ],
@@ -191,8 +230,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "no",
-          Aceable: "n/a",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "manual",
         },
       },
@@ -201,8 +240,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "manual",
-          TopDriver: "manual",
-          Aceable: "n/a",
+          Teachworks: "manual",
+          "Drivers Ed Solutions": "manual",
           "Spreadsheets + Stripe": "manual",
         },
       },
@@ -213,12 +252,12 @@ const ROWS: { section: string; rows: Row[] }[] = [
     rows: [
       {
         feature: "Per-state credential modeled",
-        detail: "Actual state-specific credential name (Blue Card, ITTD slip, DEC, etc.), not generic 'certificate'.",
+        detail: "Real credential names (Blue Card, ITTD slip, DEC-1/DEC-2, MV3001, etc.), not 'certificate'.",
         cells: {
           directio: "all 51 jurisdictions",
           DriveScout: "few",
-          TopDriver: "MN + a few",
-          Aceable: "n/a",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "few",
           "Spreadsheets + Stripe": "no",
         },
       },
@@ -228,8 +267,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "no",
-          Aceable: "no",
+          Teachworks: "n/a",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "n/a",
         },
       },
@@ -238,8 +277,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "yes",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "no",
         },
       },
@@ -249,8 +288,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "no",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "n/a",
         },
       },
@@ -264,8 +303,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "partial",
-          TopDriver: "manual",
-          Aceable: "no",
+          Teachworks: "partial",
+          "Drivers Ed Solutions": "manual",
           "Spreadsheets + Stripe": "n/a",
         },
       },
@@ -274,9 +313,9 @@ const ROWS: { section: string; rows: Row[] }[] = [
         detail: "Direct Stripe Connect to your bank — we never hold school funds.",
         cells: {
           directio: "yes",
-          DriveScout: "varies",
-          TopDriver: "varies",
-          Aceable: "no",
+          DriveScout: "BYO gateway",
+          Teachworks: "BYO gateway",
+          "Drivers Ed Solutions": "+$275 setup",
           "Spreadsheets + Stripe": "yes",
         },
       },
@@ -285,8 +324,8 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "partial",
-          TopDriver: "partial",
-          Aceable: "n/a",
+          Teachworks: "partial",
+          "Drivers Ed Solutions": "partial",
           "Spreadsheets + Stripe": "yes",
         },
       },
@@ -295,12 +334,95 @@ const ROWS: { section: string; rows: Row[] }[] = [
         cells: {
           directio: "yes",
           DriveScout: "no",
-          TopDriver: "partial",
-          Aceable: "no",
+          Teachworks: "no",
+          "Drivers Ed Solutions": "no",
           "Spreadsheets + Stripe": "no",
         },
       },
     ],
+  },
+];
+
+// 200-student/year school doing $120K GMV ($600 avg tuition). Numbers
+// pulled from each vendor's public pricing page in May 2026.
+const TCO_SCHOOL = {
+  students: 200,
+  avgTuition: 600,
+  gmv: 120_000,
+};
+type TcoRow = {
+  vendor: string;
+  base: string;
+  perStudent: string;
+  payments: string;
+  setup: string;
+  y1: string;
+  notes?: string;
+  mine?: boolean;
+};
+const TCO_ROWS: TcoRow[] = [
+  {
+    vendor: "directio (Free)",
+    base: "$0",
+    perStudent: "—",
+    payments: "2% of $120K = $2,400",
+    setup: "$0",
+    y1: "$2,400",
+    notes: "No contract, no upfront, no seat cap.",
+    mine: true,
+  },
+  {
+    vendor: "directio (Studio)",
+    base: "$348",
+    perStudent: "—",
+    payments: "2% of $120K = $2,400",
+    setup: "$0",
+    y1: "$2,748",
+    notes: "Adds AI-built marketing site on your domain.",
+    mine: true,
+  },
+  {
+    vendor: "DriveScout (annual prepay)",
+    base: "$2,400",
+    perStudent: "—",
+    payments: "BYO Stripe (2.9% + 30¢)",
+    setup: "$250",
+    y1: "$2,650",
+    notes: "Full $2,400 paid day one for the discount tier.",
+  },
+  {
+    vendor: "DriveScout (monthly)",
+    base: "$3,000",
+    perStudent: "—",
+    payments: "BYO Stripe",
+    setup: "$250",
+    y1: "$3,250",
+  },
+  {
+    vendor: "Teachworks Starter",
+    base: "$198",
+    perStudent: "$0.32 × ~2,400 lessons = $768",
+    payments: "BYO Stripe",
+    setup: "$0",
+    y1: "$966",
+    notes: "Genuinely cheap. No state compliance, no LMS, no payroll.",
+  },
+  {
+    vendor: "Drivers Ed Solutions",
+    base: "$750 (5-mo term)",
+    perStudent: "$6.25 × 200 = $1,250",
+    payments: "+$275 setup",
+    setup: "$275",
+    y1: "$2,275",
+  },
+  {
+    vendor: "Spreadsheets + Stripe + Acuity",
+    base: "~$960 (Acuity + Mailchimp + Twilio)",
+    perStudent: "—",
+    payments: "2.9% + 30¢",
+    setup: "$0",
+    y1: "~$960",
+    notes: "Zero compliance, zero credential workflow, you build it.",
   },
 ];
 
@@ -374,10 +496,10 @@ export default function Compare({ loaderData }: Route.ComponentProps) {
           </Reveal>
           <Reveal delay={160}>
             <p className="mx-auto mt-6 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Most driving schools are either paying $200/mo to software that
-              still makes them keep a spreadsheet, or running on a spreadsheet
-              and a Stripe link. We built directio because both options are
-              bad. Here's the honest comparison.
+              Most driving schools are either paying $250–$3,000/yr to software
+              that still makes them keep a spreadsheet, or running on a
+              spreadsheet and a Stripe link. We built directio because both
+              options are bad. Real prices, real features, no asterisks.
             </p>
           </Reveal>
         </div>
@@ -454,6 +576,86 @@ export default function Compare({ loaderData }: Route.ComponentProps) {
       </section>
 
       <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+          <Reveal>
+            <h2 className="font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl dark:text-ink-50">
+              Year one, real numbers.
+            </h2>
+            <p className="mt-2 max-w-2xl text-base text-ink-600 dark:text-ink-300">
+              A {TCO_SCHOOL.students}-student school doing ${(TCO_SCHOOL.gmv / 1000).toFixed(0)}K
+              in tuition GMV (avg ${TCO_SCHOOL.avgTuition}/student). Every line
+              is pulled from a vendor's own public pricing page. If there's no
+              public page, that's a row that doesn't appear here — by design.
+            </p>
+          </Reveal>
+          <div className="mt-6 overflow-x-auto rounded-3xl border border-ink-200 bg-white/60 backdrop-blur-md dark:border-ink-800 dark:bg-ink-900/40">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-ink-100/80 text-xs uppercase tracking-[0.12em] text-ink-500 dark:bg-ink-900/80 dark:text-ink-400">
+                <tr>
+                  <th className="px-5 py-4 text-left font-medium">Vendor</th>
+                  <th className="px-3 py-4 text-left font-medium">Base</th>
+                  <th className="px-3 py-4 text-left font-medium">Per student</th>
+                  <th className="px-3 py-4 text-left font-medium">Payments</th>
+                  <th className="px-3 py-4 text-left font-medium">Setup</th>
+                  <th className="px-3 py-4 text-right font-medium">Y1 total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {TCO_ROWS.map((t) => (
+                  <tr
+                    key={t.vendor}
+                    className={[
+                      "border-t border-ink-200/60 align-top dark:border-ink-800/60",
+                      t.mine
+                        ? "bg-brand-50/40 dark:bg-brand-950/30"
+                        : "",
+                    ].join(" ")}
+                  >
+                    <td className="px-5 py-4">
+                      <div
+                        className={[
+                          "font-semibold",
+                          t.mine
+                            ? "text-brand-700 dark:text-brand-200"
+                            : "text-ink-900 dark:text-ink-50",
+                        ].join(" ")}
+                      >
+                        {t.vendor}
+                      </div>
+                      {t.notes && (
+                        <div className="mt-1 max-w-xs text-xs text-ink-500 dark:text-ink-400">
+                          {t.notes}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-4 text-xs text-ink-600 dark:text-ink-300">{t.base}</td>
+                    <td className="px-3 py-4 text-xs text-ink-600 dark:text-ink-300">{t.perStudent}</td>
+                    <td className="px-3 py-4 text-xs text-ink-600 dark:text-ink-300">{t.payments}</td>
+                    <td className="px-3 py-4 text-xs text-ink-600 dark:text-ink-300">{t.setup}</td>
+                    <td
+                      className={[
+                        "px-3 py-4 text-right font-mono text-sm font-semibold",
+                        t.mine
+                          ? "text-brand-700 dark:text-brand-200"
+                          : "text-ink-900 dark:text-ink-50",
+                      ].join(" ")}
+                    >
+                      {t.y1}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+            Teachworks looks cheaper on this single line. It is. It also has
+            no LMS, no per-state credential workflow, no instructor payroll,
+            and no audit log. The chart above is where that gap shows up.
+          </p>
+        </div>
+      </section>
+
+      <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
           <Reveal>
             <h2 className="font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl dark:text-ink-50">
@@ -469,21 +671,21 @@ export default function Compare({ loaderData }: Route.ComponentProps) {
               <Differentiator
                 tag="Pricing"
                 title="$0/mo to run the whole school."
-                body="Other vendors charge $99–$249/mo plus per-seat fees before you see a single student. We charge $0 and take a 2% fee on payments — out of your revenue, never on top of the family's bill. Studio ($29/mo) adds your AI-built marketing site; that's it."
+                body="DriveScout starts at $50/seat/mo with a 5-seat floor and a $250 setup. Teachworks charges $0.32/lesson — which adds up fast at 12 lessons per student. We charge $0 and take 2% on payments — out of your revenue, never on top of the family's bill. Studio ($29/mo) adds your AI-built marketing site. That's the whole menu."
               />
             </Reveal>
             <Reveal delay={80}>
               <Differentiator
                 tag="State coverage"
                 title="51 jurisdictions, honestly labeled."
-                body="Every other vendor either claims they 'support all 50 states' (they don't, really) or supports one state and leaves the rest to you. We name the credential for every jurisdiction, label depth honestly (checklist / PDF / electronic), and co-build the deeper adapter with the first school in each state."
+                body="Every other vendor either claims they 'support all 50 states' (they don't) or supports one and leaves the rest to you. We name the real credential for every jurisdiction — Blue Card, ITTD slip, DEC-1/DEC-2, MV3001, Driving Eligibility Certificate — and label maturity honestly: checklist / PDF / electronic. The first school in each state is a design partner and we co-build the deeper adapter."
               />
             </Reveal>
             <Reveal delay={160}>
               <Differentiator
-                tag="Your data, your money"
-                title="Stripe Connect direct. Full export. No lock-in."
-                body="Payments go directly to your bank via Stripe Connect — we never hold school funds. CSV import and export are first-class. Curriculum installs as a copy you own. Leaving is a click, not a negotiation."
+                tag="No upfront, no lock-in"
+                title="Stripe Connect direct. Cancel any time."
+                body="DriveScout's discount tier wants $2,400 paid on day one. Drivers Ed Solutions sells you a 4-, 5-, or 8-month prepay term. We never hold school funds — payments go directly to your bank via Stripe Connect, and full CSV export is a click. Leaving is a click, not a negotiation."
               />
             </Reveal>
           </div>

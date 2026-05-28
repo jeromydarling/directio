@@ -1,5 +1,9 @@
 @import "tailwindcss" source(".");
 
+/* Site defaults to dark. The `dark` class on <html> in app/root.tsx opts
+   every `dark:` utility in — independent of the user's OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans:
     "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
@@ -74,18 +78,11 @@
 
 html,
 body {
-  @apply bg-ink-50 text-ink-900 antialiased;
+  @apply bg-ink-950 text-ink-100 antialiased;
+  color-scheme: dark;
   font-feature-settings: "ss01" on, "cv11" on;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-@media (prefers-color-scheme: dark) {
-  html,
-  body {
-    @apply bg-ink-950 text-ink-100;
-    color-scheme: dark;
-  }
 }
 
 /* Film-grain noise overlay. Use on a relative ancestor that already
@@ -103,22 +100,16 @@ body {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
-/* Glass morphism card surface. Subtle on light, more pronounced on dark. */
+/* Glass morphism card surface — dark default. */
 .glass {
-  background: color-mix(in oklch, white 65%, transparent);
-  border: 1px solid color-mix(in oklch, white 80%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, white 6%, transparent) 0%,
+    color-mix(in oklch, white 2%, transparent) 100%
+  );
+  border: 1px solid color-mix(in oklch, white 8%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
-}
-@media (prefers-color-scheme: dark) {
-  .glass {
-    background: linear-gradient(
-      180deg,
-      color-mix(in oklch, white 6%, transparent) 0%,
-      color-mix(in oklch, white 2%, transparent) 100%
-    );
-    border: 1px solid color-mix(in oklch, white 8%, transparent);
-  }
 }
 
 /* Soft radial glow behind hero text or active timeline dots. */
