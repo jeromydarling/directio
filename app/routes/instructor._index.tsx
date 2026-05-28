@@ -4,6 +4,12 @@ import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { assessNoShowFee, getFeePolicy } from "~/lib/fees.server";
 import { suggestSlots } from "~/lib/scheduler";
+import {
+  computeLessonPayout,
+  getActiveCompRule,
+  getInstructorOverrides,
+  persistLessonPayout,
+} from "~/lib/comp";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { Field, FormError, Select, TextArea } from "~/components/form";
 import {
@@ -67,7 +73,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .first<{ id: string }>();
 
   if (!instructor) {
-    return { instructorId: null, todays: [] as ApptRow[] };
+    return {
+      instructorId: null,
+      todays: [] as ApptRow[],
+      earnings: { cents: 0, lessons: 0, unpaidCents: 0 },
+    };
   }
 
   const startOfDay = new Date();
@@ -102,6 +112,23 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(instructor.id, tenant.organization.id, startOfDay.getTime(), endOfDay.getTime())
     .all<Omit<ApptRow, "rubric">>();
 
+  // Rolling 30-day earnings — the instructor's pay transparency surface
+  // per spec module #7. Always shows the running total + next payday
+  // (TODO once the pay-period engine lands).
+  const periodStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const earningsRow = await db
+    .prepare(
+      `SELECT COALESCE(SUM(totalCents), 0) AS cents,
+              COUNT(*) AS lessons,
+              COALESCE(SUM(CASE WHEN paidAt IS NULL THEN totalCents ELSE 0 END), 0) AS unpaidCents
+         FROM lesson_payout
+        WHERE organizationId = ?
+          AND instructorId = ?
+          AND computedAt >= ?`,
+    )
+    .bind(tenant.organization.id, instructor.id, periodStart)
+    .first<{ cents: number; lessons: number; unpaidCents: number }>();
+
   // Hydrate the BTW rubric for every BTW appointment in one query, then
   // attach to each row. Empty map for non-BTW or unscored appointments.
   const btwIds = rows.results.filter((r) => r.kind === "btw").map((r) => r.id);
@@ -133,7 +160,15 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     rubric: rubricMaps.get(r.id) ?? {},
   }));
 
-  return { instructorId: instructor.id, todays };
+  return {
+    instructorId: instructor.id,
+    todays,
+    earnings: {
+      cents: earningsRow?.cents ?? 0,
+      lessons: earningsRow?.lessons ?? 0,
+      unpaidCents: earningsRow?.unpaidCents ?? 0,
+    },
+  };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -248,6 +283,59 @@ export async function action({ request, context }: Route.ActionArgs) {
       feeCents = result.feeCents;
     }
 
+    // Compute and persist the instructor's payout for this lesson —
+    // both completed and no-show statuses can earn pay (no-show stipends).
+    // Cancellations and weather holds get $0.
+    let payoutCents = 0;
+    if (status === "completed" || status === "no_show") {
+      const apptForPay = await env.DB.prepare(
+        `SELECT a.id, a.kind, a.status, a.startsAt, a.endsAt, a.instructorId
+           FROM appointment a
+          WHERE a.id = ? AND a.organizationId = ?`,
+      )
+        .bind(apptId, tenant.organization.id)
+        .first<{
+          id: string;
+          kind: string;
+          status: string;
+          startsAt: number;
+          endsAt: number;
+          instructorId: string | null;
+        }>();
+      if (apptForPay && apptForPay.instructorId) {
+        const [rule, overrides] = await Promise.all([
+          getActiveCompRule(env.DB, tenant.organization.id),
+          getInstructorOverrides(
+            env.DB,
+            tenant.organization.id,
+            apptForPay.instructorId,
+            apptForPay.startsAt,
+          ),
+        ]);
+        const computation = computeLessonPayout({
+          rule,
+          overrides,
+          ctx: {
+            appointment: {
+              id: apptForPay.id,
+              kind: apptForPay.kind,
+              status: apptForPay.status,
+              startsAt: apptForPay.startsAt,
+              endsAt: apptForPay.endsAt,
+            },
+          },
+        });
+        await persistLessonPayout(env.DB, {
+          organizationId: tenant.organization.id,
+          appointmentId: apptId,
+          instructorId: apptForPay.instructorId,
+          computation,
+          now,
+        });
+        payoutCents = computation.totalCents;
+      }
+    }
+
     // AI auto-suggest at sign-off: when a BTW lesson is completed,
     // pre-compute the top 3 next-lesson slots and surface them to the
     // family portal. This is the no-show economics fix at the source —
@@ -337,6 +425,7 @@ export async function action({ request, context }: Route.ActionArgs) {
         feeCents,
         rubricScored,
         suggestionsCreated,
+        payoutCents,
       },
     });
     return redirect("/instructor");
@@ -356,7 +445,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function InstructorToday({ loaderData, actionData }: Route.ComponentProps) {
   const me = useOutletContext<InstructorCtx>();
-  const { instructorId, todays } = loaderData;
+  const { instructorId, todays, earnings } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -379,6 +468,8 @@ export default function InstructorToday({ loaderData, actionData }: Route.Compon
         title={`Hi ${firstName(me.user.name) ?? me.user.email}`}
         description={`${todays.length} lesson${todays.length === 1 ? "" : "s"} on your schedule.`}
       />
+
+      {earnings.lessons > 0 && <EarningsStrip earnings={earnings} />}
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
 
@@ -641,6 +732,62 @@ function RubricSummary({ rubric }: { rubric: RubricMap }) {
       </ul>
     </div>
   );
+}
+
+function EarningsStrip({
+  earnings,
+}: {
+  earnings: { cents: number; lessons: number; unpaidCents: number };
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div className="rounded-2xl border border-emerald-300 bg-emerald-50/60 p-4 dark:border-emerald-800/60 dark:bg-emerald-950/30">
+        <p className="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-200">
+          Earned · last 30 days
+        </p>
+        <p className="mt-1 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+          {formatMoney(earnings.cents)}
+        </p>
+        <p className="text-xs text-ink-600 dark:text-ink-300">
+          across {earnings.lessons} lesson{earnings.lessons === 1 ? "" : "s"}
+        </p>
+      </div>
+      <div className="rounded-2xl border border-ink-200 bg-white/70 p-4 dark:border-ink-800 dark:bg-ink-900/40">
+        <p className="text-xs uppercase tracking-[0.16em] text-ink-500 dark:text-ink-400">
+          Pending payout
+        </p>
+        <p className="mt-1 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+          {formatMoney(earnings.unpaidCents)}
+        </p>
+        <p className="text-xs text-ink-500 dark:text-ink-400">
+          {earnings.unpaidCents === 0
+            ? "all caught up"
+            : "in the next pay period"}
+        </p>
+      </div>
+      <div className="rounded-2xl border border-ink-200 bg-white/70 p-4 dark:border-ink-800 dark:bg-ink-900/40">
+        <p className="text-xs uppercase tracking-[0.16em] text-ink-500 dark:text-ink-400">
+          Average per lesson
+        </p>
+        <p className="mt-1 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
+          {earnings.lessons > 0
+            ? formatMoney(Math.round(earnings.cents / earnings.lessons))
+            : "—"}
+        </p>
+        <p className="text-xs text-ink-500 dark:text-ink-400">
+          based on logged lessons
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function formatMoney(cents: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Math.round(cents) / 100);
 }
 
 function StatusPill({ status }: { status: string }) {

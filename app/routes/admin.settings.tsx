@@ -146,6 +146,9 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
             <LinkButton to="/admin/settings/payments" variant="secondary">
               Payments
             </LinkButton>
+            <LinkButton to="/admin/settings/compensation" variant="secondary">
+              Compensation
+            </LinkButton>
             <LinkButton to="/admin/settings/btw-flow" variant="secondary">
               BTW flow
             </LinkButton>

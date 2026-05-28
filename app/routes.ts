@@ -50,6 +50,7 @@ export default [
     ),
     route("settings", "routes/admin.settings.tsx"),
     route("settings/payments", "routes/admin.settings.payments.tsx"),
+    route("settings/compensation", "routes/admin.settings.compensation.tsx"),
     route("settings/btw-flow", "routes/admin.settings.btw-flow.tsx"),
     route("settings/public-listing", "routes/admin.settings.public-listing.tsx"),
     route("reports/quizzes", "routes/admin.reports.quizzes.tsx"),
