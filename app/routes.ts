@@ -26,6 +26,7 @@ export default [
   route("api/lesson/narration/upload", "routes/api.lesson.narration.upload.tsx"),
   route("api/lesson/translate", "routes/api.lesson.translate.tsx"),
   route("api/lesson/listen-heartbeat", "routes/api.lesson.listen-heartbeat.tsx"),
+  route("api/lesson/quiz-ai", "routes/api.lesson.quiz-ai.tsx"),
   route("api/translation/topup", "routes/api.translation.topup.tsx"),
   route("sitemap.xml", "routes/sitemap[.]xml.tsx"),
   route("robots.txt", "routes/robots[.]txt.tsx"),

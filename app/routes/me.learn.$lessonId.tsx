@@ -74,6 +74,8 @@ type LoaderData = {
   activeLang: string | null;
   isMachineTranslated: boolean;
   audioTotalSeconds: number;
+  audioGateEnabled: boolean;
+  audioCompletedAt: number | null;
 };
 
 type ActionData = {
@@ -97,6 +99,12 @@ export async function loader({
 }: Route.LoaderArgs): Promise<LoaderData> {
   const tenant = await requireTenant(request, context.cloudflare.env);
   const db = context.cloudflare.env.DB;
+
+  const orgPolicy = await db
+    .prepare("SELECT requireAudioCompletionBeforeQuiz FROM organization WHERE id = ?")
+    .bind(tenant.organization.id)
+    .first<{ requireAudioCompletionBeforeQuiz: number }>();
+  const audioGateEnabled = Boolean(orgPolicy?.requireAudioCompletionBeforeQuiz);
 
   const lesson = await db
     .prepare(
@@ -275,6 +283,8 @@ export async function loader({
     activeLang,
     isMachineTranslated: activeLang !== null,
     audioTotalSeconds: existing?.audioTotalSeconds ?? 0,
+    audioGateEnabled,
+    audioCompletedAt: existing?.audioCompletedAt ?? null,
   };
 }
 
@@ -298,6 +308,26 @@ export async function action({
       .bind(lang, Date.now(), tenant.user.id, tenant.organization.id)
       .run();
     return { results: [], passed: false, scorePercent: 0 };
+  }
+
+  // Enforce the audio-completion gate when the org has it enabled.
+  const orgPolicy = await db
+    .prepare("SELECT requireAudioCompletionBeforeQuiz FROM organization WHERE id = ?")
+    .bind(tenant.organization.id)
+    .first<{ requireAudioCompletionBeforeQuiz: number }>();
+  if (orgPolicy?.requireAudioCompletionBeforeQuiz) {
+    const progress = await db
+      .prepare(
+        "SELECT audioCompletedAt FROM lesson_progress WHERE userId = ? AND schoolLessonId = ?",
+      )
+      .bind(tenant.user.id, params.lessonId)
+      .first<{ audioCompletedAt: number | null }>();
+    if (!progress?.audioCompletedAt) {
+      throw new Response(
+        "Audio listen requirement not met. Listen to at least 85% of the lesson audio before submitting the quiz.",
+        { status: 403 },
+      );
+    }
   }
 
   const quiz = await db
@@ -442,6 +472,8 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
     activeLang,
     isMachineTranslated,
     audioTotalSeconds,
+    audioGateEnabled,
+    audioCompletedAt,
   } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
@@ -576,7 +608,24 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
         </section>
       )}
 
-      {quiz && questions.length > 0 && (
+      {quiz && questions.length > 0 && audioGateEnabled && !audioCompletedAt && lesson.audioUrl && (
+        <section className="mt-6 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/40 p-5 dark:border-amber-700/40 dark:bg-amber-950/30">
+          <p className="text-xs uppercase tracking-wider text-amber-700 dark:text-amber-300">
+            Quiz locked
+          </p>
+          <h2 className="font-display text-xl font-semibold text-amber-900 dark:text-amber-100">
+            Listen to the lesson first
+          </h2>
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            Your school requires students to listen to at least 85% of this
+            lesson's audio before the quiz unlocks. Scrub the player above to
+            the start and let it play — speed-running and tab-switching don't
+            earn credit.
+          </p>
+        </section>
+      )}
+
+      {quiz && questions.length > 0 && (!audioGateEnabled || audioCompletedAt || !lesson.audioUrl) && (
         <section className="mt-6 flex flex-col gap-4 border-t border-ink-200/60 pt-8 dark:border-ink-800/60">
           <header>
             <p className="text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">

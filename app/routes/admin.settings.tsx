@@ -93,7 +93,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const orgRow = await db
     .prepare(
       `SELECT jurisdiction, dailyDigestEnabled, dailyDigestRecipientEmail,
-              dailyDigestLastSentOnDate, geolocationPolicy
+              dailyDigestLastSentOnDate, geolocationPolicy,
+              requireAudioCompletionBeforeQuiz
          FROM organization WHERE id = ?`,
     )
     .bind(tenant.organization.id)
@@ -103,6 +104,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       dailyDigestRecipientEmail: string | null;
       dailyDigestLastSentOnDate: string | null;
       geolocationPolicy: string;
+      requireAudioCompletionBeforeQuiz: number;
     }>();
   const installedJurisdiction = installed.results[0]?.jurisdiction ?? null;
   const adapter = maturityForJurisdiction(
@@ -123,6 +125,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       | "off"
       | "opt_in"
       | "required",
+    requireAudioCompletionBeforeQuiz: Boolean(orgRow?.requireAudioCompletionBeforeQuiz),
   };
 }
 
@@ -148,6 +151,24 @@ export async function action({ request, context }: Route.ActionArgs) {
       entityType: "organization",
       entityId: tenant.organization.id,
       payload: { policy },
+    });
+    return redirect("/admin/settings");
+  }
+
+  if (intent === "save-audio-gate") {
+    const enabled = formData.get("requireAudioCompletionBeforeQuiz") === "on" ? 1 : 0;
+    await env.DB.prepare(
+      "UPDATE organization SET requireAudioCompletionBeforeQuiz = ? WHERE id = ?",
+    )
+      .bind(enabled, tenant.organization.id)
+      .run();
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "organization.audio_gate_changed",
+      entityType: "organization",
+      entityId: tenant.organization.id,
+      payload: { requireAudioCompletionBeforeQuiz: Boolean(enabled) },
     });
     return redirect("/admin/settings");
   }
@@ -219,7 +240,15 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export default function AdminSettings({ loaderData, actionData }: Route.ComponentProps) {
   const { tenant } = useOutletContext<{ tenant: ActiveTenant }>();
-  const { available, installed, audit, adapter, digest, geolocationPolicy } = loaderData;
+  const {
+    available,
+    installed,
+    audit,
+    adapter,
+    digest,
+    geolocationPolicy,
+    requireAudioCompletionBeforeQuiz,
+  } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -248,6 +277,34 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
           </div>
         }
       />
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Quiz access
+        </h2>
+        <Card>
+          <p className="text-sm text-ink-600 dark:text-ink-300">
+            Lessons with audio narration can require the student to listen to
+            at least 85% before the quiz unlocks. Server-side tracking — speed-
+            running, scrubbing, or hidden tabs don't earn credit. Off by default.
+          </p>
+          <Form method="post" className="mt-3 flex flex-wrap items-center gap-3">
+            <input type="hidden" name="intent" value="save-audio-gate" />
+            <label className="inline-flex items-center gap-2 text-sm text-ink-800 dark:text-ink-200">
+              <input
+                type="checkbox"
+                name="requireAudioCompletionBeforeQuiz"
+                defaultChecked={requireAudioCompletionBeforeQuiz}
+                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500 dark:border-ink-600 dark:bg-ink-900"
+              />
+              Require 85% listen-completion before the quiz unlocks
+            </label>
+            <Button type="submit" variant="secondary">
+              Save
+            </Button>
+          </Form>
+        </Card>
+      </section>
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">

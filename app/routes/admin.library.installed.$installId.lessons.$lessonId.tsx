@@ -15,6 +15,7 @@ import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput, TextArea, Select } from "~/components/form";
 import { VoiceRecorder } from "~/components/voice-recorder";
 import { LessonTranslationPanel } from "~/components/lesson-translation-panel";
+import { QuizAiPanel } from "~/components/quiz-ai-panel";
 
 type LessonRow = {
   id: string;
@@ -688,11 +689,17 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
         {quizDrift && (
           <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50/60 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
             <strong>Heads up:</strong> you edited the lesson body since these
-            quiz questions were last reviewed. Open each question, scan that
-            its answer still matches the new content, and save — that re-
-            aligns the quiz. The badge clears as soon as a question is saved.
+            quiz questions were last reviewed. Use "Review alignment" below for
+            an AI audit, or open each question and save to re-align manually.
           </div>
         )}
+        <div className="mb-4">
+          <QuizAiPanel
+            schoolLessonId={lesson.id}
+            hasQuiz={!!quiz}
+            questionCount={questions.length}
+          />
+        </div>
         {questions.length === 0 ? (
           <Card>No quiz attached to this lesson.</Card>
         ) : (
