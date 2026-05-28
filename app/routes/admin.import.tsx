@@ -288,6 +288,21 @@ export default function ImportStudents({ loaderData, actionData }: Route.Compone
         }
       />
 
+      <div className="flex flex-wrap gap-2">
+        <LinkButton to="/admin/import" variant="secondary">
+          Students (this page)
+        </LinkButton>
+        <LinkButton to="/admin/import/staff" variant="ghost">
+          Instructors
+        </LinkButton>
+        <LinkButton to="/admin/import/fleet" variant="ghost">
+          Vehicles
+        </LinkButton>
+        <LinkButton to="/admin/import/payments" variant="ghost">
+          Payment ledger
+        </LinkButton>
+      </div>
+
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
 
       {!claudeConfigured && (

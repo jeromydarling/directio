@@ -22,6 +22,8 @@ const NAV = [
   { to: "/admin/website", label: "Website", icon: "◐" },
   { to: "/admin/library", label: "Curriculum", icon: "◧" },
   { to: "/admin/reports/quizzes", label: "Quiz reports", icon: "◍" },
+  { to: "/admin/reports/outcomes", label: "Outcomes", icon: "◎" },
+  { to: "/admin/import", label: "Import", icon: "↓" },
   { to: "/admin/road-tests", label: "Road tests", icon: "◑" },
   { to: "/admin/state-coverage", label: "State coverage", icon: "✦" },
   { to: "/admin/documents", label: "Documents", icon: "◰" },
