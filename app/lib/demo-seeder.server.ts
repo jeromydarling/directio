@@ -577,9 +577,14 @@ export async function seedDemoOrg(
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(demoGuardianId, orgId, userId, demoFirstName, demoLastName, randPhone(rng), now),
   );
+  // The demo user is already a member as 'owner'. The role-gate bypass
+  // (org.isDemo) lets them see /family, /instructor, /me directly, so
+  // an extra membership row is redundant — and the UNIQUE constraint
+  // on (organizationId, userId) would reject it anyway. OR IGNORE
+  // keeps the seed defensive against schema changes.
   stmts.push(
     env.DB.prepare(
-      `INSERT INTO member (id, organizationId, userId, role, createdAt)
+      `INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt)
        VALUES (?, ?, ?, 'parent', ?)`,
     ).bind(newId(), orgId, userId, now + 1),
   );
@@ -635,7 +640,7 @@ export async function seedDemoOrg(
   );
   stmts.push(
     env.DB.prepare(
-      `INSERT INTO member (id, organizationId, userId, role, createdAt)
+      `INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt)
        VALUES (?, ?, ?, 'student', ?)`,
     ).bind(newId(), orgId, userId, now + 2),
   );
