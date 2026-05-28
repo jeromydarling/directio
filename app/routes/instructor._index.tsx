@@ -761,6 +761,50 @@ export async function action({ request, context }: Route.ActionArgs) {
     return redirect("/instructor");
   }
 
+  if (intent === "request_coverage") {
+    const apptId = String(formData.get("appointmentId") ?? "");
+    if (!apptId) return data({ error: "Missing appointment." }, { status: 400 });
+    const myInstructor = await env.DB.prepare(
+      "SELECT id FROM instructor WHERE userId = ? AND organizationId = ?",
+    )
+      .bind(tenant.user.id, tenant.organization.id)
+      .first<{ id: string }>();
+    if (!myInstructor) {
+      return data({ error: "You aren't an instructor at this school." }, { status: 400 });
+    }
+    const now = Date.now();
+    const result = await env.DB.prepare(
+      `UPDATE appointment
+          SET instructorId = NULL, openShiftAt = ?, updatedAt = ?
+        WHERE id = ? AND organizationId = ?
+          AND instructorId = ?
+          AND status IN ('scheduled','confirmed')
+          AND startsAt > ?`,
+    )
+      .bind(now, now, apptId, tenant.organization.id, myInstructor.id, now)
+      .run();
+    if ((result.meta?.changes ?? 0) === 0) {
+      return data(
+        { error: "Couldn't release that lesson — make sure it's assigned to you and in the future." },
+        { status: 409 },
+      );
+    }
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "appointment.coverage_requested",
+      entityType: "appointment",
+      entityId: apptId,
+      payload: {},
+    });
+    await notifyBoard(env, {
+      kind: "appointment.canceled",
+      orgId: tenant.organization.id,
+      appointmentId: apptId,
+    });
+    return redirect("/instructor");
+  }
+
   if (intent === "claim_open_shift") {
     const apptId = String(formData.get("appointmentId") ?? "");
     if (!apptId) return data({ error: "Missing shift." }, { status: 400 });
@@ -1136,6 +1180,18 @@ function AppointmentCard({ a, submitting }: { a: ApptRow; submitting: boolean })
               <input type="hidden" name="completionStatus" value="no_show" />
               <Button type="submit" variant="ghost" disabled={submitting}>
                 No-show
+              </Button>
+            </Form>
+            <Form method="post">
+              <input type="hidden" name="intent" value="request_coverage" />
+              <input type="hidden" name="appointmentId" value={a.id} />
+              <Button
+                type="submit"
+                variant="ghost"
+                disabled={submitting}
+                className="text-amber-700 hover:bg-amber-50 dark:text-amber-200 dark:hover:bg-amber-950/30"
+              >
+                Need coverage
               </Button>
             </Form>
           </div>
