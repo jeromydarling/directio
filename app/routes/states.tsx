@@ -11,16 +11,10 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "All 50 states + DC have a seeded teen driver-education rule pack. Honest maturity levels per state. Deep Minnesota Blue Card support first.",
+        "Minnesota is the state we go deep on. A handful of others have started work. Everywhere else is a design-partner relationship — co-built with the first school in the state.",
     },
   ];
 }
-
-type RulePackRow = {
-  slug: string;
-  name: string;
-  jurisdiction: string | null;
-};
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
@@ -39,16 +33,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       : role.role === "parent" ? "/family" : "/me";
   }
 
-  const packs = await env.DB.prepare(
-    "SELECT slug, name, jurisdiction FROM rule_pack ORDER BY name",
-  )
-    .all<RulePackRow>();
-
   return {
     appEnv: env.APP_ENV ?? "unknown",
     signedIn: Boolean(session?.user),
     destination,
-    packs: packs.results,
   };
 }
 
@@ -101,21 +89,32 @@ const MATURITY = STATE_MATURITY;
 
 export default function States({ loaderData, actionData }: Route.ComponentProps) {
   const dest = loaderData.destination ?? "/signup";
-  const packs = loaderData.packs;
 
-  const enriched = packs
-    .map((p) => {
-      const code = p.slug.slice(0, 2).toUpperCase();
-      const m = MATURITY[code] ?? { level: 1 as const };
-      return {
-        code,
-        name: STATE_LABEL[code] ?? p.name,
-        level: m.level,
-        credentialLabel: m.credentialLabel,
-        note: m.note,
-      };
-    })
-    .filter((p) => STATE_LABEL[p.code])
+  // Only states with an explicit STATE_MATURITY entry count as "active"
+  // coverage. Everything else falls into the design-partner bucket so
+  // the page doesn't oversell what's modeled. Sort by maturity desc
+  // then name so MN leads, then Level 2s, then Level 1s.
+  const enriched = Object.entries(MATURITY)
+    .filter(([code]) => STATE_LABEL[code])
+    .map(([code, m]) => ({
+      code,
+      name: STATE_LABEL[code]!,
+      level: m.level,
+      credentialLabel: m.credentialLabel,
+      note: m.note,
+      lastVerifiedAt: m.lastVerifiedAt,
+      legalBlocker: m.legalBlocker,
+    }))
+    .sort((a, b) =>
+      b.level - a.level !== 0 ? b.level - a.level : a.name.localeCompare(b.name),
+    );
+
+  // Every other US state — the design-partner bucket. We're not
+  // claiming any maturity here; signing up triggers the co-build flow.
+  const activeCodes = new Set(enriched.map((e) => e.code));
+  const waitingStates = Object.entries(STATE_LABEL)
+    .filter(([code]) => !activeCodes.has(code))
+    .map(([code, name]) => ({ code, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
@@ -134,15 +133,17 @@ export default function States({ loaderData, actionData }: Route.ComponentProps)
           </Reveal>
           <Reveal delay={80}>
             <h1 className="max-w-3xl font-display text-4xl font-semibold leading-tight tracking-tight text-ink-900 sm:text-5xl md:text-6xl dark:text-ink-50">
-              <span className="text-gradient">51 jurisdictions.</span> Honest about each one.
+              <span className="text-gradient">Minnesota deep.</span> A handful of others started. The rest, co-built with you.
             </h1>
           </Reveal>
           <Reveal delay={160}>
-            <p className="mt-6 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              All 50 states plus DC are loaded with their teen driver-education rules today. The
-              depth varies — Minnesota is the deepest, others are at the "guided checklist"
-              level for now and will deepen as we add the official forms and electronic
-              submission for each state.
+            <p className="mt-6 max-w-3xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
+              We won't pretend to model 51 jurisdictions when we don't. Minnesota
+              is the state we've gone deep on — Blue Card credential, three GDL
+              stages, fees, full audit trail. A handful of others ({enriched.length - 1}{" "}
+              right now) have real per-state work at varying depth. Every other US
+              state is a design-partner relationship: sign up, become the first
+              school in your state, and we co-build the rules with you.
             </p>
           </Reveal>
         </div>
@@ -194,18 +195,24 @@ export default function States({ loaderData, actionData }: Route.ComponentProps)
       <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
           <Reveal>
-            <h2 className="mb-8 font-display text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl dark:text-ink-50">
-              All {enriched.length} packs.
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl dark:text-ink-50">
+              Where we have real per-state work today.
             </h2>
+            <p className="mt-2 max-w-2xl text-sm text-ink-600 dark:text-ink-300">
+              {enriched.length} states. Each one has been worked through by the
+              directio team — credential modeling, rule pack, last-verified-with-DPS
+              date. Listed roughly in order of depth.
+            </p>
           </Reveal>
-          <div className="overflow-hidden rounded-2xl border border-ink-200 dark:border-ink-800">
+          <div className="mt-6 overflow-hidden rounded-2xl border border-ink-200 dark:border-ink-800">
             <table className="w-full divide-y divide-ink-200 text-sm dark:divide-ink-800">
               <thead className="bg-ink-100/60 text-xs uppercase tracking-[0.14em] text-ink-500 dark:bg-ink-900/60 dark:text-ink-400">
                 <tr>
                   <th className="px-4 py-3 text-left">State</th>
                   <th className="px-4 py-3 text-left">Credential</th>
                   <th className="px-4 py-3 text-left">Maturity</th>
-                  <th className="hidden px-4 py-3 text-left sm:table-cell">Notes</th>
+                  <th className="hidden px-4 py-3 text-left sm:table-cell">Last verified</th>
+                  <th className="hidden px-4 py-3 text-left lg:table-cell">Notes</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-200 bg-white/40 dark:divide-ink-800 dark:bg-ink-900/30">
@@ -218,18 +225,57 @@ export default function States({ loaderData, actionData }: Route.ComponentProps)
                       {p.name}
                     </td>
                     <td className="px-4 py-3 text-ink-700 dark:text-ink-200">
-                      {p.credentialLabel ?? "Modeled generically"}
+                      {p.credentialLabel ?? "—"}
                     </td>
                     <td className="px-4 py-3">
                       <MaturityPill level={p.level} />
                     </td>
                     <td className="hidden px-4 py-3 text-xs text-ink-500 sm:table-cell dark:text-ink-400">
-                      {p.note ?? "—"}
+                      {p.lastVerifiedAt ?? "—"}
+                    </td>
+                    <td className="hidden px-4 py-3 text-xs text-ink-500 lg:table-cell dark:text-ink-400">
+                      {p.legalBlocker ? (
+                        <span className="text-amber-700 dark:text-amber-200">
+                          ⚠ {p.legalBlocker}
+                        </span>
+                      ) : (
+                        p.note ?? "—"
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+          <Reveal>
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl dark:text-ink-50">
+              Everywhere else — {waitingStates.length} states ready for a design partner.
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-ink-600 dark:text-ink-300">
+              Signup is open in every US state from day one. But if your state
+              isn't in the table above, we haven't gone deep yet. Schools in these
+              states sign up as design partners — the directio team works with
+              the first one or two to model the credential, the requirements, and
+              the official forms. Most of that work is configuration, not code.
+            </p>
+          </Reveal>
+          <div className="mt-6 grid gap-1 sm:grid-cols-3 lg:grid-cols-4">
+            {waitingStates.map((s) => (
+              <span
+                key={s.code}
+                className="inline-flex items-center gap-2 rounded-lg border border-dashed border-ink-200 px-3 py-1.5 text-sm text-ink-600 dark:border-ink-700 dark:text-ink-300"
+              >
+                <span className="font-mono text-[10px] text-ink-400">
+                  {s.code}
+                </span>
+                {s.name}
+              </span>
+            ))}
           </div>
         </div>
       </section>

@@ -561,9 +561,9 @@ const SECTIONS: FeatureSection[] = [
       "Each state has its own rules. We handle them honestly — no marketing-page lies about coverage depth. Per-school adapter maturity is visible on page one of onboarding.",
     features: [
       {
-        title: "All 50 states + DC, ready",
+        title: "Minnesota deep; others co-built",
         detail:
-          "Every state's teen path is loaded — Minnesota's Blue Card, Texas's parent-taught route, California's classroom certificate. Pick yours and the rules apply.",
+          "Minnesota is the state we've gone deep on — Blue Card credential, three GDL stages, fees, full audit trail. A handful of others (Texas, California, New York, Florida, Ohio, Illinois, Washington) have real per-state work at varying depth. Schools in every other state sign up as design partners and we co-build their state's rules with them.",
       },
       {
         title: "Three honest maturity levels",

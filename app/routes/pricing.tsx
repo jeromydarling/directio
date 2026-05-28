@@ -45,7 +45,7 @@ const TIERS = [
       "Unlimited students and enrollments",
       "Unlimited instructors and vehicles",
       "Your bank account, your money",
-      "All 50 states + DC, ready out of the box",
+      "Minnesota deep today; other states co-built as design partners",
       "Lessons, quizzes, video — the whole classroom",
       "Family portal that handles all your kids",
       "Late-cancel and no-show fee rules",

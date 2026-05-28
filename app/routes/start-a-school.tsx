@@ -288,7 +288,7 @@ const WE_PROVIDE = [
   },
   {
     title: "State credentialing",
-    body: "Your state's permit credential (Blue Card, ITTD, etc.) unlocks automatically when students finish. All 50 states + DC loaded.",
+    body: "Your state's permit credential (Blue Card, ITTD, etc.) unlocks automatically when students finish. Minnesota is the deepest today; other states get co-built when their first school signs up.",
     icon: "📜",
   },
   {

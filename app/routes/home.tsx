@@ -428,7 +428,7 @@ const FEATURE_CATEGORIES = [
     title: "State compliance",
     icon: "📜",
     features: [
-      "All 50 states + DC ready out of the box",
+      "Minnesota deep today; other states co-built as design partners",
       "Permit credentials unlock automatically when requirements hit",
       "Instructor signs off on supervised-practice hours",
       "Log road test results, show your pass rate",
@@ -711,7 +711,7 @@ const TRUST_ITEMS = [
   },
   {
     title: "Honest about state coverage",
-    body: "All 50 states + DC are seeded today. We're upfront about which states are at 'manual checklist' depth and which are deeper — see /states for the full breakdown.",
+    body: "Minnesota is the state we go deep on. A handful of others have real per-state work. The rest are a design-partner relationship — we co-build the rules with the first school in your state. See /states for the breakdown.",
   },
   {
     title: "Your lessons stay yours",

@@ -283,9 +283,11 @@ function ComplianceSection() {
               The hardest part — already done.
             </h2>
             <p className="mt-4 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Driver education is heavily regulated, state by state. We ship with all 50 states
-              plus DC ready to go. You install your state, the rules apply, and you adjust the
-              one or two things that are specific to your school.
+              Driver education is heavily regulated, state by state. Minnesota is
+              the state we've gone deep on; a handful of others have started.
+              Schools in every other state sign up as design partners and we
+              co-build the rules together — most of that work is configuration,
+              not code.
             </p>
           </div>
         </Reveal>
