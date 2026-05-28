@@ -6,7 +6,14 @@ import { requireTenant } from "~/lib/tenant.server";
 import { Card, PageHeader, StatTile } from "~/components/ui";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PERIOD_DAYS = 30;
+
+const PERIOD_PRESETS: ReadonlyArray<{ value: string; days: number; label: string }> = [
+  { value: "7d", days: 7, label: "Last 7 days" },
+  { value: "30d", days: 30, label: "Last 30 days" },
+  { value: "90d", days: 90, label: "Last 90 days" },
+  { value: "ytd", days: 0, label: "Year to date" },
+];
+const DEFAULT_PERIOD = "30d";
 
 type HealthTone = "emerald" | "amber" | "rose";
 
@@ -17,10 +24,30 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const db = context.cloudflare.env.DB;
   const orgId = tenant.organization.id;
   const now = Date.now();
-  const periodStart = now - PERIOD_DAYS * DAY_MS;
-  const priorStart = periodStart - PERIOD_DAYS * DAY_MS;
+  const url = new URL(request.url);
+  const periodKey = url.searchParams.get("period") ?? DEFAULT_PERIOD;
+  const preset =
+    PERIOD_PRESETS.find((p) => p.value === periodKey) ??
+    PERIOD_PRESETS.find((p) => p.value === DEFAULT_PERIOD)!;
+  let periodStart: number;
+  let priorStart: number;
+  let periodDays: number;
+  if (preset.value === "ytd") {
+    const yStart = new Date(new Date(now).getFullYear(), 0, 1).getTime();
+    periodStart = yStart;
+    const elapsedDays = Math.max(1, Math.floor((now - yStart) / DAY_MS));
+    periodDays = elapsedDays;
+    // Prior comparison: same number of days from the same point last year.
+    const lastYearStart = new Date(new Date(now).getFullYear() - 1, 0, 1).getTime();
+    priorStart = lastYearStart;
+  } else {
+    periodStart = now - preset.days * DAY_MS;
+    priorStart = periodStart - preset.days * DAY_MS;
+    periodDays = preset.days;
+  }
   const horizonEnd = now + 14 * DAY_MS;
   const stuckThreshold = now - 30 * DAY_MS;
+  const priorEnd = priorStart + periodDays * DAY_MS;
 
   const [
     revenueRow,
@@ -38,6 +65,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     roadTestRow,
     payrollRow,
     instructorLicenseRow,
+    priorRecoveredRow,
+    priorPayrollRow,
   ] = await Promise.all([
     db
       .prepare(
@@ -49,7 +78,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       .prepare(
         "SELECT COALESCE(SUM(schoolNetCents), 0) AS cents FROM payment WHERE organizationId = ? AND status = 'succeeded' AND createdAt >= ? AND createdAt < ?",
       )
-      .bind(orgId, priorStart, periodStart)
+      .bind(orgId, priorStart, priorEnd)
       .first<{ cents: number }>(),
     db
       .prepare(
@@ -204,6 +233,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       )
       .bind(now, now, now + 30 * DAY_MS, orgId)
       .first<{ expired: number; expiringSoon: number }>(),
+    // Prior-period fee recovery, for comparison.
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN feeStatus = 'paid' THEN feeAssessedCents ELSE 0 END), 0) AS cents
+           FROM appointment
+          WHERE organizationId = ? AND canceledAt >= ? AND canceledAt < ?`,
+      )
+      .bind(orgId, priorStart, priorEnd)
+      .first<{ cents: number }>(),
+    // Prior-period payroll accrual, for comparison.
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(totalCents), 0) AS cents
+           FROM lesson_payout
+          WHERE organizationId = ? AND computedAt >= ? AND computedAt < ?`,
+      )
+      .bind(orgId, priorStart, priorEnd)
+      .first<{ cents: number }>(),
   ]);
 
   const revenueCents = revenueRow?.cents ?? 0;
@@ -253,10 +300,15 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   return {
     period: {
-      days: PERIOD_DAYS,
+      days: periodDays,
+      key: preset.value,
+      label: preset.label,
       startMs: periodStart,
       endMs: now,
     },
+    periodPresets: PERIOD_PRESETS,
+    priorRecoveredCents: priorRecoveredRow?.cents ?? 0,
+    priorPayrollCents: priorPayrollRow?.cents ?? 0,
     counts: {
       students: studentRow?.n ?? 0,
       activeEnrollments: activeEnrollRow?.n ?? 0,
@@ -334,6 +386,11 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
         description="Your school at a glance — the answer to “is the business healthy?” before you scroll."
       />
 
+      <PeriodPicker
+        active={data.period.key}
+        presets={data.periodPresets}
+      />
+
       <HealthBanner data={data} />
 
       <RecoveredSection data={data} />
@@ -350,6 +407,35 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
       <InstructorScorecardSection data={data} />
 
       <VehicleSection data={data} />
+    </div>
+  );
+}
+
+function PeriodPicker({
+  active,
+  presets,
+}: {
+  active: string;
+  presets: ReadonlyArray<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {presets.map((p) => {
+        const isActive = p.value === active;
+        return (
+          <Link
+            key={p.value}
+            to={`/admin?period=${p.value}`}
+            className={
+              isActive
+                ? "rounded-full bg-ink-900 px-3 py-1 text-xs font-medium text-ink-50 dark:bg-ink-50 dark:text-ink-900"
+                : "rounded-full border border-ink-200 px-3 py-1 text-xs font-medium text-ink-700 hover:border-brand-400 dark:border-ink-700 dark:text-ink-200"
+            }
+          >
+            {p.label}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -400,19 +486,31 @@ function HealthBanner({ data }: { data: Loader }) {
 }
 
 function RecoveredSection({ data }: { data: Loader }) {
-  const { recovered } = data;
+  const { recovered, priorRecoveredCents } = data;
   const total = recovered.totalCents;
+  const delta = priorRecoveredCents > 0 ? total / priorRecoveredCents - 1 : null;
   return (
     <section>
       <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
-        Dollars recovered, last {data.period.days} days
+        Dollars recovered, {data.period.label.toLowerCase()}
       </h2>
       <div className="grid gap-4 md:grid-cols-3">
         <StatTile
           tone="emerald"
           label="Total recovered"
           value={formatMoney(total)}
-          hint={total > 0 ? "would-be-lost revenue captured" : "no recovery activity yet"}
+          hint={
+            delta === null
+              ? total > 0
+                ? "would-be-lost revenue captured"
+                : "no recovery activity yet"
+              : (
+                  <>
+                    {formatDelta(delta)} vs. prior period (
+                    {formatMoney(priorRecoveredCents)})
+                  </>
+                )
+          }
         />
         <StatTile
           label="No-show fees collected"
@@ -434,13 +532,15 @@ function RecoveredSection({ data }: { data: Loader }) {
 }
 
 function PayrollSection({ data }: { data: Loader }) {
-  const { payroll, recovered } = data;
+  const { payroll, recovered, priorPayrollCents } = data;
   const net = recovered.totalCents - payroll.accruedCents;
+  const delta =
+    priorPayrollCents > 0 ? payroll.accruedCents / priorPayrollCents - 1 : null;
   return (
     <section>
       <div className="mb-3 flex items-end justify-between">
         <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
-          Payroll, last {data.period.days} days
+          Payroll, {data.period.label.toLowerCase()}
         </h2>
         <Link
           to="/admin/payroll"
@@ -453,7 +553,15 @@ function PayrollSection({ data }: { data: Loader }) {
         <StatTile
           label="Accrued instructor pay"
           value={formatMoney(payroll.accruedCents)}
-          hint={`${payroll.lessonCount} lesson${payroll.lessonCount === 1 ? "" : "s"} computed`}
+          hint={
+            delta === null
+              ? `${payroll.lessonCount} lesson${payroll.lessonCount === 1 ? "" : "s"} computed`
+              : (
+                  <>
+                    {formatDelta(delta)} vs. prior period ({payroll.lessonCount} lessons)
+                  </>
+                )
+          }
         />
         <StatTile
           tone="amber"
