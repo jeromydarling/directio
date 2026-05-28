@@ -1,4 +1,4 @@
-import { Form, data, redirect, useNavigation } from "react-router";
+import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.instructors.$instructorId";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
@@ -421,7 +421,12 @@ export default function InstructorDetail({ loaderData, actionData }: Route.Compo
                   </td>
                   <td className="py-2 pr-3 tabular-nums">{d.year}</td>
                   <td className="py-2 pr-3 text-xs text-ink-600 dark:text-ink-300">
-                    {d.fileName}
+                    <Link
+                      to={`/admin/instructors/${instructor.id}/tax-doc/${d.id}.pdf`}
+                      className="hover:text-brand-600 hover:underline dark:hover:text-brand-300"
+                    >
+                      {d.fileName}
+                    </Link>
                   </td>
                   <td className="py-2 pr-3 text-xs tabular-nums text-ink-500 dark:text-ink-400">
                     {formatBytes(d.sizeBytes)}

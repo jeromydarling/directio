@@ -559,6 +559,92 @@ export async function closePayPeriod(
   return { draftsCreated: buckets.results.length, totalCents: total };
 }
 
+/**
+ * Cron-friendly: close every pay period that has ended for every
+ * organization. Idempotent — periods already 'closed' or 'paid' are
+ * skipped. Returns counts so the cron can log them.
+ *
+ * Per spec module #7: "the school configures pay cadence ... and the
+ * engine closes a period on its own." This is that "on its own" path.
+ */
+export async function autoCloseExpiredPayPeriods(
+  db: D1Database,
+  now: number,
+): Promise<{ closedPeriods: number; totalCents: number }> {
+  const expired = await db
+    .prepare(
+      `SELECT id, organizationId
+         FROM pay_period
+        WHERE status = 'open' AND endsAt <= ?
+        ORDER BY organizationId, startsAt`,
+    )
+    .bind(now)
+    .all<{ id: string; organizationId: string }>();
+
+  let closedPeriods = 0;
+  let totalCents = 0;
+  for (const period of expired.results) {
+    try {
+      // closedByUserId is null for cron-driven closes; audit reflects it.
+      const buckets = await db
+        .prepare(
+          `SELECT instructorId,
+                  COALESCE(SUM(totalCents), 0) AS totalCents,
+                  COUNT(*) AS lessonCount
+             FROM lesson_payout
+            WHERE organizationId = ?
+              AND payPeriodId = ?
+            GROUP BY instructorId`,
+        )
+        .bind(period.organizationId, period.id)
+        .all<{ instructorId: string; totalCents: number; lessonCount: number }>();
+
+      for (const b of buckets.results) {
+        totalCents += b.totalCents;
+        await db
+          .prepare(
+            `INSERT INTO payout_draft
+               (id, organizationId, payPeriodId, instructorId,
+                totalCents, lessonCount, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(payPeriodId, instructorId) DO UPDATE SET
+               totalCents = excluded.totalCents,
+               lessonCount = excluded.lessonCount,
+               updatedAt = excluded.updatedAt`,
+          )
+          .bind(
+            newId(),
+            period.organizationId,
+            period.id,
+            b.instructorId,
+            b.totalCents,
+            b.lessonCount,
+            now,
+            now,
+          )
+          .run();
+      }
+
+      await db
+        .prepare(
+          `UPDATE pay_period
+              SET status = 'closed', closedAt = ?, closedByUserId = NULL
+            WHERE id = ? AND status = 'open'`,
+        )
+        .bind(now, period.id)
+        .run();
+      closedPeriods++;
+
+      // Open the next period so accruals continue to land somewhere.
+      await ensureOpenPayPeriod(db, period.organizationId, now + 1);
+    } catch (err) {
+      console.warn(`[pay-period] auto-close failed for ${period.id}:`, err);
+    }
+  }
+
+  return { closedPeriods, totalCents };
+}
+
 function mondayAtMidnight(now: number): number {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);

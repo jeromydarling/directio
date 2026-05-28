@@ -1,4 +1,5 @@
 import { createRequestHandler } from "react-router";
+import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
 
@@ -117,6 +118,16 @@ export default {
           await runStateChangeMonitor(env, { batchSize: 5 });
         } catch (err) {
           console.error("scheduled state-change monitor failed:", err);
+        }
+        try {
+          const result = await autoCloseExpiredPayPeriods(env.DB, Date.now());
+          if (result.closedPeriods > 0) {
+            console.log(
+              `[cron] auto-closed ${result.closedPeriods} pay period(s), totalCents=${result.totalCents}`,
+            );
+          }
+        } catch (err) {
+          console.error("scheduled pay-period close failed:", err);
         }
       })(),
     );

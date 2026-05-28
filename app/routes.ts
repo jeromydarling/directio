@@ -30,6 +30,10 @@ export default [
     route("instructors", "routes/admin.instructors.tsx"),
     route("instructors/new", "routes/admin.instructors.new.tsx"),
     route("instructors/:instructorId", "routes/admin.instructors.$instructorId.tsx"),
+    route(
+      "instructors/:instructorId/tax-doc/:docId.pdf",
+      "routes/admin.instructors.$instructorId.tax-doc.$docId[.pdf].tsx",
+    ),
     route("vehicles", "routes/admin.vehicles.tsx"),
     route("vehicles/:vehicleId", "routes/admin.vehicles.$vehicleId.tsx"),
     route("schedule", "routes/admin.schedule.tsx"),
