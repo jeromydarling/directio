@@ -1,8 +1,9 @@
-import { Form, data, redirect, useNavigation } from "react-router";
+import { Form, Link, data, redirect, useNavigation } from "react-router";
 import { useState } from "react";
 import type { Route } from "./+types/admin.schedule.new";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
+import { checkSlot, suggestSlots, type SlotProposal } from "~/lib/scheduler";
 import { PageHeader, Button, LinkButton, Card } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
@@ -30,6 +31,19 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
   const db = context.cloudflare.env.DB;
   const orgId = tenant.organization.id;
+
+  // Prefill + suggest mode is driven by URL params so clicking a
+  // suggested slot just navigates to /admin/schedule/new with the
+  // values baked in — no client state needed.
+  const url = new URL(request.url);
+  const prefill = {
+    enrollmentId: url.searchParams.get("enrollmentId") ?? "",
+    instructorId: url.searchParams.get("instructorId") ?? "",
+    vehicleId: url.searchParams.get("vehicleId") ?? "",
+    startsAt: url.searchParams.get("startsAt") ?? "",
+    kind: url.searchParams.get("kind") ?? "btw",
+    durationMin: url.searchParams.get("durationMin") ?? "60",
+  };
 
   const enrollments = await db
     .prepare(
@@ -71,11 +85,34 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(orgId, now, horizon)
     .all<AvailabilityRow>();
 
+  // Constraint-engine-powered suggestions, only when the admin has picked
+  // an enrollment via the URL. Walks the next 14 days, returns top
+  // candidates ranked by earliness + preference matches, filtered against
+  // every constraint the engine knows about (vehicle compliance,
+  // instructor availability, conflicts).
+  let suggestions: SlotProposal[] | null = null;
+  if (prefill.enrollmentId) {
+    const durationMinutes = Math.max(15, parseInt(prefill.durationMin, 10) || 60);
+    suggestions = await suggestSlots(db, {
+      organizationId: orgId,
+      enrollmentId: prefill.enrollmentId,
+      kind: prefill.kind,
+      durationMinutes,
+      windowStart: now,
+      windowEnd: now + 14 * 24 * 60 * 60 * 1000,
+      preferredInstructorId: prefill.instructorId || null,
+      preferredVehicleId: prefill.vehicleId || null,
+      limit: 10,
+    });
+  }
+
   return {
     enrollments: enrollments.results,
     instructors: instructors.results,
     vehicles: vehicles.results,
     availability: availability.results,
+    prefill,
+    suggestions,
   };
 }
 
@@ -110,62 +147,33 @@ export async function action({ request, context }: Route.ActionArgs) {
     .first<{ id: string }>();
   if (!e) return data({ error: "Enrollment not found." }, { status: 400 });
 
-  // Hard block: same instructor double-booked.
-  if (instructorId) {
-    const conflict = await env.DB.prepare(
-      `SELECT id FROM appointment
-        WHERE organizationId = ? AND instructorId = ?
-          AND status IN ('scheduled', 'confirmed')
-          AND startsAt < ? AND endsAt > ?
-        LIMIT 1`,
-    )
-      .bind(tenant.organization.id, instructorId, endsAt, startsAt)
-      .first<{ id: string }>();
-    if (conflict)
-      return data(
-        { error: "That instructor is already booked during this time." },
-        { status: 409 },
-      );
+  // Single source of truth for "is this slot bookable" lives in
+  // app/lib/scheduler.ts — same code path the suggest/parent/auto-suggest
+  // surfaces use, so they can never produce a slot this form would reject.
+  const check = await checkSlot(env.DB, {
+    organizationId: tenant.organization.id,
+    enrollmentId,
+    instructorId,
+    vehicleId,
+    startsAt,
+    endsAt,
+  });
+  if (!check.ok) {
+    return data({ error: check.hardErrors.join(" ") }, { status: 409 });
   }
-
-  // Hard block: same vehicle double-booked.
-  if (vehicleId) {
-    const vehicleConflict = await env.DB.prepare(
-      `SELECT id FROM appointment
-        WHERE organizationId = ? AND vehicleId = ?
-          AND status IN ('scheduled', 'confirmed')
-          AND startsAt < ? AND endsAt > ?
-        LIMIT 1`,
-    )
-      .bind(tenant.organization.id, vehicleId, endsAt, startsAt)
-      .first<{ id: string }>();
-    if (vehicleConflict)
-      return data(
-        { error: "That vehicle is already in use during this time." },
-        { status: 409 },
-      );
-  }
-
-  // Soft check: time should fall inside an instructor availability window.
-  // Allow override (e.g. school staff knows the instructor agreed off-platform).
-  if (instructorId && !overrideWindow) {
-    const window = await env.DB.prepare(
-      `SELECT id FROM instructorAvailability
-        WHERE organizationId = ? AND instructorId = ?
-          AND startsAt <= ? AND endsAt >= ?
-        LIMIT 1`,
-    )
-      .bind(tenant.organization.id, instructorId, startsAt, endsAt)
-      .first<{ id: string }>();
-    if (!window)
-      return data(
-        {
-          error:
-            "This time isn't inside the instructor's open availability. Check 'Book outside availability' to override.",
-          showOverride: true,
-        },
-        { status: 400 },
-      );
+  // Availability-window warning is admin-overridable.
+  const outsideWindow = check.warnings.some((w) =>
+    w.startsWith("Outside the instructor's"),
+  );
+  if (outsideWindow && !overrideWindow) {
+    return data(
+      {
+        error:
+          "This time isn't inside the instructor's open availability. Check 'Book outside availability' to override.",
+        showOverride: true,
+      },
+      { status: 400 },
+    );
   }
 
   await env.DB.prepare(
@@ -192,11 +200,13 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function NewLesson({ loaderData, actionData }: Route.ComponentProps) {
-  const { enrollments, instructors, vehicles, availability } = loaderData;
+  const { enrollments, instructors, vehicles, availability, prefill, suggestions } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
-  const defaultStart = defaultDatetimeLocal();
-  const [instructorId, setInstructorId] = useState("");
+  const defaultStart = prefill.startsAt
+    ? toDatetimeLocalValue(parseInt(prefill.startsAt, 10))
+    : defaultDatetimeLocal();
+  const [instructorId, setInstructorId] = useState(prefill.instructorId);
 
   const upcomingForInstructor = instructorId
     ? availability.filter((a) => a.instructorId === instructorId).slice(0, 6)
@@ -222,9 +232,55 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
           No active enrollments to book against. Enroll a student first.
         </p>
       ) : (
-        <Form method="post" className="grid max-w-3xl gap-4 md:grid-cols-2">
+        <>
+          {!prefill.enrollmentId && (
+            <Form method="get" className="max-w-3xl">
+              <Card className="bg-brand-50/30 dark:bg-brand-950/20">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-700 dark:text-brand-200">
+                  Suggest valid slots
+                </p>
+                <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+                  Pick an enrollment and we'll surface the top 10 slots in the next 14 days that pass every constraint — instructor availability, vehicle compliance, conflict checks. Click a slot to prefill the booking form.
+                </p>
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <Field label="Enrollment">
+                    <Select name="enrollmentId" defaultValue="" required>
+                      <option value="" disabled>
+                        Pick a student…
+                      </option>
+                      {enrollments.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.studentName} — {e.programName}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Kind">
+                    <Select name="kind" defaultValue="btw">
+                      <option value="btw">BTW</option>
+                      <option value="classroom">Classroom</option>
+                      <option value="road_test_prep">Road test prep</option>
+                    </Select>
+                  </Field>
+                  <Field label="Duration (min)">
+                    <TextInput name="durationMin" type="number" min="15" step="15" defaultValue="60" />
+                  </Field>
+                  <Button type="submit">Show valid slots</Button>
+                </div>
+              </Card>
+            </Form>
+          )}
+
+          {prefill.enrollmentId && suggestions && (
+            <SuggestionsList
+              suggestions={suggestions}
+              prefill={prefill}
+            />
+          )}
+
+          <Form method="post" className="grid max-w-3xl gap-4 md:grid-cols-2">
           <Field label="Enrollment">
-            <Select name="enrollmentId" defaultValue="" required>
+            <Select name="enrollmentId" defaultValue={prefill.enrollmentId} required>
               <option value="" disabled>
                 Pick a student / program…
               </option>
@@ -236,7 +292,7 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
             </Select>
           </Field>
           <Field label="Kind">
-            <Select name="kind" defaultValue="btw">
+            <Select name="kind" defaultValue={prefill.kind}>
               <option value="btw">Behind-the-wheel</option>
               <option value="classroom">Classroom</option>
               <option value="road_test_prep">Road test prep</option>
@@ -258,7 +314,7 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
             </Select>
           </Field>
           <Field label="Vehicle">
-            <Select name="vehicleId" defaultValue="">
+            <Select name="vehicleId" defaultValue={prefill.vehicleId}>
               <option value="">— None —</option>
               {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -277,7 +333,7 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
               min="15"
               step="15"
               required
-              defaultValue="60"
+              defaultValue={prefill.durationMin}
             />
           </Field>
           <Field label="Location">
@@ -336,9 +392,91 @@ export default function NewLesson({ loaderData, actionData }: Route.ComponentPro
             </Button>
           </div>
         </Form>
+        </>
       )}
     </div>
   );
+}
+
+function SuggestionsList({
+  suggestions,
+  prefill,
+}: {
+  suggestions: SlotProposal[];
+  prefill: { enrollmentId: string; kind: string; durationMin: string };
+}) {
+  if (suggestions.length === 0) {
+    return (
+      <Card className="max-w-3xl bg-amber-50/40 dark:bg-amber-950/20">
+        <p className="text-xs uppercase tracking-[0.18em] text-amber-700 dark:text-amber-200">
+          No valid slots found in the next 14 days
+        </p>
+        <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+          Either no instructor has open availability windows, or every
+          candidate slot is blocked by conflicts or vehicle compliance.
+          You can still book manually using the form below.
+        </p>
+      </Card>
+    );
+  }
+  return (
+    <Card className="max-w-3xl">
+      <div className="flex items-baseline justify-between">
+        <p className="text-xs uppercase tracking-[0.18em] text-brand-700 dark:text-brand-200">
+          Top {suggestions.length} valid slots, next 14 days
+        </p>
+        <Link
+          to="/admin/schedule/new"
+          className="text-xs text-ink-500 hover:text-ink-700 dark:text-ink-400 dark:hover:text-ink-200"
+        >
+          Reset
+        </Link>
+      </div>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {suggestions.map((s, i) => {
+          const params = new URLSearchParams({
+            enrollmentId: prefill.enrollmentId,
+            kind: prefill.kind,
+            durationMin: prefill.durationMin,
+            startsAt: String(s.startsAt),
+            instructorId: s.instructorId,
+            ...(s.vehicleId ? { vehicleId: s.vehicleId } : {}),
+          });
+          return (
+            <li key={`${s.startsAt}-${s.instructorId}-${i}`}>
+              <Link
+                to={`/admin/schedule/new?${params.toString()}`}
+                className="group flex flex-col gap-1 rounded-xl border border-ink-200 bg-white/70 p-3 transition-colors hover:border-brand-400 hover:bg-brand-50/40 dark:border-ink-800 dark:bg-ink-900/40 dark:hover:border-brand-600 dark:hover:bg-brand-950/30"
+              >
+                <p className="font-medium text-ink-900 dark:text-ink-50">
+                  {fmtRange(s.startsAt, s.endsAt)}
+                </p>
+                <p className="text-xs text-ink-600 dark:text-ink-300">
+                  {s.instructorName}
+                  {s.vehicleLabel ? ` · ${s.vehicleLabel}` : ""}
+                </p>
+                {s.warnings.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                    {s.warnings.map((w) => (
+                      <li key={w}>⚠ {w}</li>
+                    ))}
+                  </ul>
+                )}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+function toDatetimeLocalValue(ms: number): string {
+  if (!Number.isFinite(ms)) return defaultDatetimeLocal();
+  const d = new Date(ms);
+  const tz = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - tz * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 function defaultDatetimeLocal(): string {
