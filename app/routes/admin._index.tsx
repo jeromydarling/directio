@@ -586,6 +586,14 @@ function PayrollSection({ data }: { data: Loader }) {
 
 function CapacitySection({ data }: { data: Loader }) {
   const peak = data.capacityByDay.reduce((max, d) => Math.max(max, d.count), 0);
+  // Gap callouts: days that are noticeably underbooked relative to the
+  // peak. We surface the top three gap days so the owner can promote
+  // them. Empty days don't count (might be a closed day).
+  const gapDays = peak === 0
+    ? []
+    : data.capacityByDay
+        .filter((d) => d.count > 0 && d.count <= Math.max(1, Math.floor(peak * 0.4)))
+        .slice(0, 3);
   return (
     <section>
       <div className="mb-3 flex items-end justify-between">
@@ -605,6 +613,29 @@ function CapacitySection({ data }: { data: Loader }) {
             <DayCell key={d.dayOffset} dateMs={d.dateMs} count={d.count} peak={peak} />
           ))}
         </div>
+        {gapDays.length > 0 && (
+          <div className="mt-3 border-t border-ink-200 pt-3 text-xs text-ink-600 dark:border-ink-800 dark:text-ink-300">
+            <span className="font-medium text-ink-800 dark:text-ink-100">
+              Promote these gaps →
+            </span>{" "}
+            {gapDays.map((d, i) => {
+              const date = new Date(d.dateMs);
+              return (
+                <span key={d.dayOffset}>
+                  {i > 0 ? ", " : " "}
+                  <strong>
+                    {date.toLocaleDateString(undefined, {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </strong>{" "}
+                  ({d.count} booked)
+                </span>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </section>
   );

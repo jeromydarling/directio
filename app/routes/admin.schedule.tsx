@@ -1,7 +1,10 @@
-import { Link } from "react-router";
+import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.schedule";
 import { requireTenant } from "~/lib/tenant.server";
-import { PageHeader, EmptyState, LinkButton } from "~/components/ui";
+import { recordAudit } from "~/lib/audit.server";
+import { notifyBoard } from "~/lib/scheduling-board.server";
+import { PageHeader, EmptyState, LinkButton, Button } from "~/components/ui";
+import { Field, Select, TextArea, TextInput } from "~/components/form";
 
 type Row = {
   id: string;
@@ -41,9 +44,77 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   return { upcoming: rows.results };
 }
 
+export async function action({ request, context }: Route.ActionArgs) {
+  const tenant = await requireTenant(request, context.cloudflare.env);
+  if (tenant.role !== "owner" && tenant.role !== "admin") throw redirect("/me");
+  const env = context.cloudflare.env;
+  const orgId = tenant.organization.id;
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "");
+  const now = Date.now();
+
+  if (intent === "weather_hold") {
+    const dateStr = String(formData.get("date") ?? "");
+    const reason = String(formData.get("reason") ?? "").trim() || "weather";
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (!match) return data({ error: "Pick a valid date." }, { status: 400 });
+    const dayStart = new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      0,
+      0,
+      0,
+      0,
+    ).getTime();
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+    const updated = await env.DB.prepare(
+      `UPDATE appointment
+          SET status = 'weather_hold',
+              canceledReason = ?,
+              canceledAt = ?,
+              canceledByUserId = ?,
+              updatedAt = ?
+        WHERE organizationId = ?
+          AND startsAt >= ? AND startsAt < ?
+          AND status IN ('scheduled','confirmed')`,
+    )
+      .bind(reason, now, tenant.user.id, now, orgId, dayStart, dayEnd)
+      .run();
+
+    const affected = updated.meta?.changes ?? 0;
+    await recordAudit(env, {
+      organizationId: orgId,
+      actorUserId: tenant.user.id,
+      action: "schedule.weather_hold",
+      entityType: "organization",
+      entityId: orgId,
+      payload: { dateStr, reason, affected },
+    });
+    if (affected > 0) {
+      await notifyBoard(env, {
+        kind: "appointment.canceled",
+        orgId,
+        appointmentId: `bulk:${dayStart}`,
+      });
+    }
+    return redirect(
+      `/admin/schedule?weather_hold=${affected}`,
+    );
+  }
+
+  return data({ error: "Unknown action." }, { status: 400 });
+}
+
 export default function AdminSchedule({ loaderData }: Route.ComponentProps) {
   const { upcoming } = loaderData;
   const grouped = groupByDay(upcoming);
+  const nav = useNavigation();
+  const submitting = nav.state === "submitting";
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const url = typeof window !== "undefined" ? new URL(window.location.href) : null;
+  const weatherHoldCount = url?.searchParams.get("weather_hold");
 
   return (
     <div className="flex flex-col gap-8">
@@ -63,6 +134,44 @@ export default function AdminSchedule({ loaderData }: Route.ComponentProps) {
           </div>
         }
       />
+
+      {weatherHoldCount && (
+        <div className="rounded-xl border border-sky-300 bg-sky-50/40 px-4 py-3 text-sm text-sky-900 dark:border-sky-800/60 dark:bg-sky-950/20 dark:text-sky-100">
+          Weather hold applied to {weatherHoldCount} lesson
+          {weatherHoldCount === "1" ? "" : "s"}. Affected families will see
+          the change immediately.
+        </div>
+      )}
+
+      <details className="rounded-2xl border border-amber-300 bg-amber-50/30 p-4 dark:border-amber-800/60 dark:bg-amber-950/20">
+        <summary className="cursor-pointer select-none text-sm font-medium text-amber-900 dark:text-amber-100">
+          ☼ Weather hold — bulk-cancel a day's lessons
+        </summary>
+        <Form method="post" className="mt-3 grid gap-3 md:grid-cols-3">
+          <input type="hidden" name="intent" value="weather_hold" />
+          <Field label="Date">
+            <TextInput name="date" type="date" required defaultValue={todayIso} />
+          </Field>
+          <Field label="Reason">
+            <Select name="reason" defaultValue="weather">
+              <option value="weather">Weather</option>
+              <option value="emergency">Emergency closure</option>
+              <option value="staff_outage">Staff outage</option>
+              <option value="other">Other</option>
+            </Select>
+          </Field>
+          <div className="flex items-end">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "Applying…" : "Apply weather hold"}
+            </Button>
+          </div>
+          <p className="text-xs text-ink-600 md:col-span-3 dark:text-ink-300">
+            Marks every scheduled/confirmed lesson on the chosen day as
+            <code className="mx-1 font-mono">weather_hold</code>. Reversible
+            individually from each lesson; bulk un-hold is a follow-up.
+          </p>
+        </Form>
+      </details>
 
       {upcoming.length === 0 ? (
         <EmptyState
