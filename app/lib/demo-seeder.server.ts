@@ -188,7 +188,7 @@ export async function seedDemoOrg(
     ),
   );
 
-  // --- Instructors (3) -----------------------------------------------
+  // --- Instructors (3 fake + 1 demo user as 4th) ---------------------
   const instructors: { id: string; userId: string; name: string }[] = [];
   for (let i = 0; i < 3; i++) {
     const fn = FIRST_NAMES[(i * 17) % FIRST_NAMES.length]!;
@@ -230,6 +230,30 @@ export async function seedDemoOrg(
 
     instructors.push({ id: instructorId, userId: instructorUserId, name: `${fn} ${ln}` });
   }
+
+  // The demo user themselves also gets an `instructor` row so they can
+  // switch to the instructor view and see their own dashboard.
+  const demoInstructorId = newId();
+  const demoFirstName = lead.name.split(/\s+/)[0] || "Demo";
+  const demoLastName = lead.name.split(/\s+/).slice(1).join(" ") || "User";
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO instructor
+         (id, organizationId, userId, firstName, lastName, certifications,
+          active, createdAt, homeLocationId)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    ).bind(
+      demoInstructorId,
+      orgId,
+      userId,
+      demoFirstName,
+      demoLastName,
+      JSON.stringify(["ADTSEA"]),
+      now - 14 * 86400000,
+      locationId,
+    ),
+  );
+  instructors.push({ id: demoInstructorId, userId, name: lead.name });
 
   // --- Vehicles (4) --------------------------------------------------
   const vehicles: string[] = [];
@@ -536,6 +560,158 @@ export async function seedDemoOrg(
         ),
       );
     }
+  }
+
+  // --- Demo user multi-role linkage ---------------------------------
+  // The demo user is owner. They also need to be wired into the
+  // instructor view (done above), the family/parent view (here), and
+  // the student view (also here) so the "View as..." switcher in the
+  // demo banner shows real data on every screen.
+
+  // Demo user as guardian — linked to the first 2 teen students.
+  const demoGuardianId = newId();
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO guardian
+         (id, organizationId, userId, firstName, lastName, phone, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(demoGuardianId, orgId, userId, demoFirstName, demoLastName, randPhone(rng), now),
+  );
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO member (id, organizationId, userId, role, createdAt)
+       VALUES (?, ?, ?, 'parent', ?)`,
+    ).bind(newId(), orgId, userId, now + 1),
+  );
+  for (let i = 0; i < 2 && i < students.length; i++) {
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO guardianStudent (guardianId, studentId, relationship, createdAt)
+         VALUES (?, ?, 'parent', ?)`,
+      ).bind(demoGuardianId, students[i]!.id, now),
+    );
+  }
+
+  // Demo user as student — their own enrollment + a couple of past
+  // and future appointments so /me/learn and /me/upcoming feel alive.
+  const demoStudentId = newId();
+  const demoEnrollmentId = newId();
+  const demoEnrolledAt = now - 21 * 86400000;
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO student
+         (id, organizationId, userId, firstName, lastName, dateOfBirth, email, phone,
+          createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      demoStudentId,
+      orgId,
+      userId,
+      demoFirstName,
+      demoLastName,
+      "2009-04-15",
+      lead.email,
+      randPhone(rng),
+      demoEnrolledAt,
+      demoEnrolledAt,
+    ),
+  );
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO enrollment
+         (id, organizationId, studentId, programId, programPackageId,
+          status, journeyState, enrolledAt, completedAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'active', 'btw', ?, NULL, ?, ?)`,
+    ).bind(
+      demoEnrollmentId,
+      orgId,
+      demoStudentId,
+      teenProgramId,
+      teenStandardId,
+      demoEnrolledAt,
+      demoEnrolledAt,
+      demoEnrolledAt,
+    ),
+  );
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO member (id, organizationId, userId, role, createdAt)
+       VALUES (?, ?, ?, 'student', ?)`,
+    ).bind(newId(), orgId, userId, now + 2),
+  );
+
+  // Past completed lesson for the demo student.
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO appointment
+         (id, organizationId, enrollmentId, instructorId, vehicleId,
+          kind, status, startsAt, endsAt, locationLabel, notes,
+          locationId, nextLessonFocus, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'btw', 'completed', ?, ?, 'Pickup at home',
+               'Worked on scanning at intersections.', ?, 'Highway merging next time.', ?, ?)`,
+    ).bind(
+      newId(),
+      orgId,
+      demoEnrollmentId,
+      instructors[0]!.id,
+      vehicles[0]!,
+      now - 6 * 86400000,
+      now - 6 * 86400000 + 90 * 60000,
+      locationId,
+      now - 13 * 86400000,
+      now - 6 * 86400000,
+    ),
+  );
+  // Upcoming confirmed lesson.
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO appointment
+         (id, organizationId, enrollmentId, instructorId, vehicleId,
+          kind, status, startsAt, endsAt, locationLabel,
+          locationId, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'btw', 'confirmed', ?, ?, 'Pickup at home',
+               ?, ?, ?)`,
+    ).bind(
+      newId(),
+      orgId,
+      demoEnrollmentId,
+      instructors[0]!.id,
+      vehicles[0]!,
+      now + 3 * 86400000 + 16 * 3600000,
+      now + 3 * 86400000 + 17 * 3600000 + 30 * 60000,
+      locationId,
+      now - 2 * 86400000,
+      now,
+    ),
+  );
+
+  // Also schedule the demo user as the instructor for 2 upcoming
+  // lessons with other students so /instructor has data.
+  for (let i = 0; i < 2; i++) {
+    const s = students[i * 3]!;
+    const daysFromNow = 1 + i * 2;
+    const startsAt = now + daysFromNow * 86400000 + (9 + i * 2) * 3600000;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO appointment
+           (id, organizationId, enrollmentId, instructorId, vehicleId,
+            kind, status, startsAt, endsAt, locationLabel,
+            locationId, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'btw', 'confirmed', ?, ?, 'Pickup at home',
+                 ?, ?, ?)`,
+      ).bind(
+        newId(),
+        orgId,
+        s.enrollmentId,
+        demoInstructorId,
+        vehicles[i % vehicles.length]!,
+        startsAt,
+        startsAt + 90 * 60000,
+        locationId,
+        now - 86400000,
+        now,
+      ),
+    );
   }
 
   // --- Audit log entries (sampling, last 30 days) -------------------

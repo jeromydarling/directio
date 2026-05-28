@@ -13,6 +13,7 @@ export default [
   route("pricing", "routes/pricing.tsx"),
   route("compare", "routes/compare.tsx"),
   route("demo", "routes/demo.tsx"),
+  route("demo/skip", "routes/demo.skip.tsx"),
   route("login", "routes/login.tsx"),
   route("signup", "routes/signup.tsx"),
   route("logout", "routes/logout.tsx"),

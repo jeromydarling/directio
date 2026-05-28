@@ -1,18 +1,21 @@
 import { Form, Link, NavLink, Outlet, redirect } from "react-router";
 import type { Route } from "./+types/family";
+import { DemoBanner } from "~/components/demo-banner";
 import { requireTenant } from "~/lib/tenant.server";
 
 type FamilyCtx = {
   user: { id: string; email: string; name: string | null };
-  organization: { id: string; name: string };
+  organization: { id: string; name: string; isDemo: boolean; demoExpiresAt: number | null };
   guardianId: string | null;
 };
 
 export async function loader({ request, context }: Route.LoaderArgs): Promise<FamilyCtx> {
   const tenant = await requireTenant(request, context.cloudflare.env);
 
-  if (tenant.role === "owner" || tenant.role === "admin") throw redirect("/admin");
-  if (tenant.role === "instructor") throw redirect("/instructor");
+  if (!tenant.organization.isDemo) {
+    if (tenant.role === "owner" || tenant.role === "admin") throw redirect("/admin");
+    if (tenant.role === "instructor") throw redirect("/instructor");
+  }
 
   const guardian = await context.cloudflare.env.DB.prepare(
     "SELECT id FROM guardian WHERE userId = ? AND organizationId = ? LIMIT 1",
@@ -26,7 +29,12 @@ export async function loader({ request, context }: Route.LoaderArgs): Promise<Fa
       email: tenant.user.email,
       name: tenant.user.name ?? null,
     },
-    organization: { id: tenant.organization.id, name: tenant.organization.name },
+    organization: {
+      id: tenant.organization.id,
+      name: tenant.organization.name,
+      isDemo: tenant.organization.isDemo,
+      demoExpiresAt: tenant.organization.demoExpiresAt,
+    },
     guardianId: guardian?.id ?? null,
   };
 }
@@ -91,6 +99,12 @@ export default function FamilyLayout({ loaderData }: Route.ComponentProps) {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+        {me.organization.isDemo && (
+          <DemoBanner
+            expiresAt={me.organization.demoExpiresAt}
+            current="family"
+          />
+        )}
         <Outlet context={me} />
       </main>
     </div>

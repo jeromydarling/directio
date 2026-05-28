@@ -1,11 +1,16 @@
 import { Form, Link, NavLink, Outlet, redirect, useLocation } from "react-router";
 import { useEffect, useState } from "react";
 import type { Route } from "./+types/admin";
+import { DemoBanner } from "~/components/demo-banner";
 import { requireTenant } from "~/lib/tenant.server";
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const tenant = await requireTenant(request, context.cloudflare.env);
-  if (tenant.role !== "owner" && tenant.role !== "admin") {
+  if (
+    tenant.role !== "owner" &&
+    tenant.role !== "admin" &&
+    !tenant.organization.isDemo
+  ) {
     throw redirect("/me");
   }
   return { tenant };
@@ -96,7 +101,10 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
 
         <main className="px-4 py-6 pb-24 sm:px-6 md:px-10 md:py-8 md:pb-12">
           {tenant.organization.isDemo && (
-            <DemoBanner expiresAt={tenant.organization.demoExpiresAt} />
+            <DemoBanner
+              expiresAt={tenant.organization.demoExpiresAt}
+              current="owner"
+            />
           )}
           <Outlet context={{ tenant }} />
         </main>
@@ -235,46 +243,3 @@ function Avatar({ name, image }: { name: string; image: string | null }) {
   );
 }
 
-function DemoBanner({ expiresAt }: { expiresAt: number | null }) {
-  const remainingHours =
-    expiresAt ? Math.max(0, Math.round((expiresAt - Date.now()) / 3600000)) : null;
-  return (
-    <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-accent-500/40 bg-gradient-to-r from-brand-500/15 to-accent-500/15 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between dark:border-accent-400/40">
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-sm font-semibold text-white"
-        >
-          ✦
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-ink-900 dark:text-ink-50">
-            You're in a live demo. Click anything.
-          </p>
-          <p className="mt-0.5 text-xs text-ink-600 dark:text-ink-300">
-            Fake students, fake payments, real workflows. Auto-resets in
-            {" "}
-            {remainingHours !== null
-              ? `~${remainingHours} hour${remainingHours === 1 ? "" : "s"}`
-              : "24 hours"}
-            .
-          </p>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <a
-          href="/signup"
-          className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-2 text-sm font-medium text-white shadow-[0_4px_16px_-4px_var(--color-brand-500)]"
-        >
-          Start a real account <span aria-hidden>→</span>
-        </a>
-        <a
-          href="/pricing"
-          className="inline-flex items-center text-sm font-medium text-ink-700 hover:text-ink-900 dark:text-ink-200 dark:hover:text-ink-50"
-        >
-          Pricing
-        </a>
-      </div>
-    </div>
-  );
-}

@@ -1,16 +1,20 @@
 import { Form, Link, NavLink, Outlet, redirect } from "react-router";
 import type { Route } from "./+types/instructor";
+import { DemoBanner } from "~/components/demo-banner";
 import { requireTenant } from "~/lib/tenant.server";
 
 type InstructorCtx = {
   user: { id: string; email: string; name: string | null };
-  organization: { id: string; name: string };
+  organization: { id: string; name: string; isDemo: boolean; demoExpiresAt: number | null };
   instructor: { id: string; firstName: string; lastName: string } | null;
 };
 
 export async function loader({ request, context }: Route.LoaderArgs): Promise<InstructorCtx> {
   const tenant = await requireTenant(request, context.cloudflare.env);
-  if (tenant.role === "parent" || tenant.role === "student") {
+  if (
+    !tenant.organization.isDemo &&
+    (tenant.role === "parent" || tenant.role === "student")
+  ) {
     throw redirect("/me");
   }
 
@@ -26,7 +30,12 @@ export async function loader({ request, context }: Route.LoaderArgs): Promise<In
       email: tenant.user.email,
       name: tenant.user.name ?? null,
     },
-    organization: { id: tenant.organization.id, name: tenant.organization.name },
+    organization: {
+      id: tenant.organization.id,
+      name: tenant.organization.name,
+      isDemo: tenant.organization.isDemo,
+      demoExpiresAt: tenant.organization.demoExpiresAt,
+    },
     instructor: instructor ?? null,
   };
 }
@@ -91,6 +100,12 @@ export default function InstructorLayout({ loaderData }: Route.ComponentProps) {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+        {me.organization.isDemo && (
+          <DemoBanner
+            expiresAt={me.organization.demoExpiresAt}
+            current="instructor"
+          />
+        )}
         <Outlet context={me} />
       </main>
     </div>
