@@ -36,6 +36,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     studentRow,
     activeEnrollRow,
     roadTestRow,
+    payrollRow,
   ] = await Promise.all([
     db
       .prepare(
@@ -181,6 +182,17 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       )
       .bind(orgId, periodStart)
       .first<{ attempts: number; passes: number }>(),
+    db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(totalCents), 0) AS accruedCents,
+           COALESCE(SUM(CASE WHEN paidAt IS NULL THEN totalCents ELSE 0 END), 0) AS unpaidCents,
+           COUNT(*) AS lessonCount
+         FROM lesson_payout
+         WHERE organizationId = ? AND computedAt >= ?`,
+      )
+      .bind(orgId, periodStart)
+      .first<{ accruedCents: number; unpaidCents: number; lessonCount: number }>(),
   ]);
 
   const revenueCents = revenueRow?.cents ?? 0;
@@ -264,6 +276,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       roadTestAttempts: roadTestRow?.attempts ?? 0,
       roadTestPasses: roadTestRow?.passes ?? 0,
     },
+    payroll: {
+      accruedCents: payrollRow?.accruedCents ?? 0,
+      unpaidCents: payrollRow?.unpaidCents ?? 0,
+      lessonCount: payrollRow?.lessonCount ?? 0,
+    },
   };
 }
 
@@ -307,6 +324,8 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
       <HealthBanner data={data} />
 
       <RecoveredSection data={data} />
+
+      <PayrollSection data={data} />
 
       <CapacitySection data={data} />
 
@@ -395,6 +414,49 @@ function RecoveredSection({ data }: { data: Loader }) {
           hint={`${recovered.lateCancelCount} appointment${
             recovered.lateCancelCount === 1 ? "" : "s"
           }`}
+        />
+      </div>
+    </section>
+  );
+}
+
+function PayrollSection({ data }: { data: Loader }) {
+  const { payroll, recovered } = data;
+  const net = recovered.totalCents - payroll.accruedCents;
+  return (
+    <section>
+      <div className="mb-3 flex items-end justify-between">
+        <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
+          Payroll, last {data.period.days} days
+        </h2>
+        <Link
+          to="/admin/payroll"
+          className="text-xs text-brand-600 hover:underline dark:text-brand-300"
+        >
+          Open payroll →
+        </Link>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatTile
+          label="Accrued instructor pay"
+          value={formatMoney(payroll.accruedCents)}
+          hint={`${payroll.lessonCount} lesson${payroll.lessonCount === 1 ? "" : "s"} computed`}
+        />
+        <StatTile
+          tone="amber"
+          label="Pending payout"
+          value={formatMoney(payroll.unpaidCents)}
+          hint={payroll.unpaidCents === 0 ? "all caught up" : "ready to close"}
+        />
+        <StatTile
+          tone={net >= 0 ? "emerald" : "rose"}
+          label="Recovered vs. payroll"
+          value={`${net >= 0 ? "+" : ""}${formatMoney(net)}`}
+          hint={
+            net >= 0
+              ? "fees collected exceed pay accrued"
+              : "pay accrued exceeds fees collected"
+          }
         />
       </div>
     </section>

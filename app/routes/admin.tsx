@@ -25,6 +25,7 @@ const NAV = [
   { to: "/admin/state-coverage", label: "State coverage", icon: "✦" },
   { to: "/admin/documents", label: "Documents", icon: "◰" },
   { to: "/admin/payments", label: "Payments", icon: "◉" },
+  { to: "/admin/payroll", label: "Payroll", icon: "◇" },
   { to: "/admin/fees", label: "Fees", icon: "◎" },
   { to: "/admin/settings", label: "Settings", icon: "⚙" },
 ];

@@ -300,17 +300,21 @@ export async function persistLessonPayout(
     now: number;
   },
 ): Promise<void> {
+  // Link the payout to the current open pay period (creating one if
+  // there isn't one yet) so payroll close just runs a SUM by period.
+  const period = await ensureOpenPayPeriod(db, input.organizationId, input.now);
   await db
     .prepare(
       `INSERT INTO lesson_payout
          (id, organizationId, appointmentId, instructorId, compRuleVersionId,
-          computedAt, totalCents, components)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          computedAt, totalCents, components, payPeriodId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(appointmentId) DO UPDATE SET
          compRuleVersionId = excluded.compRuleVersionId,
          computedAt = excluded.computedAt,
          totalCents = excluded.totalCents,
-         components = excluded.components`,
+         components = excluded.components,
+         payPeriodId = excluded.payPeriodId`,
     )
     .bind(
       newId(),
@@ -321,6 +325,249 @@ export async function persistLessonPayout(
       input.now,
       input.computation.totalCents,
       JSON.stringify(input.computation.components),
+      period.id,
     )
     .run();
+}
+
+/* ------------------------------------------------------------------ */
+/* Pay period engine                                                   */
+/* ------------------------------------------------------------------ */
+
+export type PayCadence = "weekly" | "biweekly" | "semimonthly" | "monthly";
+
+export const PAY_CADENCES: ReadonlyArray<{
+  value: PayCadence;
+  label: string;
+}> = [
+  { value: "weekly", label: "Weekly" },
+  { value: "biweekly", label: "Biweekly" },
+  { value: "semimonthly", label: "Semi-monthly (1st & 15th)" },
+  { value: "monthly", label: "Monthly" },
+];
+
+export function isPayCadence(v: string): v is PayCadence {
+  return PAY_CADENCES.some((c) => c.value === v);
+}
+
+export type PayPeriodRow = {
+  id: string;
+  organizationId: string;
+  startsAt: number;
+  endsAt: number;
+  status: "open" | "closed" | "paid";
+  cadence: PayCadence;
+  closedAt: number | null;
+  paidAt: number | null;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY_MS;
+
+/**
+ * Compute the [start, end) boundaries of the pay period containing
+ * `now`, given a cadence and an optional anchor (epoch ms). Pure;
+ * does not touch the database.
+ */
+export function periodBoundsFor(
+  cadence: PayCadence,
+  now: number,
+  anchor: number | null,
+): { startsAt: number; endsAt: number } {
+  switch (cadence) {
+    case "weekly": {
+      const a = anchor ?? mondayAtMidnight(now);
+      const offset = mod(now - a, WEEK_MS);
+      const startsAt = now - offset;
+      return { startsAt, endsAt: startsAt + WEEK_MS };
+    }
+    case "biweekly": {
+      const a = anchor ?? mondayAtMidnight(now);
+      const period = 2 * WEEK_MS;
+      const offset = mod(now - a, period);
+      const startsAt = now - offset;
+      return { startsAt, endsAt: startsAt + period };
+    }
+    case "semimonthly": {
+      const d = new Date(now);
+      const y = d.getFullYear();
+      const m = d.getMonth();
+      const day = d.getDate();
+      if (day < 16) {
+        return {
+          startsAt: new Date(y, m, 1).getTime(),
+          endsAt: new Date(y, m, 16).getTime(),
+        };
+      }
+      return {
+        startsAt: new Date(y, m, 16).getTime(),
+        endsAt: new Date(y, m + 1, 1).getTime(),
+      };
+    }
+    case "monthly": {
+      const d = new Date(now);
+      const y = d.getFullYear();
+      const m = d.getMonth();
+      return {
+        startsAt: new Date(y, m, 1).getTime(),
+        endsAt: new Date(y, m + 1, 1).getTime(),
+      };
+    }
+  }
+}
+
+/**
+ * Find or create the open pay period for an organization at `now`.
+ * Creates one with the org's configured cadence + anchor if missing.
+ */
+export async function ensureOpenPayPeriod(
+  db: D1Database,
+  organizationId: string,
+  now: number,
+): Promise<PayPeriodRow> {
+  const org = await db
+    .prepare(
+      "SELECT payCadence, payCadenceAnchor FROM organization WHERE id = ?",
+    )
+    .bind(organizationId)
+    .first<{ payCadence: string; payCadenceAnchor: number | null }>();
+  const cadence: PayCadence = isPayCadence(org?.payCadence ?? "")
+    ? (org!.payCadence as PayCadence)
+    : "biweekly";
+  const anchor = org?.payCadenceAnchor ?? null;
+
+  // Try to find an existing open period that covers `now`.
+  const existing = await db
+    .prepare(
+      `SELECT id, organizationId, startsAt, endsAt, status, cadence, closedAt, paidAt
+         FROM pay_period
+        WHERE organizationId = ?
+          AND status = 'open'
+          AND startsAt <= ?
+          AND endsAt > ?
+        LIMIT 1`,
+    )
+    .bind(organizationId, now, now)
+    .first<PayPeriodRow>();
+  if (existing) return existing;
+
+  const bounds = periodBoundsFor(cadence, now, anchor);
+  const id = newId();
+  await db
+    .prepare(
+      `INSERT INTO pay_period
+         (id, organizationId, startsAt, endsAt, status, cadence, createdAt)
+       VALUES (?, ?, ?, ?, 'open', ?, ?)
+       ON CONFLICT(organizationId, startsAt) DO NOTHING`,
+    )
+    .bind(id, organizationId, bounds.startsAt, bounds.endsAt, cadence, now)
+    .run();
+
+  // Either we inserted or there was a race — re-fetch to get the canonical row.
+  const fresh = await db
+    .prepare(
+      `SELECT id, organizationId, startsAt, endsAt, status, cadence, closedAt, paidAt
+         FROM pay_period
+        WHERE organizationId = ?
+          AND startsAt = ?
+        LIMIT 1`,
+    )
+    .bind(organizationId, bounds.startsAt)
+    .first<PayPeriodRow>();
+  if (!fresh) {
+    throw new Error("Failed to create pay period.");
+  }
+  return fresh;
+}
+
+/**
+ * Close a period: materialize per-instructor payout_draft rows from
+ * the lesson_payout rows in the period's window, then mark the period
+ * as 'closed'. Idempotent — re-closing recomputes the drafts.
+ */
+export async function closePayPeriod(
+  db: D1Database,
+  input: {
+    organizationId: string;
+    periodId: string;
+    closedByUserId: string;
+    now: number;
+  },
+): Promise<{ draftsCreated: number; totalCents: number }> {
+  const period = await db
+    .prepare(
+      `SELECT id, startsAt, endsAt, status
+         FROM pay_period
+        WHERE id = ? AND organizationId = ?`,
+    )
+    .bind(input.periodId, input.organizationId)
+    .first<{ id: string; startsAt: number; endsAt: number; status: string }>();
+  if (!period) throw new Error("Pay period not found.");
+  if (period.status === "paid") {
+    throw new Error("Pay period already paid; cannot recompute.");
+  }
+
+  const buckets = await db
+    .prepare(
+      `SELECT instructorId,
+              COALESCE(SUM(totalCents), 0) AS totalCents,
+              COUNT(*) AS lessonCount
+         FROM lesson_payout
+        WHERE organizationId = ?
+          AND payPeriodId = ?
+        GROUP BY instructorId`,
+    )
+    .bind(input.organizationId, period.id)
+    .all<{ instructorId: string; totalCents: number; lessonCount: number }>();
+
+  let total = 0;
+  for (const b of buckets.results) {
+    total += b.totalCents;
+    await db
+      .prepare(
+        `INSERT INTO payout_draft
+           (id, organizationId, payPeriodId, instructorId,
+            totalCents, lessonCount, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(payPeriodId, instructorId) DO UPDATE SET
+           totalCents = excluded.totalCents,
+           lessonCount = excluded.lessonCount,
+           updatedAt = excluded.updatedAt`,
+      )
+      .bind(
+        newId(),
+        input.organizationId,
+        period.id,
+        b.instructorId,
+        b.totalCents,
+        b.lessonCount,
+        input.now,
+        input.now,
+      )
+      .run();
+  }
+
+  await db
+    .prepare(
+      `UPDATE pay_period
+          SET status = 'closed', closedAt = ?, closedByUserId = ?
+        WHERE id = ? AND status = 'open'`,
+    )
+    .bind(input.now, input.closedByUserId, period.id)
+    .run();
+
+  return { draftsCreated: buckets.results.length, totalCents: total };
+}
+
+function mondayAtMidnight(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay(); // 0 = Sunday
+  const diff = (day + 6) % 7; // days back to Monday
+  d.setDate(d.getDate() - diff);
+  return d.getTime();
+}
+
+function mod(n: number, m: number): number {
+  return ((n % m) + m) % m;
 }
