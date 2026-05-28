@@ -760,11 +760,15 @@ export async function seedDemoOrg(
   // version of the platform's national pack and deep-copies it into
   // the org's school_* tables.
   try {
+    // Pin to the classroom curriculum (40 lessons including "Reading
+    // traffic signs" with inline sign shortcodes) — not the BTW
+    // progression pack, which is also national-scope but is for the
+    // in-car lesson sequence.
     const nationalVersion = await env.DB.prepare(
       `SELECT cpv.id AS versionId
          FROM content_pack cp
          JOIN content_pack_version cpv ON cpv.contentPackId = cp.id
-        WHERE cp.scope = 'national' AND cpv.publishedAt IS NOT NULL
+        WHERE cp.slug = 'national-teen-core' AND cpv.publishedAt IS NOT NULL
         ORDER BY cpv.publishedAt DESC
         LIMIT 1`,
     ).first<{ versionId: string }>();
