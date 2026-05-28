@@ -3,6 +3,8 @@ import type { Route } from "./+types/admin.instructors.$instructorId";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
+import { checkInstructorCompliance } from "~/lib/instructors";
+import { parseDateInput, formatDateInput } from "~/lib/vehicles";
 import { PageHeader, Card, EmptyState, LinkButton, Button } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
@@ -14,6 +16,13 @@ type InstructorRow = {
   phone: string | null;
   active: number;
   userId: string | null;
+  stateLicenseNumber: string | null;
+  stateLicenseJurisdiction: string | null;
+  stateLicenseExpiresAt: number | null;
+  backgroundCheckCompletedAt: number | null;
+  backgroundCheckExpiresAt: number | null;
+  continuingEdHoursYtd: number;
+  continuingEdRequiredAnnually: number;
 };
 
 type ApptRow = {
@@ -51,7 +60,11 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const instructor = await db
     .prepare(
-      "SELECT id, firstName, lastName, email, phone, active, userId FROM instructor WHERE id = ? AND organizationId = ?",
+      `SELECT id, firstName, lastName, email, phone, active, userId,
+              stateLicenseNumber, stateLicenseJurisdiction, stateLicenseExpiresAt,
+              backgroundCheckCompletedAt, backgroundCheckExpiresAt,
+              continuingEdHoursYtd, continuingEdRequiredAnnually
+         FROM instructor WHERE id = ? AND organizationId = ?`,
     )
     .bind(params.instructorId, tenant.organization.id)
     .first<InstructorRow>();
@@ -83,7 +96,14 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
       .all<TaxDocRow>(),
   ]);
 
-  return { instructor, upcoming: upcoming.results, taxDocs: taxDocs.results };
+  const compliance = checkInstructorCompliance(instructor);
+
+  return {
+    instructor,
+    upcoming: upcoming.results,
+    taxDocs: taxDocs.results,
+    compliance,
+  };
 }
 
 export async function action({ params, request, context }: Route.ActionArgs) {
@@ -94,6 +114,55 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
   const now = Date.now();
+
+  if (intent === "save_credentials") {
+    const stateLicenseNumber =
+      String(formData.get("stateLicenseNumber") ?? "").trim() || null;
+    const stateLicenseJurisdiction =
+      String(formData.get("stateLicenseJurisdiction") ?? "").trim() || null;
+    const stateLicenseExpiresAt = parseDateInput(
+      String(formData.get("stateLicenseExpiresAt") ?? ""),
+    );
+    const backgroundCheckCompletedAt = parseDateInput(
+      String(formData.get("backgroundCheckCompletedAt") ?? ""),
+    );
+    const backgroundCheckExpiresAt = parseDateInput(
+      String(formData.get("backgroundCheckExpiresAt") ?? ""),
+    );
+    const ceYtdStr = String(formData.get("continuingEdHoursYtd") ?? "0").trim();
+    const continuingEdHoursYtd = Number.parseInt(ceYtdStr, 10) || 0;
+    const ceReqStr = String(formData.get("continuingEdRequiredAnnually") ?? "0").trim();
+    const continuingEdRequiredAnnually = Number.parseInt(ceReqStr, 10) || 0;
+
+    await env.DB.prepare(
+      `UPDATE instructor SET
+         stateLicenseNumber = ?, stateLicenseJurisdiction = ?, stateLicenseExpiresAt = ?,
+         backgroundCheckCompletedAt = ?, backgroundCheckExpiresAt = ?,
+         continuingEdHoursYtd = ?, continuingEdRequiredAnnually = ?
+       WHERE id = ? AND organizationId = ?`,
+    )
+      .bind(
+        stateLicenseNumber,
+        stateLicenseJurisdiction,
+        stateLicenseExpiresAt,
+        backgroundCheckCompletedAt,
+        backgroundCheckExpiresAt,
+        continuingEdHoursYtd,
+        continuingEdRequiredAnnually,
+        params.instructorId,
+        orgId,
+      )
+      .run();
+    await recordAudit(env, {
+      organizationId: orgId,
+      actorUserId: tenant.user.id,
+      action: "instructor.credentials_updated",
+      entityType: "instructor",
+      entityId: params.instructorId,
+      payload: { hasLicense: stateLicenseNumber !== null },
+    });
+    return redirect(`/admin/instructors/${params.instructorId}`);
+  }
 
   if (intent === "upload_tax_doc") {
     const file = formData.get("file");
@@ -198,7 +267,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 }
 
 export default function InstructorDetail({ loaderData, actionData }: Route.ComponentProps) {
-  const { instructor, upcoming, taxDocs } = loaderData;
+  const { instructor, upcoming, taxDocs, compliance } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const currentYear = new Date().getFullYear();
@@ -219,6 +288,8 @@ export default function InstructorDetail({ loaderData, actionData }: Route.Compo
       />
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
+
+      <ComplianceBanner compliance={compliance} />
 
       <Card>
         <div className="flex items-center justify-between">
@@ -242,6 +313,78 @@ export default function InstructorDetail({ loaderData, actionData }: Route.Compo
             {instructor.active ? "Active" : "Inactive"}
           </span>
         </div>
+      </Card>
+
+      <Card>
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
+          Credentials &amp; compliance
+        </p>
+        <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+          Scheduling auto-blocks this instructor when the license lapses.
+          Reminders at 90, 60, 30, and 7 days appear on the owner dashboard.
+        </p>
+        <Form method="post" className="mt-4 grid gap-3 md:grid-cols-3">
+          <input type="hidden" name="intent" value="save_credentials" />
+          <Field label="State license #">
+            <TextInput
+              name="stateLicenseNumber"
+              type="text"
+              defaultValue={instructor.stateLicenseNumber ?? ""}
+              placeholder="MN-INS-12345"
+            />
+          </Field>
+          <Field label="License jurisdiction">
+            <TextInput
+              name="stateLicenseJurisdiction"
+              type="text"
+              defaultValue={instructor.stateLicenseJurisdiction ?? ""}
+              placeholder="US-MN"
+            />
+          </Field>
+          <Field label="License expires">
+            <TextInput
+              name="stateLicenseExpiresAt"
+              type="date"
+              defaultValue={formatDateInput(instructor.stateLicenseExpiresAt)}
+            />
+          </Field>
+          <Field label="Background check completed">
+            <TextInput
+              name="backgroundCheckCompletedAt"
+              type="date"
+              defaultValue={formatDateInput(instructor.backgroundCheckCompletedAt)}
+            />
+          </Field>
+          <Field label="Background check expires">
+            <TextInput
+              name="backgroundCheckExpiresAt"
+              type="date"
+              defaultValue={formatDateInput(instructor.backgroundCheckExpiresAt)}
+            />
+          </Field>
+          <Field
+            label="Continuing-ed hours this year"
+            hint="0 if your state doesn't require it."
+          >
+            <TextInput
+              name="continuingEdHoursYtd"
+              type="number"
+              min="0"
+              defaultValue={instructor.continuingEdHoursYtd.toString()}
+            />
+          </Field>
+          <Field label="CE hours required per year">
+            <TextInput
+              name="continuingEdRequiredAnnually"
+              type="number"
+              min="0"
+              defaultValue={instructor.continuingEdRequiredAnnually.toString()}
+            />
+          </Field>
+          <div className="md:col-span-3">
+            <Button type="submit">Save credentials</Button>
+          </div>
+        </Form>
       </Card>
 
       <Card>
@@ -388,6 +531,41 @@ export default function InstructorDetail({ loaderData, actionData }: Route.Compo
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+function ComplianceBanner({
+  compliance,
+}: {
+  compliance: ReturnType<typeof checkInstructorCompliance>;
+}) {
+  if (compliance.state === "ok") {
+    return (
+      <div className="rounded-xl border border-emerald-300 bg-emerald-50/30 px-4 py-2 text-sm text-emerald-900 dark:border-emerald-800/60 dark:bg-emerald-950/20 dark:text-emerald-100">
+        ✓ Credentials clean. Bookable.
+      </div>
+    );
+  }
+  const cls =
+    compliance.state === "blocked"
+      ? "border-rose-300 bg-rose-50/30 text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/20 dark:text-rose-100"
+      : "border-amber-300 bg-amber-50/30 text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-100";
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${cls}`}>
+      <p className="text-sm font-semibold">
+        {compliance.state === "blocked"
+          ? "Auto-removed from scheduling"
+          : "Action needed soon"}
+      </p>
+      <ul className="mt-2 space-y-0.5 text-xs">
+        {compliance.blockers.map((b) => (
+          <li key={b}>⛔ {b}</li>
+        ))}
+        {compliance.warnings.map((w) => (
+          <li key={w}>⚠ {w}</li>
+        ))}
+      </ul>
     </div>
   );
 }

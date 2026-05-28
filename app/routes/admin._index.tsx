@@ -37,6 +37,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     activeEnrollRow,
     roadTestRow,
     payrollRow,
+    instructorLicenseRow,
   ] = await Promise.all([
     db
       .prepare(
@@ -193,6 +194,16 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       )
       .bind(orgId, periodStart)
       .first<{ accruedCents: number; unpaidCents: number; lessonCount: number }>(),
+    db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(CASE WHEN stateLicenseExpiresAt < ? THEN 1 ELSE 0 END), 0) AS expired,
+           COALESCE(SUM(CASE WHEN stateLicenseExpiresAt >= ? AND stateLicenseExpiresAt < ? THEN 1 ELSE 0 END), 0) AS expiringSoon
+         FROM instructor
+         WHERE organizationId = ? AND active = 1 AND stateLicenseExpiresAt IS NOT NULL`,
+      )
+      .bind(now, now, now + 30 * DAY_MS, orgId)
+      .first<{ expired: number; expiringSoon: number }>(),
   ]);
 
   const revenueCents = revenueRow?.cents ?? 0;
@@ -275,6 +286,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       pendingCredentials: licenseRow?.n ?? 0,
       roadTestAttempts: roadTestRow?.attempts ?? 0,
       roadTestPasses: roadTestRow?.passes ?? 0,
+      instructorLicensesExpired: instructorLicenseRow?.expired ?? 0,
+      instructorLicensesExpiringSoon: instructorLicenseRow?.expiringSoon ?? 0,
     },
     payroll: {
       accruedCents: payrollRow?.accruedCents ?? 0,
@@ -563,7 +576,11 @@ function ComplianceSection({ data }: { data: Loader }) {
     compliance.roadTestAttempts > 0
       ? compliance.roadTestPasses / compliance.roadTestAttempts
       : null;
-  const empty = compliance.stuckTotal === 0 && compliance.pendingCredentials === 0;
+  const empty =
+    compliance.stuckTotal === 0 &&
+    compliance.pendingCredentials === 0 &&
+    compliance.instructorLicensesExpired === 0 &&
+    compliance.instructorLicensesExpiringSoon === 0;
   return (
     <Card className="p-5">
       <div className="flex items-baseline justify-between">
@@ -588,6 +605,24 @@ function ComplianceSection({ data }: { data: Loader }) {
               <span>Students ready for permit credential</span>
               <span className="font-display text-base font-semibold">
                 {compliance.pendingCredentials}
+              </span>
+            </li>
+          )}
+          {compliance.instructorLicensesExpired > 0 && (
+            <li className="flex items-baseline justify-between gap-3">
+              <span className="text-rose-700 dark:text-rose-300">
+                Instructor licenses expired
+              </span>
+              <span className="font-display text-base font-semibold text-rose-700 dark:text-rose-300">
+                {compliance.instructorLicensesExpired}
+              </span>
+            </li>
+          )}
+          {compliance.instructorLicensesExpiringSoon > 0 && (
+            <li className="flex items-baseline justify-between gap-3">
+              <span>Instructor licenses expiring &lt;30 days</span>
+              <span className="font-display text-base font-semibold">
+                {compliance.instructorLicensesExpiringSoon}
               </span>
             </li>
           )}

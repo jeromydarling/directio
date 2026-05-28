@@ -27,6 +27,7 @@
  */
 
 import { checkVehicleCompliance, VEHICLE_STATUSES, type VehicleComplianceInput } from "./vehicles";
+import { checkInstructorCompliance, type InstructorComplianceInput } from "./instructors";
 
 const DEFAULT_SLOT_STEP_MIN = 30;
 const DEFAULT_LIMIT = 12;
@@ -87,6 +88,11 @@ type InstructorRow = {
   id: string;
   firstName: string;
   lastName: string;
+  active: number;
+  stateLicenseExpiresAt: number | null;
+  backgroundCheckExpiresAt: number | null;
+  continuingEdHoursYtd: number;
+  continuingEdRequiredAnnually: number;
 };
 
 type VehicleRow = VehicleComplianceInput & {
@@ -133,7 +139,10 @@ export async function suggestSlots(
   const [instructorRes, vehicleRes, availabilityRes, appointmentRes] = await Promise.all([
     db
       .prepare(
-        "SELECT id, firstName, lastName FROM instructor WHERE organizationId = ? AND active = 1",
+        `SELECT id, firstName, lastName, active,
+                stateLicenseExpiresAt, backgroundCheckExpiresAt,
+                continuingEdHoursYtd, continuingEdRequiredAnnually
+           FROM instructor WHERE organizationId = ? AND active = 1`,
       )
       .bind(orgId)
       .all<InstructorRow>(),
@@ -167,8 +176,16 @@ export async function suggestSlots(
       .all<AppointmentRow>(),
   ]);
 
-  const instructors = new Map(instructorRes.results.map((i) => [i.id, i]));
   const now = Date.now();
+  // Filter out instructors whose compliance state is 'blocked'
+  // (license expired, background check expired, marked inactive).
+  // The constraint engine never offers them; the scoring engine
+  // surfaces a warning for non-blocked-but-warning instructors.
+  const eligibleInstructors = instructorRes.results.filter((i) => {
+    const c = checkInstructorCompliance(i, now);
+    return c.state !== "blocked";
+  });
+  const instructors = new Map(eligibleInstructors.map((i) => [i.id, i]));
   const vehicles = vehicleRes.results
     .map((v) => ({ ...v, compliance: checkVehicleCompliance(v, now) }))
     .filter((v) => v.compliance.state !== "blocked");
@@ -312,8 +329,24 @@ export async function checkSlot(
     }
   }
 
-  // Instructor conflict.
+  // Instructor compliance (hard if blocked) and conflict.
   if (req.instructorId) {
+    const inst = await db
+      .prepare(
+        `SELECT active, stateLicenseExpiresAt, backgroundCheckExpiresAt,
+                continuingEdHoursYtd, continuingEdRequiredAnnually
+           FROM instructor WHERE id = ? AND organizationId = ?`,
+      )
+      .bind(req.instructorId, orgId)
+      .first<InstructorComplianceInput>();
+    if (!inst) {
+      hardErrors.push("Instructor not found.");
+    } else {
+      const c = checkInstructorCompliance(inst);
+      if (c.state === "blocked") hardErrors.push(...c.blockers);
+      if (c.warnings.length > 0) warnings.push(...c.warnings);
+    }
+
     const conflict = await fetchOverlap(
       db,
       orgId,
