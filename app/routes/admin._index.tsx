@@ -49,6 +49,23 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const stuckThreshold = now - 30 * DAY_MS;
   const priorEnd = priorStart + periodDays * DAY_MS;
 
+  // Hidden-section preferences from organization.dashboardHiddenSections.
+  const prefsRow = await db
+    .prepare(
+      "SELECT dashboardHiddenSections FROM organization WHERE id = ?",
+    )
+    .bind(orgId)
+    .first<{ dashboardHiddenSections: string | null }>();
+  let hiddenSections = new Set<string>();
+  if (prefsRow?.dashboardHiddenSections) {
+    try {
+      const arr = JSON.parse(prefsRow.dashboardHiddenSections) as string[];
+      if (Array.isArray(arr)) hiddenSections = new Set(arr);
+    } catch {
+      // ignore parse error
+    }
+  }
+
   const [
     revenueRow,
     priorRevenueRow,
@@ -359,6 +376,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       avgMs: funnelRow?.avgMs ?? null,
     },
     locations: locationRows.results,
+    hiddenSections: [...hiddenSections],
     counts: {
       students: studentRow?.n ?? 0,
       activeEnrollments: activeEnrollRow?.n ?? 0,
@@ -424,6 +442,51 @@ function computeHealth(currentCents: number, priorCents: number): { tone: Health
   return { tone: "rose", label: "Needs attention" };
 }
 
+export async function action({ request, context }: Route.ActionArgs) {
+  const tenant = await requireTenant(request, context.cloudflare.env);
+  if (tenant.role !== "owner" && tenant.role !== "admin") {
+    return new Response("forbidden", { status: 403 });
+  }
+  const formData = await request.formData();
+  // Form encodes hidden sections as visible="<key>" checkboxes — any key
+  // *not* checked in the submitted set is hidden. The list of section
+  // keys is the full set the dashboard knows about; keep it in sync.
+  const ALL_SECTIONS = [
+    "funnel",
+    "recovered",
+    "payroll",
+    "locations",
+    "capacity",
+    "ar",
+    "compliance",
+    "instructorScorecard",
+    "vehicleUtilization",
+  ];
+  const visible = new Set<string>();
+  for (const key of formData.getAll("visible")) {
+    if (typeof key === "string") visible.add(key);
+  }
+  const hidden = ALL_SECTIONS.filter((k) => !visible.has(k));
+  await context.cloudflare.env.DB.prepare(
+    "UPDATE organization SET dashboardHiddenSections = ? WHERE id = ?",
+  )
+    .bind(JSON.stringify(hidden), tenant.organization.id)
+    .run();
+  return Response.redirect(new URL("/admin", request.url).toString(), 303);
+}
+
+const SECTION_LABELS: Record<string, string> = {
+  funnel: "Enrollment funnel",
+  recovered: "Dollars recovered",
+  payroll: "Payroll",
+  locations: "Locations comparison",
+  capacity: "Capacity heatmap",
+  ar: "Outstanding A/R",
+  compliance: "Compliance health",
+  instructorScorecard: "Instructor scorecard",
+  vehicleUtilization: "Vehicle utilization",
+};
+
 export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
   const { tenant } = useOutletContext<{ tenant: ActiveTenant }>();
   const data = loaderData as Loader;
@@ -441,35 +504,84 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
           active={data.period.key}
           presets={data.periodPresets}
         />
-        <a
-          href={`/admin/dashboard/snapshot.csv?period=${data.period.key}`}
-          className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-3 py-1 text-xs font-medium text-ink-700 hover:border-brand-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
-        >
-          Download CSV snapshot
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/admin/dashboard/snapshot.csv?period=${data.period.key}`}
+            className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/60 px-3 py-1 text-xs font-medium text-ink-700 hover:border-brand-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
+          >
+            Download CSV snapshot
+          </a>
+        </div>
       </div>
+
+      <CustomizePanel hidden={new Set(data.hiddenSections)} />
 
       <HealthBanner data={data} />
 
-      <FunnelSection data={data} />
+      {!data.hiddenSections.includes("funnel") && <FunnelSection data={data} />}
 
-      <RecoveredSection data={data} />
+      {!data.hiddenSections.includes("recovered") && <RecoveredSection data={data} />}
 
-      <PayrollSection data={data} />
+      {!data.hiddenSections.includes("payroll") && <PayrollSection data={data} />}
 
-      {data.locations.length >= 2 && <LocationsSection data={data} />}
+      {!data.hiddenSections.includes("locations") && data.locations.length >= 2 && (
+        <LocationsSection data={data} />
+      )}
 
-      <CapacitySection data={data} />
+      {!data.hiddenSections.includes("capacity") && <CapacitySection data={data} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ReceivableSection data={data} />
-        <ComplianceSection data={data} />
+        {!data.hiddenSections.includes("ar") && <ReceivableSection data={data} />}
+        {!data.hiddenSections.includes("compliance") && (
+          <ComplianceSection data={data} />
+        )}
       </div>
 
-      <InstructorScorecardSection data={data} />
+      {!data.hiddenSections.includes("instructorScorecard") && (
+        <InstructorScorecardSection data={data} />
+      )}
 
-      <VehicleSection data={data} />
+      {!data.hiddenSections.includes("vehicleUtilization") && (
+        <VehicleSection data={data} />
+      )}
     </div>
+  );
+}
+
+function CustomizePanel({ hidden }: { hidden: Set<string> }) {
+  return (
+    <details className="rounded-2xl border border-ink-200 bg-white/60 px-4 py-2 text-sm dark:border-ink-800 dark:bg-ink-900/40">
+      <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+        Customize sections
+      </summary>
+      <form method="post" action="/admin" className="mt-3 flex flex-col gap-3">
+        <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
+          {Object.entries(SECTION_LABELS).map(([key, label]) => (
+            <label
+              key={key}
+              className="flex items-center gap-2 text-sm text-ink-700 dark:text-ink-200"
+            >
+              <input
+                type="checkbox"
+                name="visible"
+                value={key}
+                defaultChecked={!hidden.has(key)}
+                className="h-4 w-4 rounded border-ink-300"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div>
+          <button
+            type="submit"
+            className="inline-flex items-center justify-center rounded-full bg-ink-900 px-4 py-1.5 text-xs font-medium text-ink-50 dark:bg-ink-50 dark:text-ink-900"
+          >
+            Save layout
+          </button>
+        </div>
+      </form>
+    </details>
   );
 }
 
