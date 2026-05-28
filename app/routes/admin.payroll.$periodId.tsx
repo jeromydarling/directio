@@ -2,6 +2,7 @@ import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.payroll.$periodId";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
+import { newId } from "~/lib/ids";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, TextInput, Select } from "~/components/form";
 
@@ -84,7 +85,46 @@ export async function loader({ request, context, params }: Route.LoaderArgs) {
     .bind(orgId, period.id)
     .all<LessonRow>();
 
-  return { period, drafts: drafts.results, lessons: lessons.results };
+  // Adjustment history per draft, for the audit pop-out.
+  const adjEvents = await db
+    .prepare(
+      `SELECT ae.id, ae.payoutDraftId, ae.fromCents, ae.toCents, ae.note,
+              ae.changedAt, u.name AS changedByName, u.email AS changedByEmail
+         FROM payout_adjustment_event ae
+         LEFT JOIN user u ON u.id = ae.changedByUserId
+        WHERE ae.organizationId = ?
+          AND ae.payoutDraftId IN (
+            SELECT id FROM payout_draft WHERE organizationId = ? AND payPeriodId = ?
+          )
+        ORDER BY ae.payoutDraftId, ae.changedAt`,
+    )
+    .bind(orgId, orgId, period.id)
+    .all<{
+      id: string;
+      payoutDraftId: string;
+      fromCents: number;
+      toCents: number;
+      note: string | null;
+      changedAt: number;
+      changedByName: string | null;
+      changedByEmail: string | null;
+    }>();
+  const adjByDraft = new Map<string, typeof adjEvents.results>();
+  for (const e of adjEvents.results) {
+    let b = adjByDraft.get(e.payoutDraftId);
+    if (!b) {
+      b = [];
+      adjByDraft.set(e.payoutDraftId, b);
+    }
+    b.push(e);
+  }
+
+  return {
+    period,
+    drafts: drafts.results,
+    lessons: lessons.results,
+    adjByDraft: Object.fromEntries(adjByDraft),
+  };
 }
 
 export async function action({ request, context, params }: Route.ActionArgs) {
@@ -125,6 +165,26 @@ export async function action({ request, context, params }: Route.ActionArgs) {
     }
     const cents = Math.round(dollars * 100);
     const note = String(formData.get("adjustmentNote") ?? "").trim() || null;
+    if (cents !== draft.adjustmentCents) {
+      // Audit history: one event per actual change.
+      await env.DB.prepare(
+        `INSERT INTO payout_adjustment_event
+           (id, organizationId, payoutDraftId, fromCents, toCents, note,
+            changedByUserId, changedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          newId(),
+          tenant.organization.id,
+          draft.id,
+          draft.adjustmentCents,
+          cents,
+          note,
+          tenant.user.id,
+          now,
+        )
+        .run();
+    }
     await env.DB.prepare(
       `UPDATE payout_draft
           SET adjustmentCents = ?,
@@ -142,7 +202,11 @@ export async function action({ request, context, params }: Route.ActionArgs) {
       action: "payout_draft.adjusted",
       entityType: "payout_draft",
       entityId: draft.id,
-      payload: { adjustmentCents: cents, note: note ? "[present]" : null },
+      payload: {
+        fromCents: draft.adjustmentCents,
+        toCents: cents,
+        note: note ? "[present]" : null,
+      },
     });
     return redirect(`/admin/payroll/${params.periodId}`);
   }
@@ -221,7 +285,7 @@ export async function action({ request, context, params }: Route.ActionArgs) {
 }
 
 export default function PayPeriodDetail({ loaderData, actionData }: Route.ComponentProps) {
-  const { period, drafts, lessons } = loaderData;
+  const { period, drafts, lessons, adjByDraft } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -283,6 +347,7 @@ export default function PayPeriodDetail({ loaderData, actionData }: Route.Compon
               <DraftCard
                 draft={d}
                 lessons={lessonsByInstructor.get(d.instructorId) ?? []}
+                adjustmentHistory={adjByDraft[d.id] ?? []}
                 submitting={submitting}
               />
             </li>
@@ -296,10 +361,20 @@ export default function PayPeriodDetail({ loaderData, actionData }: Route.Compon
 function DraftCard({
   draft,
   lessons,
+  adjustmentHistory,
   submitting,
 }: {
   draft: DraftRow;
   lessons: LessonRow[];
+  adjustmentHistory: Array<{
+    id: string;
+    fromCents: number;
+    toCents: number;
+    note: string | null;
+    changedAt: number;
+    changedByName: string | null;
+    changedByEmail: string | null;
+  }>;
   submitting: boolean;
 }) {
   const name = `${draft.instructorFirst} ${draft.instructorLast}`.trim();
@@ -345,6 +420,32 @@ function DraftCard({
           <DraftStatus draft={draft} />
         </div>
       </div>
+
+      {adjustmentHistory.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+            Adjustment history ({adjustmentHistory.length})
+          </summary>
+          <ul className="mt-2 space-y-1 text-xs">
+            {adjustmentHistory.map((e) => (
+              <li key={e.id} className="rounded-lg bg-ink-50 px-2 py-1 dark:bg-ink-900/40">
+                <span className="text-ink-700 dark:text-ink-200">
+                  {formatMoney(e.fromCents)} → {formatMoney(e.toCents)}
+                </span>
+                <span className="ml-2 text-ink-500 dark:text-ink-400">
+                  by {e.changedByName ?? e.changedByEmail ?? "—"} on{" "}
+                  {new Date(e.changedAt).toLocaleString()}
+                </span>
+                {e.note && (
+                  <span className="block italic text-ink-600 dark:text-ink-300">
+                    "{e.note}"
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {lessons.length > 0 && (
         <details className="mt-4">

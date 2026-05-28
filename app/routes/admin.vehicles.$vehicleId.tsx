@@ -26,6 +26,7 @@ type VehicleRow = {
   currentOdometer: number | null;
   quirks: string | null;
   status: string;
+  photoKey: string | null;
   insuranceCarrier: string | null;
   insurancePolicyNumber: string | null;
   insuranceExpiresAt: number | null;
@@ -79,7 +80,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const vehicle = await db
     .prepare(
       `SELECT id, label, makeModel, year, plate, vin, color, fuelType,
-              dualControls, currentOdometer, quirks, status,
+              dualControls, currentOdometer, quirks, status, photoKey,
               insuranceCarrier, insurancePolicyNumber, insuranceExpiresAt,
               registrationNumber, registrationExpiresAt,
               nextOilChangeMiles, nextTireRotationMiles, nextSafetyInspectionAt,
@@ -296,6 +297,47 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/vehicles/${params.vehicleId}`);
   }
 
+  if (intent === "upload_photo") {
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      return data({ error: "Pick a photo to upload." }, { status: 400 });
+    }
+    const MAX = 5 * 1024 * 1024;
+    if (file.size > MAX) {
+      return data({ error: "Photo too large (max 5 MB)." }, { status: 413 });
+    }
+    if (!file.type.startsWith("image/")) {
+      return data({ error: "Photos must be an image file." }, { status: 400 });
+    }
+    const storageKey = `vehicles/${orgId}/${params.vehicleId}/photo-${newId()}`;
+    await env.ASSETS.put(storageKey, await file.arrayBuffer(), {
+      httpMetadata: { contentType: file.type },
+    });
+    // Delete the previous photo if any.
+    const prev = await env.DB.prepare(
+      "SELECT photoKey FROM vehicle WHERE id = ? AND organizationId = ?",
+    )
+      .bind(params.vehicleId, orgId)
+      .first<{ photoKey: string | null }>();
+    if (prev?.photoKey) {
+      await env.ASSETS.delete(prev.photoKey);
+    }
+    await env.DB.prepare(
+      "UPDATE vehicle SET photoKey = ? WHERE id = ? AND organizationId = ?",
+    )
+      .bind(storageKey, params.vehicleId, orgId)
+      .run();
+    await recordAudit(env, {
+      organizationId: orgId,
+      actorUserId: tenant.user.id,
+      action: "vehicle.photo_uploaded",
+      entityType: "vehicle",
+      entityId: params.vehicleId,
+      payload: { sizeBytes: file.size, contentType: file.type },
+    });
+    return redirect(`/admin/vehicles/${params.vehicleId}`);
+  }
+
   if (intent === "set_status") {
     const statusRaw = String(formData.get("status") ?? "") as VehicleStatus;
     if (!VEHICLE_STATUSES.some((s) => s.value === statusRaw)) {
@@ -348,6 +390,8 @@ export default function VehicleDetail({ loaderData, actionData }: Route.Componen
       <ComplianceBanner compliance={compliance} />
 
       <QuickStatus vehicle={vehicle} submitting={submitting} />
+
+      <PhotoPanel vehicle={vehicle} submitting={submitting} />
 
       <Card>
         <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
@@ -695,6 +739,58 @@ function ComplianceBanner({ compliance }: { compliance: ReturnType<typeof checkV
         ))}
       </ul>
     </div>
+  );
+}
+
+function PhotoPanel({
+  vehicle,
+  submitting,
+}: {
+  vehicle: VehicleRow;
+  submitting: boolean;
+}) {
+  return (
+    <Card>
+      <div className="flex flex-wrap gap-4">
+        {vehicle.photoKey ? (
+          <img
+            src={`/admin/vehicles/${vehicle.id}/photo.jpg`}
+            alt={`${vehicle.label} photo`}
+            className="h-32 w-48 rounded-xl object-cover ring-1 ring-ink-200 dark:ring-ink-700"
+          />
+        ) : (
+          <div className="flex h-32 w-48 items-center justify-center rounded-xl border border-dashed border-ink-300 text-xs text-ink-500 dark:border-ink-700 dark:text-ink-400">
+            No photo yet
+          </div>
+        )}
+        <div className="flex-1">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">
+            Photo
+          </p>
+          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+            Helps instructors and students recognize the car at pickup. Max 5 MB,
+            any image format.
+          </p>
+          <Form
+            method="post"
+            encType="multipart/form-data"
+            className="mt-2 flex flex-wrap items-end gap-2"
+          >
+            <input type="hidden" name="intent" value="upload_photo" />
+            <input
+              type="file"
+              name="file"
+              accept="image/*"
+              required
+              className="block text-sm text-ink-700 file:mr-3 file:rounded-full file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-brand-500 dark:text-ink-200"
+            />
+            <Button type="submit" variant="secondary" disabled={submitting}>
+              {vehicle.photoKey ? "Replace photo" : "Upload photo"}
+            </Button>
+          </Form>
+        </div>
+      </div>
+    </Card>
   );
 }
 
