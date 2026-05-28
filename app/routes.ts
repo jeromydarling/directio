@@ -58,6 +58,7 @@ export default [
     route("dashboard/snapshot.csv", "routes/admin.dashboard.snapshot[.csv].tsx"),
     route("onboarding", "routes/admin._onboarding.tsx"),
     route("import", "routes/admin.import.tsx"),
+    route("import/staff", "routes/admin.import.staff.tsx"),
     route("export.csv", "routes/admin.export[.csv].tsx"),
     route("reminders", "routes/admin.reminders.tsx"),
     route("library", "routes/admin.library.tsx"),

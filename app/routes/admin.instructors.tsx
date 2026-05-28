@@ -34,7 +34,14 @@ export default function AdminInstructors({ loaderData }: Route.ComponentProps) {
       <PageHeader
         eyebrow="Instructors"
         title={instructors.length === 0 ? "No instructors yet" : `${instructors.length} instructors`}
-        actions={<LinkButton to="/admin/instructors/new">Add instructor</LinkButton>}
+        actions={
+          <div className="flex gap-2">
+            <LinkButton to="/admin/import/staff" variant="secondary">
+              Import CSV
+            </LinkButton>
+            <LinkButton to="/admin/instructors/new">Add instructor</LinkButton>
+          </div>
+        }
       />
 
       {instructors.length === 0 ? (
