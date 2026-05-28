@@ -3,6 +3,7 @@ import type { Route } from "./+types/instructor._index";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { assessNoShowFee, getFeePolicy } from "~/lib/fees.server";
+import { suggestSlots } from "~/lib/scheduler";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { Field, FormError, Select, TextArea } from "~/components/form";
 import {
@@ -247,13 +248,96 @@ export async function action({ request, context }: Route.ActionArgs) {
       feeCents = result.feeCents;
     }
 
+    // AI auto-suggest at sign-off: when a BTW lesson is completed,
+    // pre-compute the top 3 next-lesson slots and surface them to the
+    // family portal. This is the no-show economics fix at the source —
+    // the next lesson lands in the parent's view while their attention
+    // is still on driver ed, not three days later.
+    let suggestionsCreated = 0;
+    if (status === "completed") {
+      const justFinished = await env.DB.prepare(
+        `SELECT a.kind, a.enrollmentId, a.instructorId, a.endsAt, e.studentId
+           FROM appointment a
+           JOIN enrollment e ON e.id = a.enrollmentId
+          WHERE a.id = ? AND a.organizationId = ?`,
+      )
+        .bind(apptId, tenant.organization.id)
+        .first<{
+          kind: string;
+          enrollmentId: string;
+          instructorId: string | null;
+          endsAt: number;
+          studentId: string;
+        }>();
+      if (justFinished && justFinished.kind === "btw") {
+        // Search a window starting 12 hours from now to avoid same-day
+        // double-book pressure, extending 14 days out.
+        const windowStart = now + 12 * 60 * 60 * 1000;
+        const windowEnd = now + 14 * 24 * 60 * 60 * 1000;
+        const proposals = await suggestSlots(env.DB, {
+          organizationId: tenant.organization.id,
+          enrollmentId: justFinished.enrollmentId,
+          kind: "btw",
+          durationMinutes: 60,
+          windowStart,
+          windowEnd,
+          preferredInstructorId: justFinished.instructorId,
+          limit: 3,
+        });
+        // Dismiss any prior active suggestions for this enrollment so the
+        // parent isn't looking at stale options.
+        await env.DB.prepare(
+          `UPDATE lesson_suggestion
+              SET dismissedAt = ?
+            WHERE organizationId = ?
+              AND enrollmentId = ?
+              AND dismissedAt IS NULL
+              AND bookedAt IS NULL`,
+        )
+          .bind(now, tenant.organization.id, justFinished.enrollmentId)
+          .run();
+        for (const p of proposals) {
+          await env.DB.prepare(
+            `INSERT INTO lesson_suggestion
+               (id, organizationId, enrollmentId, studentId, sourceAppointmentId,
+                startsAt, endsAt, instructorId, vehicleId, kind, durationMinutes,
+                score, warnings, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+            .bind(
+              newId(),
+              tenant.organization.id,
+              justFinished.enrollmentId,
+              justFinished.studentId,
+              apptId,
+              p.startsAt,
+              p.endsAt,
+              p.instructorId,
+              p.vehicleId,
+              "btw",
+              60,
+              p.score,
+              JSON.stringify(p.warnings),
+              now,
+            )
+            .run();
+          suggestionsCreated++;
+        }
+      }
+    }
+
     await recordAudit(env, {
       organizationId: tenant.organization.id,
       actorUserId: tenant.user.id,
       action: `appointment.${status}`,
       entityType: "appointment",
       entityId: apptId,
-      payload: { notes: notes ? "[present]" : null, feeCents, rubricScored },
+      payload: {
+        notes: notes ? "[present]" : null,
+        feeCents,
+        rubricScored,
+        suggestionsCreated,
+      },
     });
     return redirect("/instructor");
   }
