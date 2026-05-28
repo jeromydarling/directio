@@ -14,6 +14,7 @@ import { parseYouTubeId, youTubeEmbedUrl } from "~/lib/youtube";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, TextInput, TextArea, Select } from "~/components/form";
 import { VoiceRecorder } from "~/components/voice-recorder";
+import { LessonTranslationPanel } from "~/components/lesson-translation-panel";
 
 type LessonRow = {
   id: string;
@@ -103,7 +104,34 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     metadata: a.metadata ? (JSON.parse(a.metadata) as Record<string, unknown>) : null,
   }));
 
-  return { lesson, quiz, questions, assets };
+  const translations = await db
+    .prepare(
+      `SELECT lt.id AS translationId, lt.targetLang, lt.vendor, slt.createdAt
+         FROM school_lesson_translation slt
+         JOIN lesson_translation lt ON lt.id = slt.translationId
+        WHERE slt.schoolLessonId = ? AND slt.organizationId = ?
+        ORDER BY slt.createdAt DESC`,
+    )
+    .bind(params.lessonId, tenant.organization.id)
+    .all<{ translationId: string; targetLang: string; vendor: string; createdAt: number }>();
+
+  const balanceRow = await db
+    .prepare(
+      `SELECT COALESCE(SUM(amountCents), 0) AS bal
+         FROM translation_credit_ledger
+        WHERE organizationId = ?`,
+    )
+    .bind(tenant.organization.id)
+    .first<{ bal: number }>();
+
+  return {
+    lesson,
+    quiz,
+    questions,
+    assets,
+    translations: translations.results,
+    creditBalanceCents: balanceRow?.bal ?? 0,
+  };
 }
 
 export async function action({ params, request, context }: Route.ActionArgs) {
@@ -347,7 +375,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 }
 
 export default function LessonEditor({ loaderData, actionData }: Route.ComponentProps) {
-  const { lesson, quiz, questions, assets } = loaderData;
+  const { lesson, quiz, questions, assets, translations, creditBalanceCents } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -448,6 +476,17 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
             script={lesson.narrationScript ?? undefined}
           />
         </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Translations
+        </h2>
+        <LessonTranslationPanel
+          schoolLessonId={lesson.id}
+          existing={translations}
+          creditBalanceCents={creditBalanceCents}
+        />
       </section>
 
       <section>

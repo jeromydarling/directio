@@ -1,5 +1,6 @@
 import type { Route } from "./+types/api.stripe.webhook";
 import { recordAudit } from "~/lib/audit.server";
+import { appendLedgerEntry } from "~/lib/translation.server";
 
 /**
  * Stripe webhook handler.
@@ -71,6 +72,47 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
   const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
   const subscriptionId = obj.subscription ? String(obj.subscription) : null;
   const metadata = (obj.metadata as Record<string, string> | undefined) ?? {};
+
+  // Branch 1: translation credit top-up. Direct charge to directio,
+  // credits the school's ledger.
+  if (metadata.directio_credit_topup === "1") {
+    const organizationId = metadata.organizationId;
+    const creditCents = Number(metadata.creditCents ?? 0);
+    if (!organizationId || creditCents <= 0) return;
+
+    // Idempotency: skip if we've already credited this session.
+    const existing = await env.DB.prepare(
+      "SELECT id FROM translation_credit_ledger WHERE stripeSessionId = ? LIMIT 1",
+    )
+      .bind(sessionId)
+      .first<{ id: string }>();
+    if (existing) return;
+
+    await appendLedgerEntry(env, {
+      organizationId,
+      kind: "topup",
+      amountCents: creditCents,
+      stripeChargeId: paymentIntentId ?? undefined,
+      stripeSessionId: sessionId,
+      description: `Translation credit top-up ($${(creditCents / 100).toFixed(2)})`,
+      createdByUserId: metadata.purchasedByUserId ?? undefined,
+    });
+    await recordAudit(env, {
+      organizationId,
+      actorUserId: metadata.purchasedByUserId ?? null,
+      action: "translation.credits_purchased",
+      entityType: "translation_credit_ledger",
+      entityId: sessionId,
+      payload: {
+        amountCents: creditCents,
+        stripeSessionId: sessionId,
+        stripeChargeId: paymentIntentId,
+      },
+    });
+    return;
+  }
+
+  // Branch 2: existing family enrollment payment flow.
   const directioPaymentId = metadata.directio_payment_id;
   if (!directioPaymentId) return;
 
