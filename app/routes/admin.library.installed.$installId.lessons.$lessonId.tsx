@@ -1,4 +1,4 @@
-import { Form, Link, data, redirect, useNavigation } from "react-router";
+import { data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.library.installed.$installId.lessons.$lessonId";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
@@ -10,12 +10,17 @@ import {
   reorderSchoolAsset,
   uploadLessonFileAsset,
 } from "~/lib/curriculum.server";
-import { parseYouTubeId, youTubeEmbedUrl } from "~/lib/youtube";
-import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
-import { Field, FormError, TextInput, TextArea, Select } from "~/components/form";
-import { VoiceRecorder } from "~/components/voice-recorder";
+import { parseYouTubeId } from "~/lib/youtube";
+import { PageHeader, LinkButton } from "~/components/ui";
+import { FormError } from "~/components/form";
 import { LessonTranslationPanel } from "~/components/lesson-translation-panel";
-import { QuizAiPanel } from "~/components/quiz-ai-panel";
+import {
+  LessonAssetsSection,
+  LessonContentForm,
+  LessonNarrationSection,
+  LessonPublishToggle,
+  LessonQuizEditor,
+} from "~/components/lesson-editor";
 
 type LessonRow = {
   id: string;
@@ -380,11 +385,8 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
 
-  // The legacy `generate-audio` intent (ElevenLabs placeholder) has
-  // been removed. Lessons now resolve audio via the shared Aura-2
-  // cache (see app/lib/narrate.server.ts) or owner-recorded uploads
-  // (via the in-browser VoiceRecorder + /api/lesson/narration/upload).
-
+  // Legacy `generate-audio` intent removed; narration now uses the Aura-2 cache
+  // (app/lib/narrate.server.ts) or owner-recorded uploads via VoiceRecorder.
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
@@ -401,16 +403,7 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
         description={lesson.published ? "Published — visible to students" : "Draft — students cannot see this yet"}
         actions={
           <div className="flex items-center gap-2">
-            <Form method="post">
-              <input
-                type="hidden"
-                name="intent"
-                value={lesson.published ? "unpublish" : "publish"}
-              />
-              <Button type="submit" variant={lesson.published ? "secondary" : "primary"}>
-                {lesson.published ? "Unpublish" : "Publish"}
-              </Button>
-            </Form>
+            <LessonPublishToggle published={lesson.published} />
             <LinkButton to={`/admin/library`} variant="ghost">
               ← Library
             </LinkButton>
@@ -420,77 +413,9 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
 
       <FormError message={actionData && "error" in actionData ? actionData.error : null} />
 
-      <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-          Lesson content
-        </h2>
-        <Card>
-          <Form method="post" className="flex flex-col gap-4">
-            <input type="hidden" name="intent" value="save-lesson" />
-            <Field label="Title">
-              <TextInput name="title" type="text" defaultValue={lesson.title} required />
-            </Field>
-            <Field label="Estimated seat minutes" hint="How long a student should plan to spend.">
-              <TextInput
-                name="estimatedSeatMinutes"
-                type="number"
-                min="1"
-                defaultValue={lesson.estimatedSeatMinutes}
-                required
-              />
-            </Field>
-            <Field label="Body (markdown)" hint="Headings, lists, and emphasis are supported.">
-              <TextArea
-                name="body"
-                defaultValue={lesson.body}
-                className="min-h-[24rem] font-mono text-sm leading-relaxed"
-              />
-            </Field>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save lesson"}
-            </Button>
-          </Form>
-        </Card>
-      </section>
+      <LessonContentForm lesson={lesson} submitting={submitting} />
 
-      <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-          Narration
-        </h2>
-        <div className="flex flex-col gap-4">
-          {lesson.narrationAudioR2Key ? (
-            <Card>
-              <div className="flex flex-col gap-2">
-                <p className="text-sm text-ink-700 dark:text-ink-200">
-                  Narration saved{" "}
-                  {lesson.narrationAudioGeneratedAt
-                    ? new Date(lesson.narrationAudioGeneratedAt).toLocaleString()
-                    : ""}
-                  {" — "}
-                  <span className="font-mono text-xs text-ink-500 dark:text-ink-400">
-                    {lesson.narrationAudioVoiceId === "owner-recorded"
-                      ? "owner-recorded"
-                      : lesson.narrationAudioVoiceId ?? "AI"}
-                  </span>
-                </p>
-                <audio
-                  controls
-                  src={`/audio/narration/${lesson.narrationAudioR2Key}`}
-                  className="w-full"
-                />
-              </div>
-            </Card>
-          ) : null}
-
-          <VoiceRecorder
-            uploadUrl="/api/lesson/narration/upload"
-            uploadFields={{ lessonId: lesson.id }}
-            label={`Record narration: ${lesson.title}`}
-            prompt="Read the script below at a comfortable pace. We clean up the audio in your browser before saving — high-pass filter, soft noise gate, compressor — so you don't need a studio mic."
-            script={lesson.narrationScript ?? undefined}
-          />
-        </div>
-      </section>
+      <LessonNarrationSection lesson={lesson} />
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
@@ -503,258 +428,15 @@ export default function LessonEditor({ loaderData, actionData }: Route.Component
         />
       </section>
 
-      <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-          Videos &amp; resources
-        </h2>
-        {assets.length === 0 ? null : (
-          <ul className="mb-4 flex flex-col gap-3">
-            {assets.map((a, aIdx) => {
-              const meta = a.metadata as { videoId?: unknown } | null;
-              const videoId =
-                a.kind === "youtube" && meta && typeof meta.videoId === "string"
-                  ? meta.videoId
-                  : null;
-              const isFirst = aIdx === 0;
-              const isLast = aIdx === assets.length - 1;
-              return (
-                <li
-                  key={a.id}
-                  className="flex flex-col gap-3 rounded-2xl border border-ink-200 bg-white/70 p-4 dark:border-ink-800 dark:bg-ink-900/40"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
-                        {a.kind}
-                      </p>
-                      <p className="mt-1 truncate text-sm text-ink-700 dark:text-ink-200">
-                        {a.caption || a.url.split("/").pop() || a.url}
-                      </p>
-                      <a
-                        href={a.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 block truncate text-xs text-ink-500 hover:text-brand-600 dark:text-ink-400 dark:hover:text-brand-300"
-                      >
-                        {a.url}
-                      </a>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Form method="post" className="contents">
-                        <input type="hidden" name="intent" value="move-asset-up" />
-                        <input type="hidden" name="assetId" value={a.id} />
-                        <Button type="submit" variant="ghost" disabled={submitting || isFirst}>
-                          ↑
-                        </Button>
-                      </Form>
-                      <Form method="post" className="contents">
-                        <input type="hidden" name="intent" value="move-asset-down" />
-                        <input type="hidden" name="assetId" value={a.id} />
-                        <Button type="submit" variant="ghost" disabled={submitting || isLast}>
-                          ↓
-                        </Button>
-                      </Form>
-                      <Form method="post">
-                        <input type="hidden" name="intent" value="delete-asset" />
-                        <input type="hidden" name="assetId" value={a.id} />
-                        <Button type="submit" variant="ghost" disabled={submitting}>
-                          Remove
-                        </Button>
-                      </Form>
-                    </div>
-                  </div>
-                  {videoId && (
-                    <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">
-                      <iframe
-                        src={youTubeEmbedUrl(videoId)}
-                        className="h-full w-full"
-                        loading="lazy"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        title={a.caption ?? "YouTube video"}
-                      />
-                    </div>
-                  )}
-                  {a.kind === "image" && (
-                    <img
-                      src={a.url}
-                      alt={a.caption ?? "Lesson image"}
-                      className="max-h-96 w-full rounded-xl object-contain"
-                    />
-                  )}
-                  {a.kind === "pdf" && (
-                    <embed
-                      src={a.url}
-                      type="application/pdf"
-                      className="h-96 w-full rounded-xl border border-ink-200 dark:border-ink-800"
-                    />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-              Add a YouTube video
-            </h3>
-            <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
-              Paste any YouTube URL — watch link, share link, or embed.
-            </p>
-            <Form method="post" className="mt-3 flex flex-col gap-3">
-              <input type="hidden" name="intent" value="add-youtube" />
-              <Field label="">
-                <TextInput
-                  name="url"
-                  type="url"
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  required
-                />
-              </Field>
-              <Field label="">
-                <TextInput name="caption" type="text" placeholder="Caption (optional)" />
-              </Field>
-              <div>
-                <Button type="submit" disabled={submitting}>
-                  Add video
-                </Button>
-              </div>
-            </Form>
-          </Card>
+      <LessonAssetsSection assets={assets} submitting={submitting} />
 
-          <Card>
-            <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-              Upload an image or PDF
-            </h3>
-            <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
-              Up to 25&nbsp;MB. Images render inline; PDFs are embedded with a download link.
-            </p>
-            <Form
-              method="post"
-              encType="multipart/form-data"
-              className="mt-3 flex flex-col gap-3"
-            >
-              <input type="hidden" name="intent" value="upload-asset" />
-              <Field label="Kind">
-                <Select name="kind" defaultValue="image">
-                  <option value="image">Image</option>
-                  <option value="pdf">PDF</option>
-                </Select>
-              </Field>
-              <Field label="File">
-                <input
-                  name="file"
-                  type="file"
-                  accept="image/*,application/pdf"
-                  required
-                  className="block w-full text-sm text-ink-700 file:mr-3 file:rounded-full file:border-0 file:bg-ink-100 file:px-4 file:py-2 file:text-sm file:font-medium file:text-ink-800 hover:file:bg-ink-200 dark:text-ink-200 dark:file:bg-ink-800 dark:file:text-ink-100 dark:hover:file:bg-ink-700"
-                />
-              </Field>
-              <Field label="">
-                <TextInput name="caption" type="text" placeholder="Caption (optional)" />
-              </Field>
-              <div>
-                <Button type="submit" disabled={submitting}>
-                  Upload
-                </Button>
-              </div>
-            </Form>
-          </Card>
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-          Quiz ({questions.length} question{questions.length === 1 ? "" : "s"})
-        </h2>
-        {quizDrift && (
-          <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50/60 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
-            <strong>Heads up:</strong> you edited the lesson body since these
-            quiz questions were last reviewed. Use "Review alignment" below for
-            an AI audit, or open each question and save to re-align manually.
-          </div>
-        )}
-        <div className="mb-4">
-          <QuizAiPanel
-            schoolLessonId={lesson.id}
-            hasQuiz={!!quiz}
-            questionCount={questions.length}
-          />
-        </div>
-        {questions.length === 0 ? (
-          <Card>No quiz attached to this lesson.</Card>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {questions.map((q, idx) => {
-              const choices = JSON.parse(q.choices) as string[];
-              return (
-                <Card key={q.id} className="scroll-mt-20" >
-                  <div id={`q-${q.id}`} />
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">
-                      Question {idx + 1}
-                    </p>
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="delete-question" />
-                      <input type="hidden" name="questionId" value={q.id} />
-                      <Button type="submit" variant="ghost" disabled={submitting}>
-                        Delete question
-                      </Button>
-                    </Form>
-                  </div>
-                  <Form method="post" className="mt-4 flex flex-col gap-4">
-                    <input type="hidden" name="intent" value="save-question" />
-                    <input type="hidden" name="questionId" value={q.id} />
-                    <Field label="Prompt">
-                      <TextArea
-                        name="prompt"
-                        defaultValue={q.prompt}
-                        className="min-h-[4rem]"
-                      />
-                    </Field>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {choices.map((c, i) => (
-                        <Field key={i} label={`Choice ${String.fromCharCode(65 + i)}`}>
-                          <TextInput name={`choice${i}`} type="text" defaultValue={c} />
-                        </Field>
-                      ))}
-                    </div>
-                    <Field label="Correct answer">
-                      <Select name="correctIndex" defaultValue={String(q.correctIndex)}>
-                        {choices.map((_, i) => (
-                          <option key={i} value={i}>
-                            Choice {String.fromCharCode(65 + i)}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                    <Field label="Explanation">
-                      <TextArea
-                        name="explanation"
-                        defaultValue={q.explanation ?? ""}
-                        className="min-h-[3rem]"
-                      />
-                    </Field>
-                    <div>
-                      <Button type="submit" disabled={submitting}>
-                        Save question
-                      </Button>
-                    </div>
-                  </Form>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
-        <Form method="post" className="mt-4">
-          <input type="hidden" name="intent" value="add-question" />
-          <Button type="submit" variant="secondary" disabled={submitting}>
-            + Add a question
-          </Button>
-        </Form>
-      </section>
+      <LessonQuizEditor
+        lessonId={lesson.id}
+        quiz={quiz}
+        questions={questions}
+        quizDrift={quizDrift}
+        submitting={submitting}
+      />
     </div>
   );
 }
