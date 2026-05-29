@@ -65,13 +65,14 @@ export function renderLessonHtml(html: string): ReactNode {
         }
         const [kind, name] = seg.value.split(":");
         if (kind === "sign") {
-          const size = (seg.args?.size as "sm" | "md" | "lg" | undefined) ?? "md";
+          const size =
+            (seg.args?.size as "xs" | "sm" | "md" | "lg" | "xl" | undefined) ?? "xs";
           return (
             <TrafficSign
               key={i}
               type={name as TrafficSignType}
               size={size}
-              className="mx-1"
+              className="mx-0.5"
             />
           );
         }

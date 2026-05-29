@@ -61,13 +61,18 @@ export type TrafficSignType =
 
 type Props = {
   type: TrafficSignType;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "xs" | "sm" | "md" | "lg" | "xl";
   className?: string;
   /** When `interactive`, the sign gets a subtle hover lift. */
   interactive?: boolean;
 };
 
-const SIZES = { sm: 56, md: 96, lg: 144, xl: 220 } as const;
+// Heights in px. `xs` (28px) is the natural inline-with-text size —
+// sits on the baseline next to body text without forcing line height
+// to jump. `sm` (44px) is for sign-emphasis inside a callout. The
+// larger sizes are for cards / hero blocks that authors place on
+// their own line.
+const SIZES = { xs: 28, sm: 44, md: 72, lg: 120, xl: 200 } as const;
 
 const REGISTRY: Partial<Record<TrafficSignType, string>> = {
   stop,
@@ -115,10 +120,12 @@ export function TrafficSign({
   const speedMatch = /^speed-limit-(\d+)$/.exec(type);
   if (speedMatch) {
     const mph = Number(speedMatch[1]);
+    // R2-1 is taller than wide (5:4-ish). Height is the size token;
+    // width follows the natural aspect.
     return (
       <span
         className={wrap}
-        style={{ width: pxSize, height: pxSize * 1.25 }}
+        style={{ height: pxSize * 1.25, width: pxSize, verticalAlign: "-0.45em" }}
         aria-label={`Speed limit ${mph}`}
       >
         <SpeedLimitOverlay base={speedLimitBlank} mph={mph} />
@@ -129,18 +136,26 @@ export function TrafficSign({
   const svg = REGISTRY[type];
   if (!svg) return null;
 
-  // The Wikimedia SVGs have a `width` / `height` attribute in inches
-  // and a `viewBox`. We strip the dimensions and let our wrapping
-  // <span> size the rendered output via CSS — same SVG file, any size.
+  // The Wikimedia SVGs carry their own width/height in inches; strip
+  // those and let the wrapping <span> control height while width is
+  // determined by the SVG's own viewBox aspect ratio. That way the
+  // pennant (tall triangle) and one-way (wide rectangle) signs keep
+  // their natural shape instead of getting squashed into a square.
   const inlined = svg
     .replace(/<\?xml[^>]+\?>/, "")
-    .replace(/width="[^"]+"/, "")
-    .replace(/height="[^"]+"/, "");
+    .replace(/<svg([^>]*)\swidth="[^"]+"/, "<svg$1")
+    .replace(/(<svg[^>]*)\sheight="[^"]+"/, "$1")
+    // Force the <svg> root to fill its parent box AND preserve its
+    // viewBox-driven aspect ratio.
+    .replace(
+      /<svg/,
+      `<svg style="height:100%;width:auto;display:block" preserveAspectRatio="xMidYMid meet"`,
+    );
 
   return (
     <span
       className={wrap}
-      style={{ width: pxSize, height: pxSize }}
+      style={{ height: pxSize, verticalAlign: "-0.35em" }}
       // SVG content is from Wikimedia Commons (trusted); no user input.
       dangerouslySetInnerHTML={{ __html: inlined }}
       role="img"
