@@ -560,7 +560,7 @@ function Footer({ org, theme }: { org: OrgRow; theme: string }) {
         </span>
         <span>
           Powered by{" "}
-          <a href="https://godirectio.com" className="opacity-80 hover:opacity-100">
+          <a href="https://getdirectio.com" className="opacity-80 hover:opacity-100">
             directio
           </a>
         </span>

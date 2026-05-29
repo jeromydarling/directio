@@ -33,7 +33,7 @@ export async function sendEmail(
 ): Promise<{ id: string }> {
   const key: string = env.RESEND_API_KEY ?? "";
   if (!isResendConfigured(env)) throw new ResendNotConfiguredError();
-  const from: string = args.from ?? env.RESEND_FROM ?? "directio <no-reply@godirectio.com>";
+  const from: string = args.from ?? env.RESEND_FROM ?? "directio <no-reply@getdirectio.com>";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {

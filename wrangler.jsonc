@@ -9,6 +9,11 @@
     "enabled": true
   },
 
+  "routes": [
+    { "pattern": "getdirectio.com/*", "zone_name": "getdirectio.com" },
+    { "pattern": "www.getdirectio.com/*", "zone_name": "getdirectio.com" }
+  ],
+
   "triggers": {
     "crons": [
       "0 * * * *"
@@ -76,8 +81,8 @@
   ],
 
   "vars": {
-    "APP_ENV": "development",
-    "APP_URL": "http://localhost:5173",
+    "APP_ENV": "production",
+    "APP_URL": "https://getdirectio.com",
     "BETTER_AUTH_SECRET": "set-via-dev-vars-or-secret",
     "STRIPE_SECRET_KEY": "set-in-keys-pass",
     "STRIPE_PUBLISHABLE_KEY": "set-in-keys-pass",
@@ -87,7 +92,7 @@
     "ELEVENLABS_API_KEY": "set-in-keys-pass",
     "ANTHROPIC_API_KEY": "set-in-keys-pass",
     "RESEND_API_KEY": "set-in-keys-pass",
-    "RESEND_FROM": "directio <no-reply@godirectio.com>",
+    "RESEND_FROM": "directio <no-reply@getdirectio.com>",
     "AI_GATEWAY_ACCOUNT_ID": "f84f7181c051be0040e972dcad48e697",
     "AI_GATEWAY_NAME": "directio-llm",
     "SAAS_ZONE_ID": "be8ec303d18c69cc8e8c1086856fe3a1"

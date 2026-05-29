@@ -27,10 +27,18 @@ const requestHandler = createRequestHandler(
 const PLATFORM_HOSTS = new Set<string>([
   "localhost",
   "127.0.0.1",
+  // Primary public domain
+  "getdirectio.com",
+  "www.getdirectio.com",
+  // Legacy / fallback domain — kept while DNS migration settles
   "godirectio.com",
   "www.godirectio.com",
+  // Workers.dev default (still resolves until we remove it)
   "directio.jer-f84.workers.dev",
-  "sites.godirectio.com", // CNAME target — bare-host hits go to platform
+  // CNAME target for school custom-domain rewrites — bare-host hits
+  // go to platform; specific school slugs hit the rewrite path.
+  "sites.godirectio.com",
+  "sites.getdirectio.com",
 ]);
 
 function isPlatformHost(host: string): boolean {
