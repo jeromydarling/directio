@@ -58,7 +58,7 @@ export async function geocodeZip(
   url.searchParams.set("country", "us");
   url.searchParams.set("types", "postcode");
   url.searchParams.set("limit", "1");
-  url.searchParams.set("access_token", env.MAPBOX_PUBLIC_TOKEN);
+  url.searchParams.set("access_token", env.MAPBOX_PUBLIC_TOKEN ?? "");
 
   const res = await fetch(url.toString());
   if (!res.ok) return null;
