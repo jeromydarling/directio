@@ -22,6 +22,7 @@ type PackRow = {
   notes: string | null;
   installed: number;
   installedAt: number | null;
+  installId: string | null;
   moduleCount: number;
   lessonCount: number;
 };
@@ -32,7 +33,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     `SELECT cp.id AS packId, cpv.id AS versionId, cp.scope, cp.jurisdiction,
             cp.name, cpv.version, cp.description, cpv.notes,
             CASE WHEN spi.id IS NULL THEN 0 ELSE 1 END AS installed,
-            spi.installedAt,
+            spi.installedAt, spi.id AS installId,
             (SELECT COUNT(*) FROM module m
                JOIN course c ON c.id = m.courseId
               WHERE c.contentPackVersionId = cpv.id) AS moduleCount,
@@ -316,12 +317,14 @@ export default function AdminLibrary({ loaderData, actionData }: Route.Component
               <div className="mt-4 flex items-center gap-3 border-t border-ink-200/60 pt-4 dark:border-ink-800/60">
                 {p.installed ? (
                   <>
-                    <a
-                      href={`/admin/library/${p.versionId}`}
-                      className="text-sm font-medium text-brand-600 hover:text-brand-500 dark:text-brand-300"
-                    >
-                      Browse contents →
-                    </a>
+                    {p.installId ? (
+                      <a
+                        href={`/admin/library/installed/${p.installId}`}
+                        className="text-sm font-medium text-brand-600 hover:text-brand-500 dark:text-brand-300"
+                      >
+                        Browse contents →
+                      </a>
+                    ) : null}
                     <Form method="post" className="ml-auto">
                       <input type="hidden" name="intent" value="uninstall" />
                       <input type="hidden" name="versionId" value={p.versionId} />
