@@ -8,6 +8,7 @@ import { Card, LinkButton, Button } from "~/components/ui";
 import { LANG_LABELS } from "~/lib/lang-labels";
 import { renderLessonHtml } from "~/lib/lesson-shortcodes";
 import { TrackedAudioPlayer } from "~/components/tracked-audio-player";
+import { resolveLessonAudioUrl } from "~/lib/narrate.server";
 
 type LessonRow = {
   id: string;
@@ -264,8 +265,16 @@ export async function loader({
       .run();
   }
 
+  // Resolve narration audio: owner-recorded wins, then shared Aura-2
+  // cache, then null. The student player handles the null case by
+  // showing the lesson without a "Listen along" card.
+  const audioUrl = await resolveLessonAudioUrl(context.cloudflare.env, {
+    schoolLessonId: lesson.id,
+  });
+  const lessonWithAudio = { ...lesson, title: displayedTitle, audioUrl };
+
   return {
-    lesson: { ...lesson, title: displayedTitle },
+    lesson: lessonWithAudio,
     bodyHtml,
     assets,
     quiz: quiz ?? null,
