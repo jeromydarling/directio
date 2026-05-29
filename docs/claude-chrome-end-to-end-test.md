@@ -1,225 +1,224 @@
 # Claude Chrome end-to-end click test — directio
 
 **Target:** `https://godirectio.com`
-**Audience:** Claude Chrome (browser agent) running an unattended pass.
-**Goal:** touch every shipped feature, from marketing site → demo → real signup → first family enrollment → student consuming a lesson.
-**Pass condition:** every numbered step ends at the expected URL/element and screenshots match the per-step description. Failures get a `/tmp/fail-{n}.png` screenshot + a one-line note in the report.
+**Runner:** Claude Chrome (browser agent), unattended.
+**Goal:** exercise every shipped surface, from marketing site → demo → real signup → first family enrollment → student consuming a lesson.
+**Pass condition:** each numbered step lands on the expected URL and DOM. Failures save a screenshot to `/tmp/fail-{step}.png` plus a one-line reason in the report.
 
-The test is grouped by phase. Each phase is independently restartable — if Phase 4 fails, drop everything and restart at Phase 4's setup line.
+**Architecture context (read once before starting).** The codebase was refactored in May 2026 (see `docs/architecture-audit.md`). Behavior is unchanged but several "regression sentinels" below verify that the refactor held. These are marked `[SENTINEL #N]` referencing the audit finding.
+
+Phases are independently restartable — if Phase 4 fails, restart at Phase 4's Setup line.
 
 ---
 
 ## Phase 0 — Pre-flight (no auth)
 
-**Setup:** open a fresh Chrome window, no cookies, viewport ≥ 1440×900.
+**Setup:** fresh Chrome window, no cookies, viewport ≥ 1440×900.
 
-1. `GET https://godirectio.com/` — page returns 200, dark theme active, the wordmark "directio" with the violet dot is visible top-left, primary CTA in the nav reads "Try the demo".
-2. **www apex redirect:** `GET https://www.godirectio.com/` — chrome address bar lands at `https://godirectio.com/` (301 happened). Confirm no Cloudflare redirect loop, no "too many redirects" interstitial.
-3. **Marketing nav megamenus.** Hover the "Product" menu — it pops with three items (Features, State coverage, Compare) and a footer card "Try the live demo →". Hover "Who it's for" — Schools migrating in / Starting a school / Instructors / Families.
-4. **Dark theme verification.** Inspect `<html>` — `class="dark"` is present. `body` computed `background-color` is near `#0a0f1c` (not white).
-5. Visit each marketing surface and verify 200 + correct title:
+1. `GET https://godirectio.com/` → 200, dark theme, wordmark "directio" with violet dot top-left, nav CTA reads "Try the demo".
+2. **www→apex 301.** `GET https://www.godirectio.com/` lands at `https://godirectio.com/` after one redirect. No loop. `[SENTINEL #8]` — host resolution lives in `app/lib/host-resolution.server.ts`; the redirect must still fire.
+3. **Megamenus.** Hover "Product" → three items (Features, State coverage, Compare) + footer "Try the live demo →". Hover "Who it's for" → Schools / Starting / Instructors / Families.
+4. **Dark theme.** `<html class="dark">`; `body` computed background-color ≈ `#0a0f1c`.
+5. **Marketing pages 200 + title sentinels:**
    - `/features`
-   - `/states` — confirms the page title says "Minnesota deep. The other 50 at checklist depth — honestly labeled." and the active-coverage table lists at least 51 jurisdictions with credential names.
-   - `/compare` — confirms the comparison table includes columns for **directio, DriveScout, Teachworks, Drivers Ed Solutions, Spreadsheets + Stripe**. The TCO table further down shows Y1 $2,400 for "directio (Free)".
-   - `/pricing` — Studio tier shows **$29 / month**. Free tier shows **$0/mo + 2%**. Pro tier shows **Talk to us**.
-   - `/start-a-school`
-   - `/for-schools`
-   - `/for-families`
-   - `/for-instructors`
-   - `/why`
+   - `/states` — title contains "Minnesota deep"; coverage table ≥ 51 jurisdictions.
+   - `/compare` — table columns include directio, DriveScout, Teachworks, Drivers Ed Solutions, Spreadsheets + Stripe. TCO Y1 row for "directio (Free)" = $2,400.
+   - `/pricing` — Studio $29/mo, Free $0/mo + 2%, Pro "Talk to us".
+   - `/start-a-school`, `/for-schools`, `/for-families`, `/for-instructors`, `/why`.
+6. `[SENTINEL #4]` — Static asset path is cheap. `GET /assets/<any-hash>.js` succeeds; check response header `cf-cache-status: HIT` after one warm-up request. (This verifies the KV-cached host resolver short-circuits platform requests instead of hitting D1.)
 
 ---
 
-## Phase 1 — Demo: form-gated path
+## Phase 1 — Demo (form-gated)
 
 **Setup:** still logged out.
 
-6. Navigate to `/demo`. Form has four fields: Name, Email, Role dropdown (Owner / Admin / Instructor / Curious), State dropdown (51 options).
-7. Fill **Name** = `Test Owner`, **Email** = `test+{timestamp}@directio.app` (unique), **Role** = "I run a driving school", **State** = "Minnesota". Submit.
-8. Land at `/admin`. The amber demo banner is visible at the top of the content area: "You're in a live demo. Click anything." + "Auto-resets in ~24 hours." A row of four role-switch chips appears below: **School / Instructor / Family / Student**, with School highlighted active.
-9. The sidebar shows the school name (something like "Sunrise Driving Academy") and role "owner" beneath it.
+7. `GET /demo` — form fields: Name, Email, Role (Owner/Admin/Instructor/Curious), State (51 options).
+8. Submit: Name `Test Owner`, Email `test+{ts}@directio.app`, Role "I run a driving school", State "Minnesota".
+9. Land at `/admin`. Amber banner: "You're in a live demo. Click anything." + "Auto-resets in ~24 hours." Role-switch chips: **School / Instructor / Family / Student**, School active.
+10. Sidebar shows demo school name + role "owner".
 
 ---
 
-## Phase 2 — Demo: bypass + multi-role switcher
+## Phase 2 — Demo (skip path + multi-role switcher)
 
-**Setup:** open a fresh incognito window (no cookies).
+**Setup:** fresh incognito.
 
-10. `GET /demo/skip?as=owner&state=TX` — land at `/admin`. The sidebar school name reflects a fresh demo, role = owner, jurisdiction = US-TX. Demo banner present.
-11. From the demo banner role-switcher, click **Instructor** → land at `/instructor`. Page renders "Today" with at least one upcoming appointment (the demo seed gives the demo user 2 future BTW lessons as the instructor). Demo banner still visible at top with Instructor chip active.
-12. Role-switcher → **Family** → `/family`. Two student names visible in the family list (the seeder links the demo user as guardian to the first 2 students).
-13. Role-switcher → **Student** → `/me`. The student's own journey appears. The "Lessons" nav link is visible.
-14. Click **Lessons** → `/me/learn`. Forty lessons across ten modules visible (Signs and signals → Insurance and basic responsibility). Each entry shows a lesson title and time estimate.
-
----
-
-## Phase 3 — Demo: student-side lesson with audio + signs + quiz
-
-**Setup:** continuing as student in the demo from Phase 2.
-
-15. Click the first lesson under "Signs and signals" — **Reading traffic signs**. URL becomes `/me/learn/{uuid}`. Page loads within 5 seconds.
-16. **Listen-along card** appears with an `<audio>` element whose `src` matches `/audio/narration/narration/aura-2/orpheus/...`. Below the player, a progress bar reads "Listened: 0:00 / 6:XX" and "X:XX left to unlock the quiz".
-17. Press play. Within 2 seconds audio is audible (Orpheus voice). After 10 seconds of playback, the heartbeat fires — refresh the page; "Listened" reflects elapsed time.
-18. **Inline MUTCD signs.** Scroll the body. Inline `<svg>` elements appear next to lesson text ~28px tall. Expected near the top: stop, yield, do-not-enter, curve-right, deer-crossing, narrow-bridge, school-zone signs visible inline.
-19. **Lang switcher.** Next to the lesson title, a `<select>` shows "English" as the default and offers any language the school has translated this lesson into (empty for the fresh demo). Verify the select exists and `<option value="">English</option>` is selected.
-20. **Quiz gating.** If the org has `requireAudioCompletionBeforeQuiz` enabled (this demo does not by default), the quiz section shows the locked-state amber card. Otherwise the four-choice quiz renders with each question + four radio options. Pick a wrong answer for question 1 and the right answer for the rest. Submit.
-21. Result panel shows: "You scored X% · passed/failed". For each question, the chosen answer is shown next to the correct answer + the explanation text. Question 1 has a red X; the rest have green check marks.
+11. `GET /demo/skip?as=owner&state=TX` → `/admin`. Sidebar: jurisdiction US-TX, role owner, banner visible.
+12. Banner switcher → **Instructor** → `/instructor` "Today" view, ≥1 upcoming appointment seeded.
+13. → **Family** → `/family`, two student names visible.
+14. → **Student** → `/me`, the student's journey; "Lessons" nav visible.
+15. Click **Lessons** → `/me/learn`. 40 lessons across 10 modules (Signs and signals → Insurance and basic responsibility).
 
 ---
 
-## Phase 4 — Demo: owner curriculum editor (signs / translations / AI quiz / voice recorder)
+## Phase 3 — Student lesson player (audio + signs + quiz)
 
-**Setup:** open a fresh incognito and `GET /demo/skip?as=owner`. Sidebar → **Curriculum**.
+**Setup:** continuing as demo student.
 
-22. `/admin/library` shows the installed national-teen-core pack. Click into it. The installed-pack detail shows ten modules.
-23. Click **Signs and signals → Reading traffic signs**. Lesson editor renders. Title input is "Reading traffic signs", body shows the markdown with `[[sign:stop]]` shortcodes inline.
-24. **Voice recorder.** Scroll to **Record narration: Reading traffic signs**. The narration script auto-scrolls inside the teleprompter pane at "Normal" pace. Click "Enable microphone". Browser prompts for mic; **deny** the prompt and confirm the recorder card shows an error message starting "Mic access was blocked" (we're not actually recording audio in this pass).
-25. **Translation panel.** Scroll to **Translate this lesson**. Click the language picker; verify the list includes at minimum: Español, Tiếng Việt, 中文, Soomaali, Hmoob, Kreyòl ayisyen. Pick **Soomaali · Somali**. Click "Translate · $0.50". Expected: 402 response (insufficient credits) — an in-place red alert appears saying "Not enough credits — you have $0.00, this costs $0.50".
-26. Click the "Balance: $0.00 →" link → land at `/admin/translations`. Top-up cards show $5 / $20 / $100. Click the $20 card. If Stripe is wired, you reach Stripe Checkout; abandon the payment with the back button (we don't want to actually charge in the test). If Stripe is not configured, an alert appears with "Stripe is not configured…" — that's an acceptable result.
-27. Back to the lesson editor. **AI quiz tools** card. Click **Generate** with the number 3 entered. If the Anthropic key is wired, three new draft questions are appended and the page reloads. If not, a red alert reads "AI features need ANTHROPIC_API_KEY…".
-28. **Quiz drift indicator.** Edit the lesson body — add a sentence "This is a deliberate edit." at the bottom and click **Save**. The page reloads. The Quiz section now shows an amber callout: "Heads up: you edited the lesson body since these quiz questions were last reviewed."
+16. Click **Signs and signals → Reading traffic signs**. URL → `/me/learn/{uuid}`. Page paints < 5s.
+17. **Listen-along card.** `<audio>` `src` matches `/audio/narration/aura-2/orpheus/...`. Progress reads "Listened: 0:00 / 6:XX". `[SENTINEL #2]` — exactly **one** audio URL on the page; no DOM trace of a legacy `audioUrl` field (search rendered HTML for the string `data-legacy-audio` and `lesson.audioUrl` — neither should appear).
+18. Press play. Audio audible within 2s (Orpheus). After 10s of playback, refresh — "Listened" reflects elapsed seconds.
+19. **Inline MUTCD signs `[SENTINEL #5]`.** Body contains inline `<svg>` for stop, yield, do-not-enter at ~28px tall. **Code-block immunity:** any text inside a `<pre>` or `<code>` element that mentions `[[sign:` should render as literal text, NOT as an SVG. (The marked-extension tokenizer fixes the old regex-over-HTML failure mode.)
+20. **Lang switcher.** `<select>` next to title; `<option value="">English</option>` selected. No machine-translated badge in the fresh demo.
+21. **Quiz.** Four-choice questions render. Wrong answer for Q1, right for the rest. Submit.
+22. Result panel: score percentage + pass/fail. Q1 red X with the correct-answer reveal; other questions green check + explanation.
+
+---
+
+## Phase 4 — Owner curriculum editor (signs / translations / AI quiz / voice recorder)
+
+**Setup:** fresh incognito; `GET /demo/skip?as=owner`. Sidebar → **Curriculum**.
+
+23. `/admin/library` → installed national-teen-core pack. Click in. Ten modules.
+24. Click **Signs and signals → Reading traffic signs**. Editor renders. `[SENTINEL #3]` — page DOM contains discrete sections rendered by `lesson-editor/*` components: **Content**, **Narration**, **Assets**, **Quiz**, **Publish**. (DevTools React tree should show component names `LessonContentForm`, `LessonNarrationSection`, `LessonAssetsSection`, `LessonQuizEditor`, `LessonPublishToggle` — if the split regressed, you'll see one giant component instead.)
+25. **Voice recorder.** "Record narration: Reading traffic signs". Teleprompter auto-scrolls. Click "Enable microphone" → **deny** the prompt → expect error "Mic access was blocked".
+26. **Translation panel.** Language picker contains at minimum: Español, Tiếng Việt, 中文, Soomaali, Hmoob, Kreyòl ayisyen. Pick **Soomaali**. Click "Translate · $0.50". Expect 402 → red alert "Not enough credits — you have $0.00, this costs $0.50".
+27. **Translation glossary `[SENTINEL #9]`.** Edit lesson body, add the sentence: "Drivers in MN must obey MUTCD signs." Save. Confirm the body re-renders with the literal abbreviations preserved (glossary expansion happens at translation time, not display time — a regression here would show "Minnesota" instead of "MN").
+28. Click "Balance: $0.00 →" → `/admin/translations`. Top-up cards $5 / $20 / $100. Click $20 → Stripe Checkout (or alert "Stripe is not configured…" if not wired). Back out.
+29. **AI quiz tools.** Enter 3 → click **Generate**. If Anthropic key wired, 3 draft questions appended; if not, red alert "AI features need ANTHROPIC_API_KEY…". `[SENTINEL #6]` — no secret values leaked into the alert/error text.
+30. **Quiz drift.** Edit body, append "This is a deliberate edit." Save. Quiz section now shows amber callout "Heads up: you edited the lesson body since these quiz questions were last reviewed."
 
 ---
 
 ## Phase 5 — Real signup → onboarding → fresh school
 
-**Setup:** fresh incognito window, all cookies cleared.
+**Setup:** fresh incognito.
 
-29. `GET /signup`. Fill Name = `Pat Real`, Email = `pat+{timestamp}@directio-test.example`. Submit.
-30. Expected: redirect to `/onboarding` (no school yet). Page asks for school name + jurisdiction. Fill **School name** = "Test Pat Driving School", **State** = "Minnesota", **slug** auto-derived. Submit.
-31. Land at `/admin`. Dashboard shows zero students, zero appointments, the school name "Test Pat Driving School" in the sidebar, role = owner.
-
----
-
-## Phase 6 — Configure school: location, vehicle, instructor, program
-
-32. Sidebar → **Locations** → click "Add a location". Fill Name = "Main office", address fields = any valid US-MN. Save. Location row appears.
-33. Sidebar → **Vehicles** → "Add a vehicle". Label = "Car 1 — Civic", make/model = "Honda Civic", year = 2024. Save.
-34. Sidebar → **Instructors** → "Add an instructor". First name = "Sam", last name = "Owner-Also-Instructor", email = `pat+{timestamp}+inst@directio-test.example`. Save. Row appears.
-35. Sidebar → **Programs** → "Add a program". Name = "Standard Teen", kind = "teen". Add a package: name = "Standard 6-lesson", price = `$699.00`, lessons = 6. Save.
+31. `GET /signup`. Name `Pat Real`, Email `pat+{ts}@directio-test.example`. Submit.
+32. → `/onboarding`. School name "Test Pat Driving School", State "Minnesota", slug auto-derived. Submit.
+33. → `/admin`. Sidebar = "Test Pat Driving School", role owner, zero students/appointments. `[SENTINEL #1]` — admin dashboard renders in sections (Funnel, Payroll, Locations, Capacity, Compliance, Vehicles, Instructor scorecard). All sections render even with zero data (empty-state cards).
 
 ---
 
-## Phase 7 — Install curriculum + render the audio path on a fresh org
+## Phase 6 — School configuration
 
-36. Sidebar → **Curriculum** → page shows available packs. **Install** the "National Teen Driver Education Core" pack. After install, the pack appears under "Installed". Click into it.
-37. Browse to "Signs and signals → Reading traffic signs" lesson. The lesson editor renders — body has the same MUTCD sign shortcodes. **Save** the lesson without changes (this stamps `bodyHashCurrent`).
-38. **Switch to student view to validate audio cache hit cross-school.** Open the demo's `/me/learn/{uuid}` URL for the same lesson **in this real org** (find it via sidebar → Curriculum → installed → Reading traffic signs → "View as student" or by navigating to `/me/learn` while signed in as owner). The audio player should resolve from the shared `lesson_audio` cache — no fresh Aura-2 render charged to the new school. Listen progress works.
-
----
-
-## Phase 8 — Make a public marketing site visible (Studio path)
-
-39. Sidebar → **Website**. The page describes the Studio AI-generated marketing site. Open the 10-question intake. Fill in plausible answers. Click **Generate**.
-40. Within 30s a preview of the generated site appears. Confirm a hero, sections for programs, instructors, hours.
-41. Publish. The public slug (`/schools/test-pat-driving-school`) is now reachable from a logged-out browser.
-
-42. **Logged-out test of public school page.** Open an incognito window. `GET https://godirectio.com/schools/test-pat-driving-school` — the marketing site renders. Title visible, "Enroll" CTA links to `/schools/test-pat-driving-school/enroll`.
+34. Sidebar → **Locations** → "Add a location". Name "Main office", any valid US-MN address. Save. Row appears.
+35. → **Vehicles** → "Add a vehicle". Label "Car 1 — Civic", Honda Civic 2024. Save.
+36. → **Instructors** → "Add an instructor". Sam Owner-Also-Instructor, `pat+{ts}+inst@directio-test.example`. Save.
+37. → **Programs** → "Add a program". "Standard Teen", kind "teen". Add package "Standard 6-lesson", $699.00, 6 lessons. Save.
 
 ---
 
-## Phase 9 — Schedule a real lesson (admin dispatch board)
+## Phase 7 — Install curriculum + cross-school cache hit
 
-**Setup:** signed in as owner of the real school from Phase 5.
-
-43. Sidebar → **Schedule** → `/admin/schedule`. The schedule list is empty.
-44. Click **Schedule a lesson** → `/admin/schedule/new`. Pick student = "(none yet — we'll create one in Phase 10)" — back out. We need a student first.
-45. Sidebar → **Students** → "Add a student". Name = "Jamie Test", date of birth = something making them 16, email = `jamie+{timestamp}@directio-test.example`, parent email = `parent+{timestamp}@directio-test.example`. Save.
-46. Now Schedule → New. Pick Jamie. Pick instructor = Sam. Pick vehicle = Car 1. Date = tomorrow, time = 4:00 PM. Save. Confirmation message + appointment row appears.
-47. **Drag-drop board.** Visit `/admin/schedule/board`. Tomorrow's column has the appointment block. The interaction is socket-driven; confirm the block can be drag-and-dropped to another time slot without page reload.
+38. Sidebar → **Curriculum** → Install "National Teen Driver Education Core". Pack appears under Installed. Click in.
+39. **Signs and signals → Reading traffic signs**. Save without changes (stamps `bodyHashCurrent`).
+40. `[SENTINEL #1]` — Open the same lesson at `/me/learn/{uuid}` while signed in as owner. Audio resolves from the shared `lesson_audio` cache (no fresh Aura-2 render against the new school's billing). Page paints ≤ 5s; Network panel shows the R2 path identical to the one served to the demo org.
 
 ---
 
-## Phase 10 — First family enrollment (this is the "first customer" moment)
+## Phase 8 — Public marketing site (Studio path)
 
-**Setup:** open a new incognito tab.
+41. Sidebar → **Website**. 10-question intake. Fill plausible answers. **Generate**.
+42. Within 30s the preview renders: hero + programs + instructors + hours.
+43. Publish. Public slug `/schools/test-pat-driving-school` reachable from a logged-out browser.
+44. Incognito: `GET https://godirectio.com/schools/test-pat-driving-school` → site renders. "Enroll" CTA links to `/schools/test-pat-driving-school/enroll`.
 
-48. `GET /schools/test-pat-driving-school` — the public marketing site loads. Click **Enroll**.
-49. Public enrollment page. Pick the "Standard 6-lesson" package. Fill in student details (name, DOB, address), parent contact info, payment.
-50. **Pre-checkout disclosure.** Confirm the fee breakdown lines show: tuition $699.00, then a small note about Stripe processing pass-through. Family-side surcharge should be **$0**.
-51. Submit. If Stripe is wired, you land at Stripe Checkout. Use the Stripe **test card** `4242 4242 4242 4242`, any future expiry, any CVC. Complete.
-52. Webhook fires. Back in the owner's `/admin/payments`, a new succeeded payment row appears within a few seconds. The amount matches $699.00, the platform fee column shows ~$13.98 (2%).
-53. The student Jamie is now enrolled with status = active, journeyState = enrolled. The owner's dashboard counts updated.
+---
+
+## Phase 9 — Schedule a lesson (admin dispatch board)
+
+**Setup:** signed in as owner of the real school.
+
+45. Sidebar → **Students** → "Add a student". Jamie Test, DOB making them 16, `jamie+{ts}@directio-test.example`, parent `parent+{ts}@directio-test.example`. Save.
+46. Sidebar → **Schedule** → "Schedule a lesson". Student Jamie, instructor Sam, vehicle Car 1, tomorrow 4:00 PM. Save. Confirmation + appointment row.
+47. **Drag-drop board.** `/admin/schedule/board`. Tomorrow's column has the block. Drag it to a new time slot — updates without page reload (Durable Object websocket).
+
+---
+
+## Phase 10 — First family enrollment (the "first customer" moment)
+
+**Setup:** new incognito tab.
+
+48. `GET /schools/test-pat-driving-school` → public site. Click **Enroll**.
+49. Pick "Standard 6-lesson". Fill student details, parent contact, payment.
+50. **Pre-checkout disclosure.** Line items: tuition $699.00, Stripe processing pass-through. Family-side surcharge **$0**.
+51. Submit → Stripe Checkout (or alert if Stripe not wired). Test card `4242 4242 4242 4242`, future expiry, any CVC. Complete.
+52. Owner's `/admin/payments` shows a new succeeded payment within seconds. Amount $699.00; platform fee ≈ $13.98 (2%).
+53. Jamie now active; journeyState `enrolled`; dashboard counters updated.
 
 ---
 
 ## Phase 11 — Family-side experience
 
-**Setup:** the parent now has an account.
+**Setup:** parent now has an account.
 
-54. The parent email gets a magic-link login (check the **Resend dashboard** if Resend is wired, or use the dev log). Click the link → land at `/family`.
-55. Family index lists Jamie. Click Jamie → student detail page. The timeline shows: Enrolled → (next milestone). Payment history visible.
-56. **Lessons tab.** Click Lessons. The student's lesson list shows the same national-core lessons as the demo (the school's published curriculum). Click any → student-side lesson view with audio (cache hits), inline signs, quiz, lang switcher.
-57. **Practice log.** Click Practice log. Form to log supervised driving hours. Add an entry: "Today, 45 minutes, daytime, light traffic". Save. Entry appears with parent signature line.
+54. Parent magic-link in email (or dev log). Land at `/family`.
+55. Family index lists Jamie → student detail. Timeline: Enrolled → next milestone. Payment history visible.
+56. **Lessons tab** → student lesson list. Open any lesson. `[SENTINEL #3]` — student lesson view renders via `lesson-view/*` components (LessonHeader, LessonAudioBlock, LessonBody, LessonAssetGrid, LessonQuiz, LessonNav, StudentLangSwitcher). Audio cache hits (same R2 keys as the demo).
+57. **Practice log** → add entry "Today, 45 minutes, daytime, light traffic". Save → entry appears with parent signature line.
 
 ---
 
 ## Phase 12 — Instructor workflow
 
-**Setup:** sign in as the instructor (use Sam's email + magic link or the credential the seed created).
+**Setup:** sign in as Sam.
 
-58. `/instructor` shows "Today" — the appointment we scheduled in Phase 9 is visible.
-59. Click into the appointment. Pre-trip / vehicle check screen appears. Tap "Start lesson". Then "Mark complete". Set focus = "Lane changes and merging".
-60. Back at `/instructor`, the appointment moves from upcoming to past. Past list at `/instructor/past` shows it.
+58. `/instructor` "Today" shows the appointment from Phase 9. `[SENTINEL #3]` — page composed from `instructor-today/*` components (EarningsStrip, ShiftPanel, OpenShiftsPanel, AppointmentCard).
+59. Click appointment → pre-trip / vehicle check screen. "Start lesson" → "Mark complete". Focus "Lane changes and merging".
+60. `/instructor` no longer shows it under upcoming; `/instructor/past` does.
 
 ---
 
-## Phase 13 — Owner reports and integrations
+## Phase 13 — Owner reports
 
 **Setup:** signed in as owner.
 
-61. `/admin/audit` shows recent events: payment.succeeded, lesson scheduling, lesson completion.
-62. `/admin/payments` lists the one payment, status = succeeded, $699.00.
-63. `/admin/payroll` opens. A new pay period exists for the instructor. Open it — the past appointment from Phase 12 appears as a payable line at whatever rate the program package paid.
-64. `/admin/fees` opens — fees policy editable.
-65. `/admin/settings` — confirm **Quiz access** card has the "Require 85% listen-completion" checkbox. **Lesson geolocation** card with policy picker. **Daily digest** card.
+61. `/admin/audit` lists recent events: payment.succeeded, lesson scheduling, lesson completion.
+62. `/admin/payments` — one payment, succeeded, $699.00.
+63. `/admin/payroll` → new pay period for Sam; the past appointment is a payable line at the program-package rate.
+64. `/admin/fees` — fee policy editable.
+65. `/admin/settings` — cards visible: Quiz access (85% listen-completion checkbox), Lesson geolocation, Daily digest.
 
 ---
 
-## Phase 14 — Translations top-up + cache hit
+## Phase 14 — Translations top-up + cross-school cache margin
 
-**Setup:** signed in as owner of the real school (skip if Stripe not wired).
+**Setup:** signed in as owner of the real school. Skip if Stripe not wired.
 
-66. `/admin/translations` → top up $5 via Stripe test card. Returns with `?topup=success`. Balance card now reads $5.00.
-67. Back to the lesson editor for "Reading traffic signs". Translation panel → pick **Soomaali · Somali** → click Translate $0.50.
-68. Expected: 200 response within 10 seconds, the Soomaali badge appears under "Translate this lesson" with an inline note "(Fresh from vendor — added to the platform cache.)". Balance now reads $4.50.
-69. Repeat for a second school (use a separate signup or a separate demo org). On that org, translate the same lesson into Somali — this time the response message is "(From cache — instant.)" and the cost is still $0.50 to the school (pure margin to us).
+66. `/admin/translations` → top up $5 via Stripe test card. Return URL has `?topup=success`. Balance card = $5.00.
+67. Lesson editor for "Reading traffic signs" → Translation panel → **Soomaali** → **Translate $0.50**.
+68. ≤10s, 200. Soomaali badge appears under "Translate this lesson" with note "(Fresh from vendor — added to the platform cache.)". Balance = $4.50.
+69. Repeat from a second school (separate signup or fresh demo org). Same lesson, same target → note reads "(From cache — instant.)". Still charges the school $0.50 (margin to platform).
 
 ---
 
 ## Phase 15 — Cross-cutting verifications
 
-70. **Sign shortcode rendering at scale.** `/me/learn` of any seeded org, click into 5 random lessons. Confirm each has its expected MUTCD signs inline (signs lessons show many; weather and impairment lessons show none).
-71. **Lang switcher persistence.** As student, swap language to Somali (after Phase 14 made it available). Navigate to a different lesson — Somali stays selected. Refresh — Somali stays selected.
-72. **Demo expiry.** Run `/demo/skip` → note the org id from the sidebar URL. After 24 hours (or by manually triggering `/api/internal/sweep-demos` if available), the org should be deleted. Cascades clean up all dependent rows.
-73. **404 handling.** `GET /this-route-does-not-exist` returns the directio 404 page, not the platform default.
-74. **Robots + sitemap.** `GET /robots.txt` is reachable. `GET /sitemap.xml` is reachable and lists at least the marketing routes.
-75. **Cookies.** Confirm `better-auth.session_token` is `HttpOnly`, `Secure`, scoped to `godirectio.com` (not `.godirectio.com` — since we 301 www to apex, subdomain leakage shouldn't be possible).
+70. **Shortcode rendering at scale.** `/me/learn` → click 5 random lessons. Signs lessons render many inline `<svg>` MUTCD elements; weather/impairment lessons render none. No raw `[[sign:` text in any lesson body.
+71. **Lang switcher persistence.** Student switches to Somali (after Phase 14 made it available). Navigate to another lesson → Somali stays selected. Refresh → Somali stays selected.
+72. **Demo expiry.** `/demo/skip` → note org id from sidebar. After 24 hours (or trigger `/api/internal/sweep-demos` if exposed) the org is deleted and dependent rows cascade out.
+73. **404 page.** `GET /this-route-does-not-exist` returns the directio 404 page (not the platform default).
+74. **Robots + sitemap.** `GET /robots.txt` reachable. `GET /sitemap.xml` reachable and lists at least the marketing routes.
+75. **Cookies.** `better-auth.session_token` is `HttpOnly`, `Secure`, scoped to `godirectio.com` (not `.godirectio.com`).
 
 ---
 
-## Phase 16 — Edge cases & failures we want to see fail gracefully
+## Phase 16 — Edge cases & graceful failures
 
-76. As student, click a lesson where the audio cache has been deliberately cleared (admin clicks "Regenerate audio" in editor — the underlying lesson_audio row gets a new hash). First student visit should trigger a render-on-miss and the page should NOT 500. It may take 5-10 seconds. Subsequent visits hit the cache.
-77. As owner, submit the lesson editor with an empty body. Server returns 400 "Title and body required." UI shows an inline error.
-78. As family, hit `/admin` directly — server should redirect away (owner-only). Demo orgs bypass; real orgs should redirect.
-79. Translation request when org credit balance is exactly 50¢: should succeed; remaining balance = 0. Next request returns 402.
-80. Voice-recorder permission denied: recorder shows "Mic access was blocked" message and does NOT crash the page.
+76. **Audio cache miss.** Owner clicks "Regenerate audio" in editor → `lesson_audio` row gets a new hash. First student visit triggers render-on-miss; page does not 500; paints in 5-10s. Subsequent visits hit the cache.
+77. **Editor validation.** Submit lesson editor with empty body → 400 "Title and body required."; inline error visible.
+78. **Role gating.** As family user, `GET /admin` directly → server redirects away. (Demo orgs bypass; real orgs redirect.)
+79. **Credit edge.** Translation when balance = $0.50, cost = $0.50 → succeeds, balance = $0. Next request returns 402.
+80. **Mic permission denied.** Voice recorder shows "Mic access was blocked" and page stays usable.
 
 ---
 
 ## Reporting
 
-Per phase: a one-line `PHASE N: PASS|FAIL — {brief}` summary, plus screenshots of the final state and any failure points written to `/tmp/test/phase-{n}/`. Top of the report: total pass / fail counts, total wall time, environment (commit SHA from `<meta name="version">` if present, browser version).
+Per phase: one line `PHASE N: PASS|FAIL — {brief}`. Screenshots at `/tmp/test/phase-{n}/`. Top of report: total pass/fail counts, wall time, environment (commit SHA from `<meta name="version">`, browser version).
+
+**Sentinel summary.** A separate section at the bottom of the report lists each `[SENTINEL #N]` check with PASS|FAIL. If any sentinel fails, the refactor for that audit finding regressed — link to the relevant code path in `docs/architecture-audit.md`.
 
 **Stop conditions:**
-- 5 consecutive HTTP 5xx — abort and report the failing route.
-- Stripe checkout returns anything non-200 with the test card — pause and report (could be real-key vs test-key mismatch).
-- Demo banner missing on any demo org page — likely seeder broke, abort phase and report.
+- 5 consecutive HTTP 5xx — abort, report failing route.
+- Stripe checkout non-200 with the test card — pause, report (could be test-key vs real-key mismatch).
+- Demo banner missing on any demo org page — likely seeder broke; abort phase and report.
 
-**Things explicitly out of scope** (don't try to test):
+**Out of scope:**
 - DMV / state agency electronic submission (Level 3 adapters — none wired live).
 - Real Stripe charges with real cards.
-- Real SMS or email delivery — Resend may or may not be configured.
+- Real SMS or email delivery.
 - DocuSign / waiver signing — not in current build.
-- Aceable / ADTSEA AAA content import — UI exists but the BYO-license click-through isn't tested here.
+- Aceable / ADTSEA BYO-license click-through.
