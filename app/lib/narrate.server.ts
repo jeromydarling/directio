@@ -50,12 +50,89 @@ export async function findCachedNarration(
 }
 
 /**
- * Render TTS via the Workers AI binding. Returns the audio bytes as
- * a Uint8Array. Caller is responsible for storing them in R2 and
- * registering the cache row.
- *
- * Throws if the model returns a non-2xx response. Cloudflare bills
- * $0.03 per 1k characters of input.
+ * Aura-2 caps input at 2000 chars per call. Anything longer needs to
+ * be chunked. We split on paragraph breaks and merge consecutive
+ * paragraphs greedily up to MAX_CHUNK_CHARS, then render each chunk
+ * and concatenate the MP3 byte streams. Concat works because every
+ * chunk uses identical codec params (mp3, 24kHz, mono, 48kbps).
+ */
+const MAX_CHUNK_CHARS = 1800; // a little under 2000 for margin
+
+function chunkScript(text: string): string[] {
+  const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
+  const chunks: string[] = [];
+  let buf = "";
+  const flush = () => {
+    if (buf.length > 0) {
+      chunks.push(buf.trim());
+      buf = "";
+    }
+  };
+  for (const p of paragraphs) {
+    // If this paragraph alone is too long, split by sentence.
+    if (p.length > MAX_CHUNK_CHARS) {
+      flush();
+      const sentences = p.split(/(?<=[.!?])\s+/);
+      let sbuf = "";
+      for (const s of sentences) {
+        if ((sbuf + " " + s).length > MAX_CHUNK_CHARS) {
+          if (sbuf) chunks.push(sbuf.trim());
+          sbuf = s;
+        } else {
+          sbuf = sbuf ? sbuf + " " + s : s;
+        }
+      }
+      if (sbuf) chunks.push(sbuf.trim());
+      continue;
+    }
+    // Otherwise, try to append to the running buffer.
+    if ((buf + "\n\n" + p).length > MAX_CHUNK_CHARS) {
+      flush();
+      buf = p;
+    } else {
+      buf = buf ? buf + "\n\n" + p : p;
+    }
+  }
+  flush();
+  return chunks;
+}
+
+async function renderChunk(
+  env: Env,
+  args: { text: string; speaker: string },
+): Promise<Uint8Array> {
+  const stream = (await env.AI.run(
+    MODEL as never,
+    {
+      text: args.text,
+      speaker: args.speaker,
+      encoding: "mp3",
+    } as never,
+  )) as ReadableStream<Uint8Array>;
+  const reader = stream.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      parts.push(value);
+      total += value.byteLength;
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Render TTS via the Workers AI binding. Auto-chunks anything over
+ * Aura-2's 2000-char input cap, concatenates the resulting MP3
+ * streams. Cloudflare bills $0.03 per 1k characters of input.
  */
 export async function renderAura(
   env: Env,
@@ -65,32 +142,29 @@ export async function renderAura(
     throw new Error("Workers AI binding (AI) not configured");
   }
   const speaker = args.speaker ?? DEFAULT_VOICE;
-  // The binding returns a ReadableStream of audio bytes; collect to
-  // a single Uint8Array.
-  const stream = (await env.AI.run(
-    MODEL as never,
-    {
-      text: args.text,
-      speaker,
-      encoding: "mp3",
-    } as never,
-  )) as ReadableStream<Uint8Array>;
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks = chunkScript(args.text);
+  if (chunks.length === 0) return new Uint8Array(0);
+
+  // Render each chunk in serial. We could parallelize, but Aura-2 is
+  // fast (sub-second per chunk) and Workers' subrequest budget +
+  // per-isolate concurrency limits mean serial is safer.
+  const renders: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      total += value.byteLength;
-    }
+  for (const chunk of chunks) {
+    const audio = await renderChunk(env, { text: chunk, speaker });
+    renders.push(audio);
+    total += audio.byteLength;
   }
+  if (renders.length === 1) return renders[0];
+
+  // Concat: MP3 streams with identical codec params can be joined
+  // by raw byte concatenation. Aura-2 always returns 48kbps mono
+  // 24kHz so this is safe.
   const out = new Uint8Array(total);
   let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
+  for (const r of renders) {
+    out.set(r, offset);
+    offset += r.byteLength;
   }
   return out;
 }
