@@ -1,14 +1,18 @@
-import { Form, Link, useNavigation } from "react-router";
+import { useNavigation } from "react-router";
 import { marked } from "marked";
 import type { Route } from "./+types/me.learn.$lessonId";
 import { findStudentForUser, requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
-import { youTubeEmbedUrl } from "~/lib/youtube";
-import { Card, LinkButton, Button } from "~/components/ui";
-import { LANG_LABELS } from "~/lib/lang-labels";
-import { registerLessonShortcodes, renderLessonHtml } from "~/lib/lesson-shortcodes";
-import { TrackedAudioPlayer } from "~/components/tracked-audio-player";
+import { registerLessonShortcodes } from "~/lib/lesson-shortcodes";
 import { resolveLessonAudioUrl } from "~/lib/narrate.server";
+import {
+  LessonAssetGrid,
+  LessonAudioBlock,
+  LessonBody,
+  LessonHeader,
+  LessonNav,
+  LessonQuiz,
+} from "~/components/lesson-view";
 
 // Wire up the [[sign:NAME]] marked extension once at module load. The
 // helper is idempotent, but doing it here keeps the loader hot path
@@ -480,7 +484,11 @@ export async function action({
   };
 }
 
-export default function MeLearnLesson({ loaderData, actionData }: Route.ComponentProps) {
+
+export default function MeLearnLesson({
+  loaderData,
+  actionData,
+}: Route.ComponentProps) {
   const {
     lesson,
     bodyHtml,
@@ -498,315 +506,46 @@ export default function MeLearnLesson({ loaderData, actionData }: Route.Componen
   } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
-  const results = actionData?.results;
-  const resultByQuestion = new Map(results?.map((r) => [r.questionId, r]));
+
+  const hasAudio = Boolean(lesson.audioUrl);
+  const audioLocked =
+    audioGateEnabled && !audioCompletedAt && hasAudio;
 
   return (
     <div className="flex flex-col gap-8">
-      <header>
-        <Link
-          to="/me/learn"
-          className="text-sm text-ink-500 transition hover:text-ink-900 dark:text-ink-400 dark:hover:text-ink-50"
-        >
-          ← All lessons
-        </Link>
-        <p className="mt-3 text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
-          {lesson.moduleTitle}
-        </p>
-        <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
-          <h1 className="font-display text-4xl font-semibold tracking-tight text-ink-900 dark:text-ink-50">
-            {lesson.title}
-          </h1>
-          {availableLangs.length > 0 && (
-            <StudentLangSwitcher
-              available={availableLangs}
-              active={activeLang}
-            />
-          )}
-        </div>
-        <p className="mt-2 text-sm text-ink-500 dark:text-ink-400">
-          {lesson.estimatedSeatMinutes} min
-        </p>
-        {isMachineTranslated && (
-          <p className="mt-3 rounded-lg border border-amber-200/60 bg-amber-50/40 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
-            Machine-translated. If anything seems wrong, ask your school.
-          </p>
-        )}
-      </header>
+      <LessonHeader
+        moduleTitle={lesson.moduleTitle}
+        title={lesson.title}
+        estimatedSeatMinutes={lesson.estimatedSeatMinutes}
+        availableLangs={availableLangs}
+        activeLang={activeLang}
+        isMachineTranslated={isMachineTranslated}
+      />
 
       {lesson.audioUrl && (
-        <Card>
-          <p className="mb-2 text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">
-            Listen along
-          </p>
-          <TrackedAudioPlayer
-            src={lesson.audioUrl}
-            lessonId={lesson.id}
-            estimatedSeatMinutes={lesson.estimatedSeatMinutes}
-            initialTotalSeconds={audioTotalSeconds}
-          />
-        </Card>
+        <LessonAudioBlock
+          audioUrl={lesson.audioUrl}
+          lessonId={lesson.id}
+          estimatedSeatMinutes={lesson.estimatedSeatMinutes}
+          initialTotalSeconds={audioTotalSeconds}
+        />
       )}
 
-      <article className="prose prose-ink max-w-none text-ink-800 dark:text-ink-100">
-        {renderLessonHtml(bodyHtml)}
-      </article>
+      <LessonBody bodyHtml={bodyHtml} />
 
-      {assets.length > 0 && (
-        <section className="flex flex-col gap-5">
-          {assets.map((a) => {
-            if (a.videoId) {
-              return (
-                <figure key={a.id} className="flex flex-col gap-2">
-                  <div className="aspect-video w-full overflow-hidden rounded-2xl border border-ink-200 bg-black dark:border-ink-800">
-                    <iframe
-                      src={youTubeEmbedUrl(a.videoId)}
-                      className="h-full w-full"
-                      loading="lazy"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                      title={a.caption ?? "Lesson video"}
-                    />
-                  </div>
-                  {a.caption && (
-                    <figcaption className="text-sm text-ink-500 dark:text-ink-400">
-                      {a.caption}
-                    </figcaption>
-                  )}
-                </figure>
-              );
-            }
-            if (a.kind === "image") {
-              return (
-                <figure key={a.id} className="flex flex-col gap-2">
-                  <img
-                    src={a.url}
-                    alt={a.caption ?? "Lesson image"}
-                    className="w-full rounded-2xl border border-ink-200 object-contain dark:border-ink-800"
-                  />
-                  {a.caption && (
-                    <figcaption className="text-sm text-ink-500 dark:text-ink-400">
-                      {a.caption}
-                    </figcaption>
-                  )}
-                </figure>
-              );
-            }
-            if (a.kind === "pdf") {
-              return (
-                <figure key={a.id} className="flex flex-col gap-2">
-                  <embed
-                    src={a.url}
-                    type="application/pdf"
-                    className="h-[36rem] w-full rounded-2xl border border-ink-200 dark:border-ink-800"
-                  />
-                  <figcaption className="flex items-center justify-between text-sm text-ink-500 dark:text-ink-400">
-                    <span>{a.caption ?? "Lesson PDF"}</span>
-                    <a
-                      href={a.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-brand-600 hover:underline dark:text-brand-300"
-                    >
-                      Open PDF →
-                    </a>
-                  </figcaption>
-                </figure>
-              );
-            }
-            return (
-              <a
-                key={a.id}
-                href={a.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block rounded-2xl border border-ink-200 bg-white/70 p-4 text-sm text-ink-700 transition hover:border-brand-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200"
-              >
-                {a.caption ?? a.url}
-              </a>
-            );
-          })}
-        </section>
+      <LessonAssetGrid assets={assets} />
+
+      {quiz && questions.length > 0 && (
+        <LessonQuiz
+          quizTitle={quiz.title}
+          questions={questions}
+          actionData={actionData ?? null}
+          submitting={submitting}
+          audioLocked={audioLocked}
+        />
       )}
 
-      {quiz && questions.length > 0 && audioGateEnabled && !audioCompletedAt && lesson.audioUrl && (
-        <section className="mt-6 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/40 p-5 dark:border-amber-700/40 dark:bg-amber-950/30">
-          <p className="text-xs uppercase tracking-wider text-amber-700 dark:text-amber-300">
-            Quiz locked
-          </p>
-          <h2 className="font-display text-xl font-semibold text-amber-900 dark:text-amber-100">
-            Listen to the lesson first
-          </h2>
-          <p className="text-sm text-amber-800 dark:text-amber-200">
-            Your school requires students to listen to at least 85% of this
-            lesson's audio before the quiz unlocks. Scrub the player above to
-            the start and let it play — speed-running and tab-switching don't
-            earn credit.
-          </p>
-        </section>
-      )}
-
-      {quiz && questions.length > 0 && (!audioGateEnabled || audioCompletedAt || !lesson.audioUrl) && (
-        <section className="mt-6 flex flex-col gap-4 border-t border-ink-200/60 pt-8 dark:border-ink-800/60">
-          <header>
-            <p className="text-xs uppercase tracking-wider text-brand-600 dark:text-brand-300">
-              Check your understanding
-            </p>
-            <h2 className="mt-1 font-display text-2xl font-semibold text-ink-900 dark:text-ink-50">
-              {quiz.title}
-            </h2>
-            {actionData && (
-              <p
-                className={
-                  actionData.passed
-                    ? "mt-2 text-sm font-medium text-emerald-600 dark:text-emerald-400"
-                    : "mt-2 text-sm font-medium text-amber-600 dark:text-amber-400"
-                }
-              >
-                You scored {actionData.score}% · {actionData.passed ? "passed" : `need ${actionData.passingScore}% to pass`}
-              </p>
-            )}
-          </header>
-
-          <Form method="post" className="flex flex-col gap-6">
-            {questions.map((q, idx) => {
-              const r = resultByQuestion.get(q.id);
-              return (
-                <Card key={q.id}>
-                  <p className="text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">
-                    Question {idx + 1}
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-ink-900 dark:text-ink-50">
-                    {q.prompt}
-                  </p>
-                  <ul className="mt-3 flex flex-col gap-2">
-                    {q.choices.map((choice, i) => {
-                      const wasChosen = r?.chosen === i;
-                      const isCorrect = r && i === r.correct;
-                      const isWrongChoice = r && wasChosen && !r.isCorrect;
-                      return (
-                        <li key={i}>
-                          <label
-                            className={[
-                              "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition",
-                              r
-                                ? isCorrect
-                                  ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"
-                                  : isWrongChoice
-                                    ? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30"
-                                    : "border-ink-200 dark:border-ink-800"
-                                : "border-ink-200 hover:border-brand-300 dark:border-ink-800 dark:hover:border-brand-700",
-                            ].join(" ")}
-                          >
-                            <input
-                              type="radio"
-                              name={`q_${q.id}`}
-                              value={i}
-                              defaultChecked={wasChosen}
-                              className="mt-1"
-                              disabled={Boolean(r)}
-                            />
-                            <span className="text-sm text-ink-900 dark:text-ink-50">{choice}</span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {r && r.explanation && (
-                    <p className="mt-3 rounded-lg bg-ink-50 px-3 py-2 text-sm text-ink-700 dark:bg-ink-900/50 dark:text-ink-200">
-                      <strong className="text-ink-900 dark:text-ink-50">Why: </strong>
-                      {r.explanation}
-                    </p>
-                  )}
-                </Card>
-              );
-            })}
-
-            {!actionData && (
-              <div>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? "Grading…" : "Submit answers"}
-                </Button>
-              </div>
-            )}
-            {actionData && !actionData.passed && (
-              <div>
-                <Button type="submit" disabled={submitting} variant="secondary">
-                  Try again
-                </Button>
-              </div>
-            )}
-          </Form>
-        </section>
-      )}
-
-      <nav className="mt-6 flex items-center justify-between border-t border-ink-200/60 pt-6 dark:border-ink-800/60">
-        {prev ? (
-          <Link
-            to={`/me/learn/${prev.id}`}
-            className="text-sm text-ink-600 transition hover:text-ink-900 dark:text-ink-300 dark:hover:text-ink-50"
-          >
-            ← {prev.title}
-          </Link>
-        ) : (
-          <span />
-        )}
-        {next ? (
-          <LinkButton to={`/me/learn/${next.id}`}>{next.title} →</LinkButton>
-        ) : (
-          <span />
-        )}
-      </nav>
+      <LessonNav prev={prev} next={next} />
     </div>
-  );
-}
-
-function StudentLangSwitcher({
-  available,
-  active,
-}: {
-  available: string[];
-  active: string | null;
-}) {
-  // Native chooser. On change, POST the set-lang intent to persist
-  // the student's preferredLang server-side, then reload with the new
-  // ?lang= so the swap happens server-rendered.
-  return (
-    <Form method="post" reloadDocument className="flex items-center gap-2">
-      <input type="hidden" name="intent" value="set-lang" />
-      <label className="sr-only" htmlFor="lang-picker">
-        Read in
-      </label>
-      <select
-        id="lang-picker"
-        name="lang"
-        defaultValue={active ?? ""}
-        onChange={(e) => {
-          // Submit the form so the server persists preferredLang, then
-          // navigate to the URL with the chosen query string so the
-          // loader picks it up.
-          const lang = e.currentTarget.value;
-          (e.currentTarget.form as HTMLFormElement).submit();
-          const url = new URL(window.location.href);
-          if (lang) url.searchParams.set("lang", lang);
-          else url.searchParams.delete("lang");
-          // The form submit will reloadDocument; we set the search
-          // here so the redirect lands at the right URL.
-          window.history.replaceState({}, "", url.toString());
-        }}
-        className="rounded-full border border-ink-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-ink-700 dark:border-ink-700 dark:bg-ink-900/60 dark:text-ink-200"
-      >
-        <option value="">English</option>
-        {available.map((l) => {
-          const label = LANG_LABELS[l];
-          return (
-            <option key={l} value={l}>
-              {label?.native ?? l.toUpperCase()}
-              {label?.english ? ` · ${label.english}` : ""}
-            </option>
-          );
-        })}
-      </select>
-    </Form>
   );
 }
