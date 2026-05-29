@@ -18,6 +18,7 @@ interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_WEBHOOK_SECRET_CONNECT?: string;
 
   RESEND_API_KEY?: string;
 

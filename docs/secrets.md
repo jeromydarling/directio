@@ -34,7 +34,14 @@ npx wrangler secret put BETTER_AUTH_SECRET
 # Stripe — payments, payment plans, translation top-ups.
 npx wrangler secret put STRIPE_SECRET_KEY
 npx wrangler secret put STRIPE_PUBLISHABLE_KEY
-npx wrangler secret put STRIPE_WEBHOOK_SECRET
+# Stripe v2 splits webhook events across two destinations:
+#   * "Your account" stream — checkout.*, payment_intent.*, invoice.*
+#   * "Connected accounts" stream — account.updated (and any other
+#     connected-account-scoped events we add later)
+# Create both destinations pointing at /api/stripe/webhook in the
+# Stripe Dashboard, and set each signing secret here:
+npx wrangler secret put STRIPE_WEBHOOK_SECRET          # platform destination
+npx wrangler secret put STRIPE_WEBHOOK_SECRET_CONNECT  # connected-accounts destination
 
 # Mapbox — public token used by the school-finder map. "Public" in
 # Mapbox parlance still means do-not-commit; tokens are URL-scoped and

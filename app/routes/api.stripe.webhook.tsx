@@ -17,15 +17,29 @@ import { appendLedgerEntry } from "~/lib/translation.server";
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const env = context.cloudflare.env;
-  const secret = env.STRIPE_WEBHOOK_SECRET;
-  if (!secret || secret === "set-in-keys-pass") {
+  const platformSecret = env.STRIPE_WEBHOOK_SECRET;
+  const connectSecret = env.STRIPE_WEBHOOK_SECRET_CONNECT;
+  const candidates = [platformSecret, connectSecret].filter(
+    (s): s is string => Boolean(s) && s !== "set-in-keys-pass",
+  );
+  if (candidates.length === 0) {
     return new Response("Stripe webhook secret not configured", { status: 503 });
   }
   const sig = request.headers.get("stripe-signature");
   if (!sig) return new Response("Missing stripe-signature", { status: 400 });
 
   const raw = await request.text();
-  const verified = await verifyStripeSignature(raw, sig, secret);
+  // Stripe v2 splits "Your account" events and "Connected accounts" events
+  // across separate destinations, each with its own signing secret. The same
+  // worker endpoint receives both streams; try each known secret and accept
+  // the first that verifies.
+  let verified = false;
+  for (const s of candidates) {
+    if (await verifyStripeSignature(raw, sig, s)) {
+      verified = true;
+      break;
+    }
+  }
   if (!verified) return new Response("Invalid signature", { status: 400 });
 
   let event: { id: string; type: string; data: { object: Record<string, unknown> } };
