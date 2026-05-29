@@ -24,9 +24,16 @@ export class StripeNotConfiguredError extends Error {
   }
 }
 
+function isStripeSecretShape(key: string): boolean {
+  // Accept full secret keys (sk_live_, sk_test_) and restricted keys
+  // (rk_live_, rk_test_). Stripe also has whsec_ for webhooks but those
+  // never reach here.
+  return key.startsWith("sk_") || key.startsWith("rk_");
+}
+
 function requireKey(env: Env): string {
   const key: string = env.STRIPE_SECRET_KEY ?? "";
-  if (!key || key === "set-in-keys-pass" || !key.startsWith("sk_")) {
+  if (!key || key === "set-in-keys-pass" || !isStripeSecretShape(key)) {
     throw new StripeNotConfiguredError();
   }
   return key;
@@ -34,7 +41,7 @@ function requireKey(env: Env): string {
 
 export function isStripeConfigured(env: Env): boolean {
   const key: string = env.STRIPE_SECRET_KEY ?? "";
-  return Boolean(key) && key !== "set-in-keys-pass" && key.startsWith("sk_");
+  return Boolean(key) && key !== "set-in-keys-pass" && isStripeSecretShape(key);
 }
 
 async function stripeRequest(
