@@ -6,9 +6,14 @@ import { newId } from "~/lib/ids";
 import { youTubeEmbedUrl } from "~/lib/youtube";
 import { Card, LinkButton, Button } from "~/components/ui";
 import { LANG_LABELS } from "~/lib/lang-labels";
-import { renderLessonHtml } from "~/lib/lesson-shortcodes";
+import { registerLessonShortcodes, renderLessonHtml } from "~/lib/lesson-shortcodes";
 import { TrackedAudioPlayer } from "~/components/tracked-audio-player";
 import { resolveLessonAudioUrl } from "~/lib/narrate.server";
+
+// Wire up the [[sign:NAME]] marked extension once at module load. The
+// helper is idempotent, but doing it here keeps the loader hot path
+// from re-running the registration check on every request.
+registerLessonShortcodes(marked);
 
 type LessonRow = {
   id: string;
