@@ -27,19 +27,34 @@ const requestHandler = createRequestHandler(
 const PLATFORM_HOSTS = new Set<string>([
   "localhost",
   "127.0.0.1",
-  // Primary public domain
-  "getdirectio.com",
-  "www.getdirectio.com",
-  // Legacy / fallback domain — kept while DNS migration settles
+  // Production apex + www (www 301s to apex; see redirectWwwToApex
+  // below — but it has to be in this set first so the rewrite logic
+  // doesn't treat www as a school custom domain on its way through).
   "godirectio.com",
   "www.godirectio.com",
-  // Workers.dev default (still resolves until we remove it)
+  // Workers.dev default — still resolves; useful for debugging.
   "directio.jer-f84.workers.dev",
   // CNAME target for school custom-domain rewrites — bare-host hits
   // go to platform; specific school slugs hit the rewrite path.
   "sites.godirectio.com",
-  "sites.getdirectio.com",
 ]);
+
+/**
+ * Redirect www.godirectio.com → godirectio.com (301). Cleaner for SEO
+ * — Google treats apex as canonical and a permanent redirect collapses
+ * link equity. Also avoids cookies-on-subdomain weirdness with
+ * Better Auth.
+ */
+function redirectWwwToApex(request: Request): Response | null {
+  const url = new URL(request.url);
+  const host = url.host.toLowerCase();
+  if (host === "www.godirectio.com") {
+    const target = new URL(request.url);
+    target.host = "godirectio.com";
+    return Response.redirect(target.toString(), 301);
+  }
+  return null;
+}
 
 function isPlatformHost(host: string): boolean {
   const lower = host.toLowerCase().split(":")[0];
@@ -92,6 +107,11 @@ function shouldPassThrough(pathname: string): boolean {
 
 export default {
   async fetch(request, env, ctx) {
+    // Apex canonicalization first — before any DB work — so a www hit
+    // is one cheap redirect, not a full render that then 301s.
+    const wwwRedirect = redirectWwwToApex(request);
+    if (wwwRedirect) return wwwRedirect;
+
     const url = new URL(request.url);
     const host = request.headers.get("Host") ?? url.host;
     const schoolSlug = await resolveSchoolForHost(env, host);

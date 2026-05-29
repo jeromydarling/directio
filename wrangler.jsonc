@@ -9,15 +9,10 @@
     "enabled": true
   },
 
-  // Routes for getdirectio.com — UNCOMMENT once the zone is added to
-  // the Cloudflare account (Dashboard → Add a Site → getdirectio.com
-  // → set nameservers at registrar). Until then, `wrangler deploy`
-  // fails because the zone doesn't resolve.
-  //
-  // "routes": [
-  //   { "pattern": "getdirectio.com/*", "zone_name": "getdirectio.com" },
-  //   { "pattern": "www.getdirectio.com/*", "zone_name": "getdirectio.com" }
-  // ],
+  "routes": [
+    { "pattern": "godirectio.com/*", "zone_name": "godirectio.com" },
+    { "pattern": "www.godirectio.com/*", "zone_name": "godirectio.com" }
+  ],
 
   "triggers": {
     "crons": [
@@ -87,7 +82,7 @@
 
   "vars": {
     "APP_ENV": "production",
-    "APP_URL": "https://getdirectio.com",
+    "APP_URL": "https://godirectio.com",
     "BETTER_AUTH_SECRET": "set-via-dev-vars-or-secret",
     "STRIPE_SECRET_KEY": "set-in-keys-pass",
     "STRIPE_PUBLISHABLE_KEY": "set-in-keys-pass",
@@ -97,7 +92,7 @@
     "ELEVENLABS_API_KEY": "set-in-keys-pass",
     "ANTHROPIC_API_KEY": "set-in-keys-pass",
     "RESEND_API_KEY": "set-in-keys-pass",
-    "RESEND_FROM": "directio <no-reply@getdirectio.com>",
+    "RESEND_FROM": "directio <no-reply@godirectio.com>",
     "AI_GATEWAY_ACCOUNT_ID": "f84f7181c051be0040e972dcad48e697",
     "AI_GATEWAY_NAME": "directio-llm",
     "SAAS_ZONE_ID": "be8ec303d18c69cc8e8c1086856fe3a1"
