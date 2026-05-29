@@ -266,13 +266,13 @@ export async function loader({
   }
 
   // Resolve narration audio: owner-recorded wins, then shared Aura-2
-  // cache, then render on miss (paying schools only — demo orgs skip
-  // rendering so we don't pay Aura-2 costs for free demos). The
-  // student player handles the null case by showing the lesson
-  // without a "Listen along" card.
+  // cache, then render on miss. Demo orgs render too — silent
+  // lessons are a terrible sales pitch, and the shared cache means
+  // each (lesson, voice) only costs us once across every demo and
+  // every paying school.
   const audioUrl = await resolveLessonAudioUrl(context.cloudflare.env, {
     schoolLessonId: lesson.id,
-    renderOnMiss: !tenant.organization.isDemo,
+    renderOnMiss: true,
   });
   const lessonWithAudio = { ...lesson, title: displayedTitle, audioUrl };
 
