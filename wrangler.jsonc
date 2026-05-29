@@ -84,18 +84,14 @@
     }
   ],
 
+  // Secrets (BETTER_AUTH_SECRET, STRIPE_*, MAPBOX_PUBLIC_TOKEN,
+  // PERPLEXITY_API_KEY, ELEVENLABS_API_KEY, ANTHROPIC_API_KEY,
+  // RESEND_API_KEY) are NOT declared here. They are managed via
+  // `wrangler secret put` in production and `.dev.vars` for local
+  // dev. See `docs/secrets.md` for the full list and commands.
   "vars": {
     "APP_ENV": "production",
     "APP_URL": "https://godirectio.com",
-    "BETTER_AUTH_SECRET": "set-via-dev-vars-or-secret",
-    "STRIPE_SECRET_KEY": "set-in-keys-pass",
-    "STRIPE_PUBLISHABLE_KEY": "set-in-keys-pass",
-    "STRIPE_WEBHOOK_SECRET": "set-in-keys-pass",
-    "MAPBOX_PUBLIC_TOKEN": "set-in-keys-pass",
-    "PERPLEXITY_API_KEY": "set-in-keys-pass",
-    "ELEVENLABS_API_KEY": "set-in-keys-pass",
-    "ANTHROPIC_API_KEY": "set-in-keys-pass",
-    "RESEND_API_KEY": "set-in-keys-pass",
     "RESEND_FROM": "directio <no-reply@godirectio.com>",
     "AI_GATEWAY_ACCOUNT_ID": "f84f7181c051be0040e972dcad48e697",
     "AI_GATEWAY_NAME": "directio-llm",

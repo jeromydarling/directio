@@ -8,6 +8,7 @@ import {
   type WebsiteIntake,
   type WebsiteSections,
 } from "~/lib/website-generator.server";
+import { invalidateHostCache } from "~/lib/host-resolution.server";
 import {
   createCustomHostname,
   deleteCustomHostname,
@@ -259,10 +260,10 @@ export async function action({ request, context }: Route.ActionArgs) {
     // Clear path: remove the domain. Also delete any SaaS hostname.
     if (!domain) {
       const existing = await env.DB.prepare(
-        "SELECT saasHostnameId FROM school_website WHERE organizationId = ?",
+        "SELECT saasHostnameId, customDomain FROM school_website WHERE organizationId = ?",
       )
         .bind(orgId)
-        .first<{ saasHostnameId: string | null }>();
+        .first<{ saasHostnameId: string | null; customDomain: string | null }>();
       if (existing?.saasHostnameId && isSaasConfigured(env)) {
         try {
           await deleteCustomHostname(env, existing.saasHostnameId);
@@ -281,6 +282,9 @@ export async function action({ request, context }: Route.ActionArgs) {
       )
         .bind(now, orgId)
         .run();
+      if (existing?.customDomain) {
+        await invalidateHostCache(env, existing.customDomain);
+      }
       return redirect("/admin/website");
     }
 
@@ -321,6 +325,15 @@ export async function action({ request, context }: Route.ActionArgs) {
       fallbackToken = "directio-verify-" + newId().slice(0, 16).toLowerCase();
     }
 
+    // Capture the prior domain so we can invalidate its cache entry
+    // — otherwise a rename leaves the old host pointing at this school
+    // in KV for up to 5 minutes.
+    const priorRow = await env.DB.prepare(
+      "SELECT customDomain FROM school_website WHERE organizationId = ?",
+    )
+      .bind(orgId)
+      .first<{ customDomain: string | null }>();
+
     await env.DB.prepare(
       `UPDATE school_website
           SET customDomain = ?,
@@ -344,6 +357,14 @@ export async function action({ request, context }: Route.ActionArgs) {
         orgId,
       )
       .run();
+    if (priorRow?.customDomain && priorRow.customDomain !== domain) {
+      await invalidateHostCache(env, priorRow.customDomain);
+    }
+    // New domain starts unverified, so resolveSchoolForHost will return
+    // null until verification — but blow away any negative cache entry
+    // so the next request after verification picks up the new mapping
+    // immediately.
+    await invalidateHostCache(env, domain);
     await recordAudit(env, {
       organizationId: orgId,
       actorUserId: tenant.user.id,
@@ -382,6 +403,11 @@ export async function action({ request, context }: Route.ActionArgs) {
           orgId,
         )
         .run();
+      // customDomainVerifiedAt can flip in either direction here, so
+      // any cached resolution for this host is potentially stale.
+      if (row.customDomain) {
+        await invalidateHostCache(env, row.customDomain);
+      }
       if (live) {
         await recordAudit(env, {
           organizationId: orgId,
@@ -426,6 +452,9 @@ export async function action({ request, context }: Route.ActionArgs) {
         )
           .bind(now, now, orgId)
           .run();
+        // Verification just flipped null → now; the cached negative
+        // entry for this host would block traffic until TTL otherwise.
+        await invalidateHostCache(env, row.customDomain);
         await recordAudit(env, {
           organizationId: orgId,
           actorUserId: tenant.user.id,

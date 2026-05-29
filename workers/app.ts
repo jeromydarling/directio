@@ -2,6 +2,11 @@ import { createRequestHandler } from "react-router";
 import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
 import { sendDailyDigests } from "../app/lib/daily-digest.server";
 import { sweepExpiredDemos } from "../app/lib/demo-seeder.server";
+import {
+  redirectWwwToApex,
+  resolveSchoolForHost,
+  shouldPassThrough,
+} from "../app/lib/host-resolution.server";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
 
@@ -21,89 +26,6 @@ const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
   import.meta.env.MODE
 );
-
-// Hosts that should always serve the directio platform itself, never a
-// school's custom-domain rewrite. Add new platform hosts here.
-const PLATFORM_HOSTS = new Set<string>([
-  "localhost",
-  "127.0.0.1",
-  // Production apex + www (www 301s to apex; see redirectWwwToApex
-  // below — but it has to be in this set first so the rewrite logic
-  // doesn't treat www as a school custom domain on its way through).
-  "godirectio.com",
-  "www.godirectio.com",
-  // Workers.dev default — still resolves; useful for debugging.
-  "directio.jer-f84.workers.dev",
-  // CNAME target for school custom-domain rewrites — bare-host hits
-  // go to platform; specific school slugs hit the rewrite path.
-  "sites.godirectio.com",
-]);
-
-/**
- * Redirect www.godirectio.com → godirectio.com (301). Cleaner for SEO
- * — Google treats apex as canonical and a permanent redirect collapses
- * link equity. Also avoids cookies-on-subdomain weirdness with
- * Better Auth.
- */
-function redirectWwwToApex(request: Request): Response | null {
-  const url = new URL(request.url);
-  const host = url.host.toLowerCase();
-  if (host === "www.godirectio.com") {
-    const target = new URL(request.url);
-    target.host = "godirectio.com";
-    return Response.redirect(target.toString(), 301);
-  }
-  return null;
-}
-
-function isPlatformHost(host: string): boolean {
-  const lower = host.toLowerCase().split(":")[0];
-  if (PLATFORM_HOSTS.has(lower)) return true;
-  if (lower.endsWith(".workers.dev")) return true;
-  return false;
-}
-
-/**
- * If the request is coming in on a school's verified custom domain
- * (CNAMEd to sites.godirectio.com), rewrite the URL so React Router
- * routes it to the school's public marketing page. We pass-through
- * /api/, /assets/, /admin/ etc. unchanged so the school's own
- * checkout, enrollment, and signed-asset routes keep working.
- */
-async function resolveSchoolForHost(env: Env, host: string): Promise<string | null> {
-  const lower = host.toLowerCase().split(":")[0];
-  if (isPlatformHost(lower)) return null;
-  const row = await env.DB.prepare(
-    `SELECT o.publicSlug FROM school_website sw
-       JOIN organization o ON o.id = sw.organizationId
-       WHERE sw.customDomain = ? AND sw.customDomainVerifiedAt IS NOT NULL
-         AND o.publicPublishedAt IS NOT NULL
-       LIMIT 1`,
-  )
-    .bind(lower)
-    .first<{ publicSlug: string }>();
-  return row?.publicSlug ?? null;
-}
-
-const PASSTHROUGH_PREFIXES = [
-  "/api/",
-  "/assets/",
-  "/admin",
-  "/instructor",
-  "/family",
-  "/me",
-  "/login",
-  "/signup",
-  "/logout",
-  "/onboarding",
-  "/sitemap.xml",
-  "/robots.txt",
-  "/.well-known/",
-];
-
-function shouldPassThrough(pathname: string): boolean {
-  return PASSTHROUGH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
-}
 
 export default {
   async fetch(request, env, ctx) {
