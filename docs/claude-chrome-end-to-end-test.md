@@ -3,7 +3,7 @@
 **Target:** `https://godirectio.com`
 **Runner:** Claude Chrome (browser agent), unattended.
 **Goal:** exercise every shipped surface, from marketing site → demo → real signup → first family enrollment → student consuming a lesson.
-**Pass condition:** each numbered step lands on the expected URL and DOM. Failures save a screenshot to `/tmp/fail-{step}.png` plus a one-line reason in the report.
+**Pass condition:** each numbered step lands on the expected URL and DOM. Failures get a one-line reason captured in memory for the final report. **No screenshots, no filesystem writes** — Comet's screenshot tooling is unreliable. Keep the run in browser state + chat state only.
 
 **Architecture context (read once before starting).** The codebase was refactored in May 2026 (see `docs/architecture-audit.md`). Behavior is unchanged but several "regression sentinels" below verify that the refactor held. These are marked `[SENTINEL #N]` referencing the audit finding.
 
@@ -207,14 +207,44 @@ Phases are independently restartable — if Phase 4 fails, restart at Phase 4's 
 
 ## Reporting
 
-Per phase: one line `PHASE N: PASS|FAIL — {brief}`. Screenshots at `/tmp/test/phase-{n}/`. Top of report: total pass/fail counts, wall time, environment (commit SHA from `<meta name="version">`, browser version).
+**No file writes. No screenshots.** Hold the run report in chat state and post it as the final reply when the run completes (or aborts).
 
-**Sentinel summary.** A separate section at the bottom of the report lists each `[SENTINEL #N]` check with PASS|FAIL. If any sentinel fails, the refactor for that audit finding regressed — link to the relevant code path in `docs/architecture-audit.md`.
+Report shape:
 
-**Stop conditions:**
-- 5 consecutive HTTP 5xx — abort, report failing route.
-- Stripe checkout non-200 with the test card — pause, report (could be test-key vs real-key mismatch).
-- Demo banner missing on any demo org page — likely seeder broke; abort phase and report.
+```
+directio smoke — {wall time} — {browser version} — commit {sha if present}
+
+Totals: {pass}/{80} PASS, {fail} FAIL
+
+Per phase:
+  PHASE 0: PASS|FAIL — {brief}
+  PHASE 1: PASS|FAIL — {brief}
+  ...
+  PHASE 16: PASS|FAIL — {brief}
+
+Sentinels:
+  #1 admin-dashboard sections     PASS|FAIL
+  #1 cross-school audio cache hit PASS|FAIL
+  #2 single audio URL             PASS|FAIL
+  #3 lesson-editor components     PASS|FAIL
+  #3 lesson-view components       PASS|FAIL
+  #3 instructor-today components  PASS|FAIL
+  #4 static asset KV short-circuit PASS|FAIL
+  #5 sign shortcode + code-block immunity PASS|FAIL
+  #6 no secret leakage in errors  PASS|FAIL
+  #8 www→apex 301                 PASS|FAIL
+  #9 glossary literal preserved   PASS|FAIL
+
+Failures (if any), one per line:
+  STEP {n}: {url} — {one-line reason}
+```
+
+If any sentinel fails, the refactor for that audit finding regressed — flag the finding number so the operator can jump to `docs/architecture-audit.md`.
+
+**Stop conditions** (abort the whole run, no retry):
+- 5 consecutive HTTP 5xx — report the failing route.
+- Stripe checkout non-200 with the test card — could be test-key vs real-key mismatch.
+- Demo banner missing on any demo org page — likely seeder broke.
 
 **Out of scope:**
 - DMV / state agency electronic submission (Level 3 adapters — none wired live).
