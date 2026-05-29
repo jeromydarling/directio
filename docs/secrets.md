@@ -19,6 +19,13 @@ Run these once per environment (production, plus any preview envs) after
 provisioning a fresh Worker. `wrangler secret put` prompts for the value
 on stdin so the secret never lands in shell history or a file.
 
+> **Critical:** `BETTER_AUTH_SECRET` is checked at module init by
+> Better Auth. If it's unset on the deployed Worker, **every request
+> 500s** (including the public marketing homepage) with
+> `BetterAuthError: You are using the default secret`. All other
+> secrets fail lazily at first use of the specific feature. After any
+> deploy that touches the secret list, hit `GET /` to confirm.
+
 ```sh
 # Auth — Better Auth session signing key. Required by all authenticated
 # routes. Generate with: `openssl rand -base64 32`.
