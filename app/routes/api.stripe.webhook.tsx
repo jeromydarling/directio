@@ -62,10 +62,14 @@ export async function action({ request, context }: Route.ActionArgs) {
     case "account.updated":
       await handleAccountUpdated(env, event.data.object);
       break;
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      await handlePlatformSubscriptionUpdated(env, event.data.object);
+      break;
     case "invoice.paid":
     case "invoice.payment_failed":
-      // Installment subscriptions  optional: update payment + cancel
-      // the subscription after N successful invoices. Wired in keys-pass.
+      await handlePlatformInvoiceEvent(env, event.type, event.data.object);
       break;
     default:
       // No-op for events we don't care about yet.
@@ -126,7 +130,55 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
     return;
   }
 
-  // Branch 2: existing family enrollment payment flow.
+  // Branch 2: platform-self subscription (Studio etc.). Direct charge to
+  // directio; flips the org's subscriptionTier and records subscription IDs.
+  if (metadata.directio_platform_tier) {
+    const organizationId = metadata.directio_organization_id;
+    const tier = metadata.directio_platform_tier;
+    const stripeCustomerId = obj.customer ? String(obj.customer) : null;
+    const stripeSubscriptionId = obj.subscription ? String(obj.subscription) : null;
+    if (!organizationId) {
+      // Signed-out checkout: cannot attribute yet. Stripe has the Customer +
+      // Subscription; we'll reconcile during the post-signup flow. No-op
+      // here so the webhook still returns 200 and Stripe stops retrying.
+      return;
+    }
+
+    await env.DB.prepare(
+      `UPDATE organization
+          SET subscriptionTier = ?,
+              stripePlatformCustomerId = COALESCE(?, stripePlatformCustomerId),
+              stripePlatformSubscriptionId = COALESCE(?, stripePlatformSubscriptionId),
+              stripePlatformSubscriptionStatus = 'active',
+              subscriptionUpdatedAt = ?
+        WHERE id = ?`,
+    )
+      .bind(
+        normalizeTier(tier),
+        stripeCustomerId,
+        stripeSubscriptionId,
+        Date.now(),
+        organizationId,
+      )
+      .run();
+
+    await recordAudit(env, {
+      organizationId,
+      actorUserId: metadata.directio_user_id ?? null,
+      action: "platform_subscription.started",
+      entityType: "organization",
+      entityId: organizationId,
+      payload: {
+        tier: normalizeTier(tier),
+        stripeSessionId: sessionId,
+        stripeCustomerId,
+        stripeSubscriptionId,
+      },
+    });
+    return;
+  }
+
+  // Branch 3: existing family enrollment payment flow.
   const directioPaymentId = metadata.directio_payment_id;
   if (!directioPaymentId) return;
 
@@ -203,6 +255,120 @@ async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
       accountId,
     )
     .run();
+}
+
+/**
+ * customer.subscription.{created,updated,deleted}
+ * Mirrors Stripe's subscription state onto the org. Looked up by subscription
+ * id (set on the org during the initial checkout.session.completed). Also
+ * tolerates lookup by customer id as a fallback for edge cases where the
+ * subscription id isn't on the org yet (race between checkout.session.completed
+ * and customer.subscription.created — both can fire near-simultaneously).
+ */
+async function handlePlatformSubscriptionUpdated(env: Env, obj: Record<string, unknown>) {
+  const subscriptionId = String(obj.id ?? "");
+  const customerId = obj.customer ? String(obj.customer) : null;
+  const status = String(obj.status ?? "");
+  const cancelAtPeriodEnd = Boolean(obj.cancel_at_period_end);
+
+  // Normalize: a subscription marked cancel_at_period_end=true but
+  // status=active stays "active" until the period ends. Stripe will fire
+  // another event with status=canceled at that point.
+  const effectiveStatus = status;
+
+  // If status is canceled and customer is set, downgrade tier to free.
+  const downgrade = status === "canceled" ? ", subscriptionTier = 'free'" : "";
+
+  const updated = await env.DB.prepare(
+    `UPDATE organization
+        SET stripePlatformSubscriptionStatus = ?,
+            subscriptionUpdatedAt = ?${downgrade}
+      WHERE stripePlatformSubscriptionId = ?`,
+  )
+    .bind(effectiveStatus, Date.now(), subscriptionId)
+    .run();
+
+  // Fallback: org was attributed by customer but not subscription yet.
+  // Pull metadata.directio_organization_id off the subscription itself
+  // (we set it on the Checkout Session — Stripe propagates it to the
+  // resulting Subscription).
+  const meta = (obj.metadata as Record<string, string> | undefined) ?? {};
+  const orgIdFromMeta = meta.directio_organization_id;
+  if (!updated.meta?.changes && (orgIdFromMeta || customerId)) {
+    await env.DB.prepare(
+      `UPDATE organization
+          SET stripePlatformCustomerId = COALESCE(?, stripePlatformCustomerId),
+              stripePlatformSubscriptionId = COALESCE(?, stripePlatformSubscriptionId),
+              stripePlatformSubscriptionStatus = ?,
+              subscriptionUpdatedAt = ?${downgrade}
+        WHERE id = COALESCE(?, id)
+          AND (
+            stripePlatformSubscriptionId IS NULL
+            OR stripePlatformSubscriptionId = ?
+          )`,
+    )
+      .bind(
+        customerId,
+        subscriptionId,
+        effectiveStatus,
+        Date.now(),
+        orgIdFromMeta ?? null,
+        subscriptionId,
+      )
+      .run();
+  }
+
+  if (orgIdFromMeta) {
+    await recordAudit(env, {
+      organizationId: orgIdFromMeta,
+      actorUserId: null,
+      action: `platform_subscription.${status || "updated"}`,
+      entityType: "organization",
+      entityId: orgIdFromMeta,
+      payload: {
+        stripeSubscriptionId: subscriptionId,
+        stripeCustomerId: customerId,
+        cancelAtPeriodEnd,
+        status,
+      },
+    });
+  }
+}
+
+/**
+ * invoice.paid / invoice.payment_failed
+ *
+ * For the directio platform subscription, these signal billing health.
+ * - invoice.paid (and subscription is for a platform tier) → mark active.
+ * - invoice.payment_failed → mark past_due. Stripe's smart retries will
+ *   eventually resolve; if the subscription transitions to canceled later,
+ *   handlePlatformSubscriptionUpdated() flips the tier back to free.
+ */
+async function handlePlatformInvoiceEvent(
+  env: Env,
+  eventType: string,
+  obj: Record<string, unknown>,
+) {
+  const subscriptionId = obj.subscription ? String(obj.subscription) : null;
+  if (!subscriptionId) return;
+
+  const newStatus = eventType === "invoice.paid" ? "active" : "past_due";
+  await env.DB.prepare(
+    `UPDATE organization
+        SET stripePlatformSubscriptionStatus = ?,
+            subscriptionUpdatedAt = ?
+      WHERE stripePlatformSubscriptionId = ?`,
+  )
+    .bind(newStatus, Date.now(), subscriptionId)
+    .run();
+}
+
+function normalizeTier(raw: string): string {
+  // metadata is free-form; coerce to known values + default to free.
+  const t = raw.toLowerCase();
+  if (t === "studio" || t === "studio_monthly") return "studio";
+  if (t === "pro") return "pro";
+  return "free";
 }
 
 async function verifyStripeSignature(payload: string, header: string, secret: string): Promise<boolean> {

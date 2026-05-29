@@ -11,6 +11,8 @@ export type ActiveTenant = {
     brandColor: string | null;
     isDemo: boolean;
     demoExpiresAt: number | null;
+    subscriptionTier: "free" | "studio" | "pro";
+    stripePlatformSubscriptionStatus: string | null;
   };
   role: string;
 };
@@ -43,13 +45,18 @@ export async function requireTenant(request: Request, env: Env): Promise<ActiveT
     brandColor: string | null;
     isDemo: number;
     demoExpiresAt: number | null;
+    subscriptionTier: string | null;
+    stripePlatformSubscriptionStatus: string | null;
     role: string;
   };
+
+  const orgCols =
+    "o.id, o.slug, o.name, o.logo, o.brandColor, o.isDemo, o.demoExpiresAt, o.subscriptionTier, o.stripePlatformSubscriptionStatus, m.role";
 
   let org: OrgRow | null = null;
   if (activeOrgId) {
     const r = await env.DB.prepare(
-      `SELECT o.id, o.slug, o.name, o.logo, o.brandColor, o.isDemo, o.demoExpiresAt, m.role
+      `SELECT ${orgCols}
        FROM organization o
        JOIN member m ON m.organizationId = o.id
        WHERE m.userId = ? AND o.id = ?
@@ -61,7 +68,7 @@ export async function requireTenant(request: Request, env: Env): Promise<ActiveT
   }
   if (!org) {
     const r = await env.DB.prepare(
-      `SELECT o.id, o.slug, o.name, o.logo, o.brandColor, o.isDemo, o.demoExpiresAt, m.role
+      `SELECT ${orgCols}
        FROM organization o
        JOIN member m ON m.organizationId = o.id
        WHERE m.userId = ?
@@ -92,9 +99,17 @@ export async function requireTenant(request: Request, env: Env): Promise<ActiveT
       brandColor: org.brandColor,
       isDemo: org.isDemo === 1,
       demoExpiresAt: org.demoExpiresAt,
+      subscriptionTier: normalizeTier(org.subscriptionTier),
+      stripePlatformSubscriptionStatus: org.stripePlatformSubscriptionStatus,
     },
     role: org.role,
   };
+}
+
+function normalizeTier(raw: string | null): "free" | "studio" | "pro" {
+  if (raw === "studio") return "studio";
+  if (raw === "pro") return "pro";
+  return "free";
 }
 
 /**

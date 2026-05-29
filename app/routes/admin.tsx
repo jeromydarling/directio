@@ -154,7 +154,27 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function SidebarContents({ tenant }: { tenant: { user: { name: string | null; email: string; image: string | null }; organization: { name: string }; role: string } }) {
+function SidebarContents({
+  tenant,
+}: {
+  tenant: {
+    user: { name: string | null; email: string; image: string | null };
+    organization: {
+      name: string;
+      subscriptionTier: "free" | "studio" | "pro";
+      stripePlatformSubscriptionStatus: string | null;
+    };
+    role: string;
+  };
+}) {
+  const tier = tenant.organization.subscriptionTier;
+  const subStatus = tenant.organization.stripePlatformSubscriptionStatus;
+  const tierBadge =
+    tier === "studio"
+      ? { label: "Studio", className: "bg-gradient-to-r from-brand-500 to-accent-500 text-white" }
+      : tier === "pro"
+        ? { label: "Pro", className: "bg-ink-900 text-ink-50 dark:bg-ink-100 dark:text-ink-900" }
+        : null;
   return (
     <>
       <Link to="/" className="group mb-6 inline-flex items-baseline gap-1 md:mb-8">
@@ -171,7 +191,18 @@ function SidebarContents({ tenant }: { tenant: { user: { name: string | null; em
         <p className="mt-1 truncate text-sm font-semibold text-ink-900 dark:text-ink-50">
           {tenant.organization.name}
         </p>
-        <p className="mt-0.5 text-xs capitalize text-ink-500 dark:text-ink-400">{tenant.role}</p>
+        <div className="mt-1 flex items-center gap-2">
+          <p className="text-xs capitalize text-ink-500 dark:text-ink-400">{tenant.role}</p>
+          {tierBadge ? (
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${tierBadge.className}`}
+              title={subStatus ? `subscription: ${subStatus}` : undefined}
+            >
+              {tierBadge.label}
+              {subStatus && subStatus !== "active" ? ` · ${subStatus}` : ""}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <nav className="flex flex-col gap-0.5">

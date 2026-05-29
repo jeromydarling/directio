@@ -95,7 +95,6 @@ export default [
     route("reports/outcomes", "routes/admin.reports.outcomes.tsx"),
     route("documents", "routes/admin.documents.tsx"),
     route("audit", "routes/admin.audit.tsx"),
-    route("stripe-selftest", "routes/admin.stripe-selftest.tsx"),
     route("translations", "routes/admin.translations.tsx"),
     route("fees", "routes/admin.fees.tsx"),
     route("road-tests", "routes/admin.road-tests.tsx"),
