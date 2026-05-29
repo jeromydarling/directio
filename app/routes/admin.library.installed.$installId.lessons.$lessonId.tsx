@@ -24,8 +24,6 @@ type LessonRow = {
   narrationScript: string | null;
   estimatedSeatMinutes: number;
   published: number;
-  audioUrl: string | null;
-  audioGeneratedAt: number | null;
   narrationAudioR2Key: string | null;
   narrationAudioVoiceId: string | null;
   narrationAudioGeneratedAt: number | null;
@@ -65,8 +63,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const lesson = await db
     .prepare(
       `SELECT sl.id, sl.title, sl.body, sl.narrationScript,
-              sl.estimatedSeatMinutes, sl.published, sl.audioUrl,
-              sl.audioGeneratedAt, sl.narrationAudioR2Key,
+              sl.estimatedSeatMinutes, sl.published,
+              sl.narrationAudioR2Key,
               sl.narrationAudioVoiceId, sl.narrationAudioGeneratedAt,
               sl.bodyHashCurrent,
               sm.title AS moduleTitle
@@ -382,26 +380,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
   }
 
-  if (intent === "generate-audio") {
-    // Stub for ElevenLabs. Real call lands in the keys-pass at the end.
-    // For now we mark a placeholder URL so the UI can demonstrate audio
-    // playback wiring; the player will gracefully no-op on a 404.
-    const placeholderUrl = `/audio/${params.lessonId}.mp3`;
-    await env.DB.prepare(
-      "UPDATE school_lesson SET audioUrl = ?, audioGeneratedAt = ?, updatedAt = ? WHERE id = ?",
-    )
-      .bind(placeholderUrl, now, now, params.lessonId)
-      .run();
-    await recordAudit(env, {
-      organizationId: tenant.organization.id,
-      actorUserId: tenant.user.id,
-      action: "lesson.audio_generated",
-      entityType: "school_lesson",
-      entityId: params.lessonId,
-      payload: { provider: "elevenlabs-stub" },
-    });
-    return redirect(`/admin/library/installed/${params.installId}/lessons/${params.lessonId}`);
-  }
+  // The legacy `generate-audio` intent (ElevenLabs placeholder) has
+  // been removed. Lessons now resolve audio via the shared Aura-2
+  // cache (see app/lib/narrate.server.ts) or owner-recorded uploads
+  // (via the in-browser VoiceRecorder + /api/lesson/narration/upload).
 
   return data({ error: "Unknown action." }, { status: 400 });
 }

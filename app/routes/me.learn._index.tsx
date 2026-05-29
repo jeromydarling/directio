@@ -42,7 +42,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const lessons = await db
     .prepare(
       `SELECT sl.id, sl.schoolModuleId, sl.title, sl.estimatedSeatMinutes, sl.ordinal,
-              CASE WHEN sl.audioUrl IS NULL THEN 0 ELSE 1 END AS hasAudio,
+              CASE WHEN sl.narrationAudioR2Key IS NULL THEN 0 ELSE 1 END AS hasAudio,
               CASE
                 WHEN lp.completedAt IS NOT NULL THEN 'complete'
                 WHEN lp.id IS NOT NULL THEN 'in_progress'

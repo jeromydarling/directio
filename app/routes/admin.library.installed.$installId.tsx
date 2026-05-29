@@ -38,7 +38,7 @@ type LessonRow = {
   estimatedSeatMinutes: number;
   ordinal: number;
   published: number;
-  audioUrl: string | null;
+  narrationAudioR2Key: string | null;
   isSchoolAdded: number;
   aiAssisted: number;
   aiApprovedByUserId: string | null;
@@ -79,7 +79,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const lessons = await db
     .prepare(
       `SELECT sl.id, sl.schoolModuleId, sl.title, sl.estimatedSeatMinutes, sl.ordinal,
-              sl.published, sl.audioUrl,
+              sl.published, sl.narrationAudioR2Key,
               CASE WHEN sl.sourceLessonId IS NULL THEN 1 ELSE 0 END AS isSchoolAdded,
               sl.aiAssisted, sl.aiApprovedByUserId
          FROM school_lesson sl
@@ -312,7 +312,7 @@ export default function InstalledPack({ loaderData, actionData }: Route.Componen
                             )}
                             <p className="text-xs text-ink-500 dark:text-ink-400">
                               {l.estimatedSeatMinutes} min
-                              {l.audioUrl ? " · audio ready" : ""}
+                              {l.narrationAudioR2Key ? " · audio ready" : ""}
                               {l.isSchoolAdded ? " · school added" : ""}
                             </p>
                           </div>

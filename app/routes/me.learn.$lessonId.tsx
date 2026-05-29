@@ -20,9 +20,14 @@ type LessonRow = {
   title: string;
   body: string;
   estimatedSeatMinutes: number;
-  audioUrl: string | null;
   moduleTitle: string;
   moduleOrdinal: number;
+  /**
+   * Resolved by resolveLessonAudioUrl at loader time — owner-recorded
+   * audio, otherwise the shared Aura-2 cache, otherwise null.
+   * Not a school_lesson column.
+   */
+  audioUrl: string | null;
 };
 
 type QuizRow = {
@@ -114,8 +119,7 @@ export async function loader({
 
   const lesson = await db
     .prepare(
-      `SELECT sl.id, sl.title, sl.body, sl.estimatedSeatMinutes, sl.audioUrl,
-              sl.narrationAudioR2Key, sl.narrationAudioVoiceId,
+      `SELECT sl.id, sl.title, sl.body, sl.estimatedSeatMinutes,
               sm.title AS moduleTitle, sm.ordinal AS moduleOrdinal
          FROM school_lesson sl
          JOIN school_module sm ON sm.id = sl.schoolModuleId
