@@ -28,9 +28,13 @@ export function HealthBanner({ data }: { data: Loader }) {
           </p>
           <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
             {revenue.paymentCount} payment{revenue.paymentCount === 1 ? "" : "s"} ·{" "}
-            {revenue.deltaPct === null
-              ? "no prior period to compare"
-              : `${formatDelta(revenue.deltaPct)} vs. prior ${data.period.days} days`}
+            {revenue.deltaPct === null ? (
+              "no prior period to compare"
+            ) : (
+              <>
+                {formatDelta(revenue.deltaPct)} vs. prior {data.period.days} days
+              </>
+            )}
           </p>
         </div>
       </div>
