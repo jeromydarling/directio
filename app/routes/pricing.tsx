@@ -62,7 +62,7 @@ const TIERS = [
     price: "29",
     priceUnit: "/ month",
     feeNote: "All Free features included. 2% payment fee applies. Replaces your Wix/Squarespace/whatever for less than a single domain renewal.",
-    cta: { label: "Start with Studio", to: "/signup" },
+    cta: { label: "Start with Studio", to: "/api/checkout/studio", method: "post" as const },
     features: [
       "Everything in Free",
       "Custom marketing website AI-generated from a 10-question intake",
@@ -170,17 +170,33 @@ export default function Pricing({ loaderData }: Route.ComponentProps) {
                     )}
                   </div>
                   <p className="mt-2 text-sm text-ink-500 dark:text-ink-400">{t.feeNote}</p>
-                  <a
-                    href={t.cta.to}
-                    className={[
-                      "mt-6 inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-base font-medium transition-all",
-                      t.featured
-                        ? "bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-[0_8px_28px_-6px_var(--color-brand-500)] hover:shadow-[0_16px_44px_-8px_var(--color-brand-500)]"
-                        : "border border-ink-200 bg-white/60 text-ink-700 hover:border-ink-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200",
-                    ].join(" ")}
-                  >
-                    {t.cta.label} <span aria-hidden>→</span>
-                  </a>
+                  {"method" in t.cta && t.cta.method === "post" ? (
+                    <form method="post" action={t.cta.to} className="mt-6">
+                      <button
+                        type="submit"
+                        className={[
+                          "inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-3 text-base font-medium transition-all",
+                          t.featured
+                            ? "bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-[0_8px_28px_-6px_var(--color-brand-500)] hover:shadow-[0_16px_44px_-8px_var(--color-brand-500)]"
+                            : "border border-ink-200 bg-white/60 text-ink-700 hover:border-ink-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200",
+                        ].join(" ")}
+                      >
+                        {t.cta.label} <span aria-hidden>→</span>
+                      </button>
+                    </form>
+                  ) : (
+                    <a
+                      href={t.cta.to}
+                      className={[
+                        "mt-6 inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-base font-medium transition-all",
+                        t.featured
+                          ? "bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-[0_8px_28px_-6px_var(--color-brand-500)] hover:shadow-[0_16px_44px_-8px_var(--color-brand-500)]"
+                          : "border border-ink-200 bg-white/60 text-ink-700 hover:border-ink-300 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-200",
+                      ].join(" ")}
+                    >
+                      {t.cta.label} <span aria-hidden>→</span>
+                    </a>
+                  )}
                   <ul className="mt-8 space-y-2.5 border-t border-ink-200/60 pt-6 text-sm text-ink-700 dark:border-ink-800/60 dark:text-ink-200">
                     {t.features.map((f) => (
                       <li key={f} className="flex items-start gap-2">

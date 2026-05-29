@@ -20,6 +20,7 @@ export default [
   route("onboarding", "routes/onboarding.tsx"),
   route("api/auth/*", "routes/api.auth.tsx"),
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
+  route("api/checkout/studio", "routes/api.checkout.studio.tsx"),
   route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
   route("audio/narration/*", "routes/audio.narration.$.tsx"),

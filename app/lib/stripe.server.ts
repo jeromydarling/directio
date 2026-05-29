@@ -268,3 +268,127 @@ export async function refundPayment(
   }
   return { refundId: json.id ?? "", status: json.status ?? "unknown" };
 }
+
+/**
+ * Platform-self subscriptions (directio's own SaaS tiers — Studio, Pro etc.).
+ *
+ * These are direct charges to directio with no Connect transfer. Schools pay
+ * directio monthly for platform features. Separate from the per-enrollment
+ * Connect flow in createCheckoutSession() above.
+ *
+ * Pricing is idempotent via Stripe's `lookup_key` feature: every Price gets a
+ * stable lookup key (e.g. "directio_studio_monthly"); the same lookup key
+ * always resolves to the same Price across reboots. We never need to hardcode
+ * price_xxx IDs in env vars or D1.
+ */
+
+export type PlatformTierKey = "studio_monthly";
+
+const PLATFORM_TIERS: Record<
+  PlatformTierKey,
+  {
+    lookupKey: string;
+    productName: string;
+    productDescription: string;
+    unitAmountCents: number;
+    currency: string;
+    interval: "month" | "year";
+    metadata: Record<string, string>;
+  }
+> = {
+  studio_monthly: {
+    lookupKey: "directio_studio_monthly",
+    productName: "directio Studio",
+    productDescription:
+      "AI-generated marketing website + custom domain, on top of the Free tier.",
+    unitAmountCents: 2900,
+    currency: "usd",
+    interval: "month",
+    metadata: { directio_tier: "studio" },
+  },
+};
+
+/**
+ * Find an existing Price with the given lookup_key, or create the Product +
+ * Price pair if missing. Returns the Stripe price id.
+ */
+export async function ensurePlatformPrice(
+  env: Env,
+  tier: PlatformTierKey,
+): Promise<{ priceId: string; productId: string }> {
+  const spec = PLATFORM_TIERS[tier];
+
+  const existing = (await stripeRequest(
+    env,
+    `prices?lookup_keys[]=${encodeURIComponent(spec.lookupKey)}&active=true&limit=1&expand[]=data.product`,
+  )) as { data: { id: string; product: string | { id: string } }[] };
+
+  if (existing.data && existing.data.length > 0) {
+    const row = existing.data[0];
+    const productId =
+      typeof row.product === "string" ? row.product : (row.product?.id ?? "");
+    return { priceId: row.id, productId };
+  }
+
+  const product = (await stripeRequest(env, "products", {
+    method: "POST",
+    body: {
+      name: spec.productName,
+      description: spec.productDescription,
+      ...Object.fromEntries(
+        Object.entries(spec.metadata).map(([k, v]) => [`metadata[${k}]`, v]),
+      ),
+    },
+  })) as { id: string };
+
+  const price = (await stripeRequest(env, "prices", {
+    method: "POST",
+    body: {
+      product: product.id,
+      unit_amount: spec.unitAmountCents,
+      currency: spec.currency,
+      "recurring[interval]": spec.interval,
+      lookup_key: spec.lookupKey,
+      ...Object.fromEntries(
+        Object.entries(spec.metadata).map(([k, v]) => [`metadata[${k}]`, v]),
+      ),
+    },
+  })) as { id: string };
+
+  return { priceId: price.id, productId: product.id };
+}
+
+/**
+ * Create a Checkout Session for a directio platform subscription. Direct
+ * charge — no Connect transfer. Returns the Stripe-hosted Checkout URL.
+ */
+export async function createPlatformCheckoutSession(
+  env: Env,
+  args: {
+    tier: PlatformTierKey;
+    successUrl: string;
+    cancelUrl: string;
+    customerEmail?: string;
+    organizationId?: string;
+    userId?: string;
+  },
+): Promise<{ sessionId: string; url: string }> {
+  const { priceId } = await ensurePlatformPrice(env, args.tier);
+  const body: Record<string, string | number> = {
+    mode: "subscription",
+    "line_items[0][price]": priceId,
+    "line_items[0][quantity]": 1,
+    success_url: args.successUrl,
+    cancel_url: args.cancelUrl,
+    "metadata[directio_platform_tier]": args.tier,
+  };
+  if (args.customerEmail) body.customer_email = args.customerEmail;
+  if (args.organizationId) body["metadata[directio_organization_id]"] = args.organizationId;
+  if (args.userId) body["metadata[directio_user_id]"] = args.userId;
+
+  const res = (await stripeRequest(env, "checkout/sessions", {
+    method: "POST",
+    body,
+  })) as { id: string; url: string };
+  return { sessionId: res.id, url: res.url };
+}
