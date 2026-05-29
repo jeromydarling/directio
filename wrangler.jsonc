@@ -9,10 +9,14 @@
     "enabled": true
   },
 
-  "routes": [
-    { "pattern": "godirectio.com/*", "zone_name": "godirectio.com" },
-    { "pattern": "www.godirectio.com/*", "zone_name": "godirectio.com" }
-  ],
+  // Domain attachment is handled via Cloudflare Workers Custom Domains
+  // (Dashboard → Workers & Pages → directio → Domains). Custom Domains
+  // supersede the legacy `routes` mechanism — they handle Edge SSL,
+  // DNS, and route resolution automatically. Listed here for posterity:
+  //   - godirectio.com         (Production)
+  //   - www.godirectio.com     (Production; 301s to apex via the
+  //                             redirectWwwToApex hook in workers/app.ts)
+  //   - directio.jer-f84.workers.dev  (disabled in dashboard)
 
   "triggers": {
     "crons": [
