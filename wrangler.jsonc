@@ -9,10 +9,15 @@
     "enabled": true
   },
 
-  "routes": [
-    { "pattern": "getdirectio.com/*", "zone_name": "getdirectio.com" },
-    { "pattern": "www.getdirectio.com/*", "zone_name": "getdirectio.com" }
-  ],
+  // Routes for getdirectio.com — UNCOMMENT once the zone is added to
+  // the Cloudflare account (Dashboard → Add a Site → getdirectio.com
+  // → set nameservers at registrar). Until then, `wrangler deploy`
+  // fails because the zone doesn't resolve.
+  //
+  // "routes": [
+  //   { "pattern": "getdirectio.com/*", "zone_name": "getdirectio.com" },
+  //   { "pattern": "www.getdirectio.com/*", "zone_name": "getdirectio.com" }
+  // ],
 
   "triggers": {
     "crons": [
