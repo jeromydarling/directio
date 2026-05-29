@@ -230,13 +230,18 @@ export async function narrateAndCache(
 /**
  * Resolve the audio URL for a given school lesson. Order:
  *   1. Owner-recorded audio on school_lesson — highest fidelity (real person)
- *   2. School-level cached render of the school's edited script
- *   3. Shared cache for the master lesson's script (most schools)
+ *   2. Shared cache for the lesson's script (cross-school)
+ *   3. If `renderOnMiss` is true, render via Aura-2 and cache.
  *   4. null — student sees no audio player
+ *
+ * `renderOnMiss` should be true for paying-school traffic and false
+ * for demo orgs. The first paying school to visit a given lesson
+ * pays our ~$0.27 vendor cost; every school after that hits the
+ * cache for free.
  */
 export async function resolveLessonAudioUrl(
   env: Env,
-  args: { schoolLessonId: string; voiceId?: string },
+  args: { schoolLessonId: string; voiceId?: string; renderOnMiss?: boolean },
 ): Promise<string | null> {
   const voiceId = args.voiceId ?? DEFAULT_VOICE;
   const lesson = await env.DB.prepare(
@@ -258,16 +263,34 @@ export async function resolveLessonAudioUrl(
     return `/audio/narration/${lesson.narrationAudioR2Key}`;
   }
 
-  // 2 + 3. Hash the school's current script (or body) and look up the
-  // shared cache. The shared cache is content-addressed, so a school
-  // that hasn't edited will hit the same row as every other school
-  // on the same master lesson.
+  // 2. Shared cache lookup. Content-addressed, so a school that
+  // hasn't edited hits the same row as every other school on the
+  // same master lesson.
   const text = lesson.narrationScript ?? lesson.body;
-  if (!text) return null;
+  if (!text || text.length < 50) return null;
   const contentHash = await hashScript(text);
   const cached = await findCachedNarration(env, contentHash, voiceId);
   if (cached) {
     return `/audio/narration/${cached.r2Key}`;
   }
+
+  // 3. Cache miss. Render synchronously for paying schools — the
+  // first student waits ~3-5s for the audio to render, then it's
+  // cached for every student after them at every school. Skip for
+  // demo orgs so we don't pay to render audio nobody pays for.
+  if (args.renderOnMiss) {
+    try {
+      const result = await narrateAndCache(env, {
+        text,
+        voiceId,
+        lessonId: lesson.sourceLessonId,
+      });
+      return `/audio/narration/${result.r2Key}`;
+    } catch (err) {
+      console.warn("[narrate] on-miss render failed:", (err as Error).message);
+      return null;
+    }
+  }
+
   return null;
 }
