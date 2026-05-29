@@ -26,6 +26,7 @@ export async function deepCopyPackToSchool(
     slug: string;
     title: string;
     body: string;
+    narrationScript: string | null;
     estimatedSeatMinutes: number;
     ordinal: number;
   };
@@ -99,7 +100,7 @@ export async function deepCopyPackToSchool(
       counts.modules++;
 
       const lessons = await env.DB.prepare(
-        "SELECT id, slug, title, body, estimatedSeatMinutes, ordinal FROM lesson WHERE moduleId = ? ORDER BY ordinal",
+        "SELECT id, slug, title, body, narrationScript, estimatedSeatMinutes, ordinal FROM lesson WHERE moduleId = ? ORDER BY ordinal",
       )
         .bind(m.id)
         .all<LessonRow>();
@@ -109,9 +110,10 @@ export async function deepCopyPackToSchool(
         stmts.push(
           env.DB.prepare(
             `INSERT INTO school_lesson (id, organizationId, schoolModuleId, sourceLessonId,
-                                        slug, title, body, estimatedSeatMinutes, ordinal,
+                                        slug, title, body, narrationScript,
+                                        estimatedSeatMinutes, ordinal,
                                         published, createdAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
           ).bind(
             schoolLessonId,
             organizationId,
@@ -120,6 +122,7 @@ export async function deepCopyPackToSchool(
             l.slug,
             l.title,
             l.body,
+            l.narrationScript,
             l.estimatedSeatMinutes,
             l.ordinal,
             now,
