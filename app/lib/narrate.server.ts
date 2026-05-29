@@ -11,6 +11,7 @@
  */
 
 import { newId } from "./ids";
+import { sha256Hex } from "./content-hash.server";
 
 export const DEFAULT_VOICE = "orpheus";
 export const VENDOR_ID = "deepgram-aura-2";
@@ -21,13 +22,12 @@ export const AURA_VOICES = [
   "stella", "asteria", "hera", "zeus", "perseus", "thalia",
 ];
 
-export async function hashScript(text: string): Promise<string> {
-  const buf = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", buf);
-  return [...new Uint8Array(digest)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+/**
+ * Re-export of the canonical SHA-256 helper so existing consumers
+ * (api.internal.narrate-catalog.tsx) keep working. New code should
+ * import `sha256Hex` from `./content-hash.server` directly.
+ */
+export const hashScript = sha256Hex;
 
 export function r2KeyFor(voiceId: string, contentHash: string): string {
   return `narration/aura-2/${voiceId}/${contentHash}.mp3`;
