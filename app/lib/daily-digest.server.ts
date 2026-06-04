@@ -5,7 +5,7 @@
  * (UTC). Per spec #10.
  */
 
-import { isResendConfigured, sendEmail } from "./email.server";
+import { isEmailConfigured, sendEmail } from "./email.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -13,7 +13,7 @@ export async function sendDailyDigests(
   env: Env,
   now: number,
 ): Promise<{ sent: number; skipped: number; errored: number }> {
-  if (!isResendConfigured(env)) return { sent: 0, skipped: 0, errored: 0 };
+  if (!isEmailConfigured(env)) return { sent: 0, skipped: 0, errored: 0 };
   const today = isoDate(now);
 
   const orgs = await env.DB.prepare(

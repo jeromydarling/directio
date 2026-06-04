@@ -2,7 +2,7 @@ import { Form, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.reminders";
 import { requireTenant } from "~/lib/tenant.server";
 import { runBtwReminderSweep } from "~/lib/reminders.server";
-import { isResendConfigured } from "~/lib/email.server";
+import { isEmailConfigured } from "~/lib/email.server";
 import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { FormError } from "~/components/form";
 
@@ -45,7 +45,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   return {
     runs: rows.results,
     counts,
-    resendConfigured: isResendConfigured(context.cloudflare.env),
+    emailConfigured: isEmailConfigured(context.cloudflare.env),
   };
 }
 
@@ -69,7 +69,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Reminders({ loaderData, actionData }: Route.ComponentProps) {
-  const { runs, counts, resendConfigured } = loaderData;
+  const { runs, counts, emailConfigured } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
 
@@ -86,15 +86,16 @@ export default function Reminders({ loaderData, actionData }: Route.ComponentPro
         }
       />
 
-      {!resendConfigured && (
+      {!emailConfigured && (
         <Card className="border-amber-300 bg-amber-50/40 dark:border-amber-800 dark:bg-amber-950/20">
           <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
             Email sending is not configured yet.
           </p>
           <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
             Sweeps run on schedule but each candidate is logged as "skipped" with reason
-            <code className="font-mono"> resend_not_configured</code>. Set RESEND_API_KEY (and
-            RESEND_FROM if you want a custom sender) via wrangler secret.
+            <code className="font-mono"> email_not_configured</code>. Add the
+            <code className="font-mono"> send_email</code> binding in wrangler.jsonc and onboard
+            the domain in Cloudflare Dashboard → Email → Email Sending.
           </p>
         </Card>
       )}

@@ -59,10 +59,23 @@ npx wrangler secret put ELEVENLABS_API_KEY
 # Anthropic — Claude via AI Gateway. Powers quiz generation, the
 # library importer, llm.server helpers, and the family help assistant.
 npx wrangler secret put ANTHROPIC_API_KEY
-
-# Resend — transactional email and scheduled reminders.
-npx wrangler secret put RESEND_API_KEY
 ```
+
+## Outbound email (no secret needed)
+
+Email sending uses the **Cloudflare Email Service** `send_email` binding
+(declared in `wrangler.jsonc`). The Worker calls `env.EMAIL.send(...)`
+directly — there's no API key, no rotation, no secret to manage.
+Onboard each sending domain at:
+
+  Cloudflare Dashboard → Email → Email Sending → Onboard Domain
+
+and publish the SPF/DKIM/DMARC records the Dashboard issues. `godirectio.com`
+is enabled and configured.
+
+The `from` address can be overridden per call; the default comes from the
+`EMAIL_FROM` var in `wrangler.jsonc` (currently
+`directio <no-reply@godirectio.com>`).
 
 ## What uses what
 
@@ -79,7 +92,6 @@ the first request that hits the unset value, not at boot):
 | `PERPLEXITY_API_KEY`    | `app/lib/places.server.ts`, `app/routes/admin.library.places.tsx`.                                                                                                                                          |
 | `ELEVENLABS_API_KEY`    | Lesson audio adapter (premium TTS path) — referenced by the lesson-audio cache layer.                                                                                                                       |
 | `ANTHROPIC_API_KEY`     | `app/lib/claude.server.ts`, `app/lib/llm.server.ts`, `app/lib/quiz-ai.server.ts`, `app/routes/admin.import.tsx`, `app/routes/admin.library.import.tsx`, `app/routes/api.lesson.quiz-ai.tsx`, `app/routes/me.help.tsx`. |
-| `RESEND_API_KEY`        | `app/lib/email.server.ts`, `app/routes/admin.reminders.tsx`.                                                                                                                                                |
 
 ## Local development
 

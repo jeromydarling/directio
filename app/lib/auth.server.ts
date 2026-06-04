@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { magicLink, organization } from "better-auth/plugins";
 import { D1Dialect } from "kysely-d1";
-import { isResendConfigured, sendEmail } from "./email.server";
+import { isEmailConfigured, sendEmail } from "./email.server";
 
 // Cache the auth instance per Worker isolate. The D1 binding is stable
 // for the lifetime of the isolate, so we can safely memoize.
@@ -32,7 +32,7 @@ function createAuth(env: Env) {
         // be safe.
         expiresIn: 60 * 60, // 1 hour
         sendMagicLink: async ({ email, url }) => {
-          if (!isResendConfigured(env)) {
+          if (!isEmailConfigured(env)) {
             // Quietly degrade in dev: better-auth swallows the throw,
             // and we record a console line so the link is recoverable
             // from the worker log if it ever needs to be.

@@ -20,7 +20,8 @@ interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_WEBHOOK_SECRET_CONNECT?: string;
 
-  RESEND_API_KEY?: string;
+  // Resend was retired in favor of the Cloudflare Email Service
+  // send_email binding (env.EMAIL). No outbound-email secret needed.
 
   ANTHROPIC_API_KEY?: string;
 

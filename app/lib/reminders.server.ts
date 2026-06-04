@@ -5,7 +5,7 @@
  */
 
 import { newId } from "./ids";
-import { ResendNotConfiguredError, isResendConfigured, sendEmail } from "./email.server";
+import { EmailNotConfiguredError, isEmailConfigured, sendEmail } from "./email.server";
 
 type Candidate = {
   apptId: string;
@@ -128,7 +128,7 @@ If you need to cancel, please do it in directio or call the school so we can giv
 — directio`;
 
       try {
-        if (!isResendConfigured(env)) {
+        if (!isEmailConfigured(env)) {
           await env.DB.prepare(
             `INSERT INTO cron_run (id, kind, organizationId, subjectType, subjectId, status, channel, recipient, payload, createdAt)
              VALUES (?, ?, ?, 'appointment', ?, 'skipped', 'email', ?, ?, ?)`,
@@ -139,7 +139,7 @@ If you need to cancel, please do it in directio or call the school so we can giv
               c.organizationId,
               c.apptId,
               recipient,
-              JSON.stringify({ reason: "resend_not_configured", subject }),
+              JSON.stringify({ reason: "email_not_configured", subject }),
               Date.now(),
             )
             .run();
@@ -178,7 +178,7 @@ If you need to cancel, please do it in directio or call the school so we can giv
             Date.now(),
           )
           .run();
-        if (err instanceof ResendNotConfiguredError) {
+        if (err instanceof EmailNotConfiguredError) {
           skipped++;
         } else {
           errors++;
