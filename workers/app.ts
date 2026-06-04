@@ -1,4 +1,5 @@
 import { createRequestHandler } from "react-router";
+import * as Sentry from "@sentry/cloudflare";
 import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
 import { sendDailyDigests } from "../app/lib/daily-digest.server";
 import { sweepExpiredDemos } from "../app/lib/demo-seeder.server";
@@ -27,7 +28,7 @@ const requestHandler = createRequestHandler(
   import.meta.env.MODE
 );
 
-export default {
+const handler = {
   async fetch(request, env, ctx) {
     // Apex canonicalization first — before any DB work — so a www hit
     // is one cheap redirect, not a full render that then 301s.
@@ -106,3 +107,23 @@ export default {
     );
   },
 } satisfies ExportedHandler<Env>;
+
+// Wrap the FULL { fetch, scheduled } handler — not just fetch — so the
+// reminder/state-monitor/digest/demo-sweep cron failures are captured too,
+// not only SSR request errors. Federation-standard tags keep events
+// comparable across the fleet; this no-ops gracefully when SENTRY_DSN is
+// unset, so it is never a hard dependency on a live worker.
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 0.1,
+    sendDefaultPii: false,
+    initialScope: {
+      tags: {
+        app_slug: "directio",
+        federation_phase: "live",
+      },
+    },
+  }),
+  handler,
+) satisfies ExportedHandler<Env>;

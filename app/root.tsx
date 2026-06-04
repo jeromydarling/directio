@@ -5,10 +5,22 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useRouteLoaderData,
 } from "react-router";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+
+// Expose a minimal, safe-to-publish slice of env to the client via window.ENV.
+// SENTRY_DSN is a publishable value (DSNs are meant to ship in the browser);
+// we deliberately do NOT forward any secret here.
+export function loader({ context }: Route.LoaderArgs) {
+  return {
+    ENV: {
+      SENTRY_DSN: context.cloudflare.env.SENTRY_DSN,
+    },
+  };
+}
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -24,6 +36,10 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  // Layout also renders for error states where the loader may not have run, so
+  // guard the lookup. The ENV bag is injected before <Scripts /> so the client
+  // entry can read window.ENV.SENTRY_DSN during hydration.
+  const data = useRouteLoaderData<typeof loader>("root");
   return (
     <html lang="en" className="dark">
       <head>
@@ -36,6 +52,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body>
         {children}
         <ScrollRestoration />
+        {data?.ENV && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `window.ENV=${JSON.stringify(data.ENV)}`,
+            }}
+          />
+        )}
         <Scripts />
       </body>
     </html>

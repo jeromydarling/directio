@@ -2,6 +2,7 @@ import type { AppLoadContext, EntryContext } from "react-router";
 import { ServerRouter } from "react-router";
 import { isbot } from "isbot";
 import { renderToReadableStream } from "react-dom/server";
+import * as Sentry from "@sentry/cloudflare";
 
 export default async function handleRequest(
   request: Request,
@@ -23,6 +24,9 @@ export default async function handleRequest(
         // reject and get logged in handleDocumentRequest.
         if (shellRendered) {
           console.error(error);
+          // Streaming/SSR render errors are swallowed by the stream and never
+          // bubble to the worker's fetch handler, so report them here.
+          Sentry.captureException(error);
         }
       },
     }

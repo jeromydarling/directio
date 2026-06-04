@@ -15,6 +15,10 @@
 interface Env {
   BETTER_AUTH_SECRET?: string;
 
+  // Server-side Sentry DSN. Also forwarded to the client via window.ENV in
+  // app/root.tsx (DSNs are publishable). Unset → Sentry no-ops.
+  SENTRY_DSN?: string;
+
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
