@@ -475,13 +475,9 @@ async function runLlamaText(
   hint: string,
   usageAcc: { input: number; output: number },
 ): Promise<string> {
-  // Wrap source in unambiguous delimiters. Without this the model will
-  // sometimes treat a short input (a title, a single phrase) as a topic
-  // prompt and write an essay instead of translating.
   const system = [
-    `You are a translator from US English to ${langLabel} for teen driver-education content.`,
-    `Translate ONLY the text between the <<<SRC>>> markers below.`,
-    `Output ONLY the translated text. Do not include the markers, do not add a preamble, do not add commentary, do not paraphrase, do not expand, do not generate any additional content.`,
+    `You translate US English to ${langLabel} for teen driver-education content.`,
+    `Output ONLY the ${langLabel} translation. No preamble. No commentary. No quotes around the output. No explanation. Do not write the English back. Do not write "translation:".`,
     ``,
     `Rules:`,
     `- Keep these terms verbatim in the source spelling (do NOT translate them): ${glossary.preserve_verbatim.join(", ")}.`,
@@ -490,23 +486,28 @@ async function runLlamaText(
     `- Preserve numbers, dates, and form/license/section numbers verbatim.`,
     `- Preserve markdown formatting exactly: **bold**, _italics_, # headings, - bullets, 1. numbered lists, [link](url), \`inline code\`, > blockquotes, code fences.`,
     `- Preserve URLs and shortcodes like [[sign:stop]] character-for-character.`,
-    `- Match the source's length roughly. A short input gets a short output.`,
+    `- A short input gets a short output. Do not pad.`,
   ].join("\n");
 
-  const user = `<<<SRC>>>\n${text}\n<<<SRC>>>`;
+  // No delimiter wrapping — the 3B model invents its own <<<TARG>>>
+  // mirror token and leaks it into the output. Plain text in / plain
+  // text out, with the system prompt doing the constraint work.
+  const user = text;
 
-  // Cap output length proportional to input length. The 8B model
-  // otherwise happily uses all 8000 tokens for a single-line title.
+  // Cap output length proportional to input length. Without this the
+  // model uses its entire max_tokens budget regardless of input size.
   const maxTokens = Math.min(
-    8000,
+    4000,
     Math.max(120, Math.ceil(text.length * 1.6)),
   );
 
-  // Workers AI request-budget tradeoff: the 8B model gives the best
-  // translation quality. The 3B model is ~3x faster but generates
-  // borderline output. Stay on 8B and instead reduce request pressure
-  // via lower concurrency (see CONCURRENCY in translateLlama).
-  const res = (await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
+  // Workers AI throttles 8B-fp8 aggressively under sustained load
+  // (error 3046 "Request timeout" on every subsequent call after a
+  // few successes). 3B-instruct fits comfortably in the per-request
+  // budget and clears the precache backlog. Quality is "good enough
+  // for free tier" — schools who want premium fidelity upgrade to
+  // DeepL ($0.50/lesson).
+  const res = (await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -528,9 +529,12 @@ async function runLlamaText(
 }
 
 function stripDelimiters(text: string): string {
+  // Scrub the various delimiter shapes Llama 3.2 3B emits even though
+  // we no longer use any in the prompt — it sees `<<<` from training
+  // data and reaches for it as an output frame.
   return text
-    .replace(/<<<\s*SRC\s*>>>/gi, "")
-    .replace(/<<<\s*END\s*>>>/gi, "")
+    .replace(/<<<\s*(?:SRC|TARG|TARGET|SOURCE|END|TRANSLATION)\s*>>>/gi, "")
+    .replace(/\[\[\s*(?:SRC|TARG|TRANSLATION|TARGET)\s*\]\]/gi, "")
     .trim();
 }
 
