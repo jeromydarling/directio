@@ -96,6 +96,7 @@ export default [
     route("documents", "routes/admin.documents.tsx"),
     route("audit", "routes/admin.audit.tsx"),
     route("translations", "routes/admin.translations.tsx"),
+    route("translations/precache", "routes/admin.translations.precache.tsx"),
     route("fees", "routes/admin.fees.tsx"),
     route("road-tests", "routes/admin.road-tests.tsx"),
     route("state-coverage", "routes/admin.state-coverage.tsx"),

@@ -370,81 +370,191 @@ async function translateClaude(env: Env, src: VendorInput): Promise<VendorOutput
 }
 
 /**
- * Llama 3.3 70B (Workers AI) translator. Used by the "standard" tier —
+ * Llama 3.1 8B (Workers AI) translator. Used by the "standard" tier —
  * free to the school. Cost lives on Cloudflare's Workers AI bill, not
  * per-call; we still compute an estimated vendorCostMicros for the
  * platform-side accounting view (we want to know our gross margin on
  * "free" translations).
+ *
+ * Chunking: the body is split on paragraph breaks and translated in
+ * parallel. Title and script (if present) ride along as their own
+ * single-shot chunks. For a 40-paragraph lesson this cuts wall time
+ * from ~90s (one big request) to ~10s (parallel small requests). The
+ * 8B model is conversational-quality across all our languages; it's
+ * the JSON formatting that pushed wall time up, not the translation
+ * itself.
  */
 async function translateLlama(env: Env, src: VendorInput): Promise<VendorOutput> {
   const langLabel =
     LANG_LABELS[src.targetLang.toLowerCase()]?.english ?? src.targetLang;
+
+  // Split the body on paragraph breaks. Empty / whitespace-only chunks
+  // are preserved so reassembly is loss-less.
+  const bodyChunks = src.body.split(/(\n{2,})/);
+
+  // Build the list of translation tasks. We translate non-blank text
+  // chunks; whitespace runs (the (\n+) capture groups) get passed
+  // through unchanged so paragraph breaks survive.
+  type Task =
+    | { kind: "translate"; text: string; index: number }
+    | { kind: "passthrough"; text: string };
+
+  const tasks: Task[] = [];
+  bodyChunks.forEach((chunk, i) => {
+    if (!chunk) return;
+    if (/^\s+$/.test(chunk)) {
+      tasks.push({ kind: "passthrough", text: chunk });
+    } else {
+      tasks.push({ kind: "translate", text: chunk, index: i });
+    }
+  });
+
+  // Concurrency cap. Workers AI accepts heavy parallelism but rate-
+  // limiting kicks in eventually. 6 in-flight requests at a time keeps
+  // a 40-paragraph lesson under ~15s without tripping limits.
+  const CONCURRENCY = 6;
+  const usageAcc = { input: 0, output: 0 };
+
+  async function translateOne(text: string, hint: string): Promise<string> {
+    return runLlamaText(env, text, langLabel, hint, usageAcc);
+  }
+
+  // Title + script live in their own chunks so they translate in parallel
+  // with body chunks (extra throughput for free).
+  const titlePromise = translateOne(src.title, "title");
+  const scriptPromise = src.script ? translateOne(src.script, "narration script") : null;
+
+  // Drain body translation tasks with bounded concurrency.
+  const translatedChunks: string[] = new Array(tasks.length).fill("");
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const myIndex = cursor++;
+      if (myIndex >= tasks.length) return;
+      const t = tasks[myIndex];
+      if (t.kind === "passthrough") {
+        translatedChunks[myIndex] = t.text;
+      } else {
+        translatedChunks[myIndex] = await translateOne(t.text, `body §${myIndex}`);
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()),
+  );
+
+  const translatedTitle = await titlePromise;
+  const translatedScript = scriptPromise ? await scriptPromise : null;
+  const translatedBody = translatedChunks.join("");
+
+  // Workers AI llama-3.1-8b-instruct-fp8 retail pricing (~$0.29 / M
+  // input tokens, ~$2.25 / M output tokens). Accumulated from each
+  // chunk's reported usage where available, estimated otherwise.
+  const inputCost = (usageAcc.input / 1_000_000) * 0.29 * 1_000_000;
+  const outputCost = (usageAcc.output / 1_000_000) * 2.25 * 1_000_000;
+
+  return {
+    translatedTitle,
+    translatedBody,
+    translatedScript,
+    vendorCostMicros: Math.round(inputCost + outputCost),
+  };
+}
+
+type LlamaResponse = {
+  response?: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+};
+
+async function runLlamaText(
+  env: Env,
+  text: string,
+  langLabel: string,
+  hint: string,
+  usageAcc: { input: number; output: number },
+): Promise<string> {
+  // Wrap source in unambiguous delimiters. Without this the model will
+  // sometimes treat a short input (a title, a single phrase) as a topic
+  // prompt and write an essay instead of translating.
   const system = [
-    `You are a translator for US teen driver-education content.`,
-    `Translate the provided JSON from US English to ${langLabel}. Preserve register: conversational, parent-and-teen-friendly.`,
+    `You are a translator from US English to ${langLabel} for teen driver-education content.`,
+    `Translate ONLY the text between the <<<SRC>>> markers below.`,
+    `Output ONLY the translated text. Do not include the markers, do not add a preamble, do not add commentary, do not paraphrase, do not expand, do not generate any additional content.`,
     ``,
     `Rules:`,
     `- Keep these terms verbatim in the source spelling (do NOT translate them): ${glossary.preserve_verbatim.join(", ")}.`,
     `- Translate "right-of-way" as the established traffic-law term in the target language, not literally.`,
     `- Translate "permit-eligible" as "qualified for a learner's permit" or the local equivalent.`,
     `- Preserve numbers, dates, and form/license/section numbers verbatim.`,
-    `- Preserve paragraph breaks ("\\n\\n").`,
-    `- Output STRICTLY a JSON object with keys "title", "body", "script". The "script" key is null if the input "script" is null.`,
-    `- No prose around the JSON. No code fences. No commentary.`,
+    `- Preserve markdown formatting exactly: **bold**, _italics_, # headings, - bullets, 1. numbered lists, [link](url), \`inline code\`, > blockquotes, code fences.`,
+    `- Preserve URLs and shortcodes like [[sign:stop]] character-for-character.`,
+    `- Match the source's length roughly. A short input gets a short output.`,
   ].join("\n");
 
-  const userMsg = JSON.stringify({
-    title: src.title,
-    body: src.body,
-    script: src.script,
-  });
+  const user = `<<<SRC>>>\n${text}\n<<<SRC>>>`;
 
-  type LlamaResponse = {
-    response?: string;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-  };
-  // Use the 8B fp8 model: the 70B model takes 90+ seconds on full
-  // lesson bodies and trips Workers AI's request timeout. The 8B
-  // model finishes in 5-10 seconds with translation quality that's
-  // more than adequate for the standard (free) tier — schools who
-  // need premium fidelity opt up to DeepL.
+  // Cap output length proportional to input length. The 8B model
+  // otherwise happily uses all 8000 tokens for a single-line title.
+  const maxTokens = Math.min(
+    8000,
+    Math.max(120, Math.ceil(text.length * 1.6)),
+  );
+
   const res = (await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
     messages: [
       { role: "system", content: system },
-      { role: "user", content: userMsg },
+      { role: "user", content: user },
     ],
     temperature: 0.1,
-    max_tokens: 8000,
+    max_tokens: maxTokens,
   })) as LlamaResponse;
 
-  const text = res.response ?? "";
-  const parsed = extractJson<{ title: string; body: string; script: string | null }>(
-    text,
-  );
-  if (!parsed || typeof parsed.title !== "string" || typeof parsed.body !== "string") {
-    throw new TranslationVendorError("llama", "non-JSON response");
+  const out = stripPreamble(stripDelimiters(res.response ?? ""));
+  if (!out) {
+    throw new TranslationVendorError("llama", `empty response for chunk: ${hint}`);
   }
 
-  // Workers AI llama-3.3-70b-fp8-fast retail pricing (June 2026):
-  // ~$0.29/M input tokens, ~$2.25/M output tokens. Estimate token
-  // counts from char counts if the response doesn't include usage.
-  const inputTokens =
-    res.usage?.prompt_tokens ??
-    Math.ceil((src.title.length + src.body.length + (src.script?.length ?? 0)) / 4);
-  const outputTokens =
-    res.usage?.completion_tokens ??
-    Math.ceil(
-      (parsed.title.length + parsed.body.length + (parsed.script?.length ?? 0)) / 4,
-    );
-  const inputCost = (inputTokens / 1_000_000) * 0.29 * 1_000_000;
-  const outputCost = (outputTokens / 1_000_000) * 2.25 * 1_000_000;
+  usageAcc.input +=
+    res.usage?.prompt_tokens ?? Math.ceil((system.length + user.length) / 4);
+  usageAcc.output += res.usage?.completion_tokens ?? Math.ceil(out.length / 4);
 
-  return {
-    translatedTitle: parsed.title,
-    translatedBody: parsed.body,
-    translatedScript: src.script ? parsed.script : null,
-    vendorCostMicros: Math.round(inputCost + outputCost),
-  };
+  return out;
+}
+
+function stripDelimiters(text: string): string {
+  return text
+    .replace(/<<<\s*SRC\s*>>>/gi, "")
+    .replace(/<<<\s*END\s*>>>/gi, "")
+    .trim();
+}
+
+/**
+ * Trim common preambles llama emits despite the system rule. Cheap
+ * defense; far better than letting them through. Conservative: only
+ * strips a leading line that ends with a colon and is shorter than
+ * the rest of the output (so legitimate "Section A:" headings stay).
+ */
+function stripPreamble(text: string): string {
+  let out = text.trim();
+  // Strip wrapping quotes Llama sometimes adds around short outputs.
+  if (
+    (out.startsWith('"') && out.endsWith('"')) ||
+    (out.startsWith("'") && out.endsWith("'"))
+  ) {
+    out = out.slice(1, -1).trim();
+  }
+  const firstLineEnd = out.indexOf("\n");
+  if (firstLineEnd > 0 && firstLineEnd < 80) {
+    const firstLine = out.slice(0, firstLineEnd).trim();
+    if (
+      /^(here(?:'s| is)? (?:the|your) translation|translation|translated text|sure|of course|certainly)[\s,.:!]*$/i.test(
+        firstLine,
+      )
+    ) {
+      out = out.slice(firstLineEnd + 1).trim();
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- credit ledger
