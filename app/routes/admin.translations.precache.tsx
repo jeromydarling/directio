@@ -27,7 +27,11 @@ import { PageHeader, Card } from "~/components/ui";
  */
 
 const PRECACHE_LANGS = ["es", "vi", "zh", "ko", "so", "hmn"] as const;
-const MAX_PER_REQUEST = 4;
+// 2 lessons × ~110s serial chunks ≈ 4 minutes per batch — well under
+// the operator-side curl timeout (600s) and Cloudflare Workers' wall-
+// time soft cap. 4 lessons was hitting the timeout under sustained
+// load and the request got cancelled mid-flight.
+const MAX_PER_REQUEST = 2;
 
 type LessonRow = {
   schoolLessonId: string;
