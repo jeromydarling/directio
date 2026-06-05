@@ -409,10 +409,12 @@ async function translateLlama(env: Env, src: VendorInput): Promise<VendorOutput>
     }
   });
 
-  // Concurrency cap. Workers AI accepts heavy parallelism but rate-
-  // limiting kicks in eventually. 6 in-flight requests at a time keeps
-  // a 40-paragraph lesson under ~15s without tripping limits.
-  const CONCURRENCY = 6;
+  // Concurrency cap. Workers AI's per-account neuron budget makes
+  // parallel chunks unreliable under sustained load — the first batch
+  // succeeds, then subsequent calls time out with 3046. Sequential
+  // chunks (CONCURRENCY=1) are slower per lesson but never trip the
+  // limit. We trade peak speed for steady throughput.
+  const CONCURRENCY = 1;
   const usageAcc = { input: 0, output: 0 };
 
   async function translateOne(text: string, hint: string): Promise<string> {
@@ -500,6 +502,10 @@ async function runLlamaText(
     Math.max(120, Math.ceil(text.length * 1.6)),
   );
 
+  // Workers AI request-budget tradeoff: the 8B model gives the best
+  // translation quality. The 3B model is ~3x faster but generates
+  // borderline output. Stay on 8B and instead reduce request pressure
+  // via lower concurrency (see CONCURRENCY in translateLlama).
   const res = (await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
     messages: [
       { role: "system", content: system },
