@@ -4,11 +4,12 @@ import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import {
   InsufficientCreditsError,
+  TIER_PRICE_CENTS,
   TranslationConfigError,
   TranslationVendorError,
   getCreditBalanceCents,
   translateLesson,
-  TRANSLATION_PRICE_CENTS,
+  type TranslationTier,
 } from "~/lib/translation.server";
 
 /**
@@ -38,6 +39,8 @@ export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   const schoolLessonId = String(form.get("schoolLessonId") ?? "").trim();
   const targetLang = String(form.get("targetLang") ?? "").trim().toLowerCase();
+  const rawTier = String(form.get("tier") ?? "standard").trim().toLowerCase();
+  const tier: TranslationTier = rawTier === "premium" ? "premium" : "standard";
   if (!schoolLessonId || !targetLang) {
     return data({ error: "Missing schoolLessonId or targetLang" }, { status: 400 });
   }
@@ -48,9 +51,11 @@ export async function action({ request, context }: Route.ActionArgs) {
       schoolLessonId,
       targetLang,
       requestedByUserId: tenant.user.id,
+      tier,
     });
 
     const newBalance = await getCreditBalanceCents(env, tenant.organization.id);
+    const chargedCents = TIER_PRICE_CENTS[result.tier];
 
     await recordAudit(env, {
       organizationId: tenant.organization.id,
@@ -61,9 +66,10 @@ export async function action({ request, context }: Route.ActionArgs) {
       payload: {
         targetLang,
         vendor: result.vendor,
+        tier: result.tier,
         fromCache: result.fromCache,
         translationId: result.translationId,
-        chargedCents: TRANSLATION_PRICE_CENTS,
+        chargedCents,
       },
     });
 
@@ -71,12 +77,13 @@ export async function action({ request, context }: Route.ActionArgs) {
       ok: true,
       translationId: result.translationId,
       vendor: result.vendor,
+      tier: result.tier,
       fromCache: result.fromCache,
       targetLang,
       translatedTitle: result.translatedTitle,
       translatedBody: result.translatedBody,
       translatedScript: result.translatedScript,
-      chargedCents: TRANSLATION_PRICE_CENTS,
+      chargedCents,
       balanceCents: newBalance,
     });
   } catch (err) {

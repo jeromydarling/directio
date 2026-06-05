@@ -94,7 +94,7 @@ export default function AdminTranslations({ loaderData }: Route.ComponentProps) 
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Translations"
-        description={`Pay-as-you-translate. $${(TRANSLATION_PRICE_CENTS / 100).toFixed(2)} per lesson per language. Credits never expire.`}
+        description={`Default tier is free (Workers AI). Premium DeepL translation for European and Asian languages costs $${(TRANSLATION_PRICE_CENTS / 100).toFixed(2)} per lesson — credits never expire.`}
       />
 
       <section className="grid gap-4 sm:grid-cols-3">
@@ -107,7 +107,8 @@ export default function AdminTranslations({ loaderData }: Route.ComponentProps) 
           </p>
           <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">
             Enough for {Math.floor(balanceCents / TRANSLATION_PRICE_CENTS)} more
-            lesson translation{Math.floor(balanceCents / TRANSLATION_PRICE_CENTS) === 1 ? "" : "s"}.
+            premium lesson translation{Math.floor(balanceCents / TRANSLATION_PRICE_CENTS) === 1 ? "" : "s"}.
+            Free Workers AI translations don't deduct.
           </p>
         </Card>
         <Card>
@@ -138,8 +139,9 @@ export default function AdminTranslations({ loaderData }: Route.ComponentProps) 
         </h2>
         <Card>
           <p className="mb-4 text-sm text-ink-600 dark:text-ink-300">
-            Credits are stored on your school. Each lesson translation deducts{" "}
-            <strong>${(TRANSLATION_PRICE_CENTS / 100).toFixed(2)}</strong>. Cache hits
+            Credits are stored on your school. Only the <strong>premium</strong> DeepL
+            tier draws from them — <strong>${(TRANSLATION_PRICE_CENTS / 100).toFixed(2)}</strong> per
+            lesson per language. The free Workers AI tier never deducts. Cache hits
             cost the same as misses — but once any school on the platform has
             translated a given lesson into a language, every school after that gets
             it instantly.
