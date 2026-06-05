@@ -1,7 +1,7 @@
 import { Form, Link, data, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.translations";
 import { requireTenant } from "~/lib/tenant.server";
-import { PageHeader, Card } from "~/components/ui";
+import { PageHeader, Card, LinkButton } from "~/components/ui";
 import { LANG_LABELS, TRANSLATION_PRICE_CENTS } from "~/lib/lang-labels";
 import { getCreditBalanceCents } from "~/lib/translation.server";
 
@@ -95,6 +95,11 @@ export default function AdminTranslations({ loaderData }: Route.ComponentProps) 
       <PageHeader
         title="Translations"
         description={`Default tier is free (Workers AI). Premium DeepL translation for European and Asian languages costs $${(TRANSLATION_PRICE_CENTS / 100).toFixed(2)} per lesson — credits never expire.`}
+        actions={
+          <LinkButton to="/admin/translations/precache" variant="secondary">
+            Pre-cache lessons
+          </LinkButton>
+        }
       />
 
       <section className="grid gap-4 sm:grid-cols-3">
