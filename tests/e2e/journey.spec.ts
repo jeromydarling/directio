@@ -172,39 +172,47 @@ test("7. persistence: create a location and verify it survives reload", async ()
   await page.goto("/admin/locations");
   await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
 
-  // Use the "Add" CTA — varies in casing across pages but the verb
-  // "add" with "location" is the stable signature.
-  const addBtn = page
-    .getByRole("link", { name: /add (a )?location/i })
-    .or(page.getByRole("button", { name: /add (a )?location|new location/i }))
-    .first();
-  if (await addBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await addBtn.click();
-    await page.waitForLoadState("networkidle");
-    const locationName = `E2E HQ ${TS}`;
-    const nameInput = page.getByLabel(/name/i).first();
-    await nameInput.waitFor({ state: "visible", timeout: 15_000 });
-    await nameInput.fill(locationName);
-    // Address is required on some forms; fill best-effort.
-    const addressInput = page.getByLabel(/address|street/i).first();
-    if (await addressInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await addressInput.fill("100 Test St");
-    }
-    const cityInput = page.getByLabel(/city/i).first();
-    if (await cityInput.isVisible().catch(() => false)) {
-      await cityInput.fill("Saint Paul");
-    }
-    const zipInput = page.getByLabel(/zip|postal/i).first();
-    if (await zipInput.isVisible().catch(() => false)) {
-      await zipInput.fill("55101");
-    }
-    await page.getByRole("button", { name: /save|create|add/i }).first().click();
-    await page.waitForURL(/\/admin\/locations/, { timeout: 15_000 });
+  // /admin/locations renders an inline "Add a location" form right on
+  // the page — the "Add location" submit button IS the only CTA. Fill
+  // the form directly and submit once; clicking the submit before
+  // filling submits the empty form and triggers the action's
+  // "Name required" error path. The previous test attempted a
+  // generic "click Add button, then fill" sequence that double-
+  // submitted on mobile and produced the empty-state failure.
+  const locationName = `E2E HQ ${TS}`;
+  const nameInput = page.getByLabel(/^name$/i).first();
+  await expect(nameInput).toBeVisible({ timeout: 15_000 });
+  await nameInput.fill(locationName);
 
-    // Persistence check: reload and ensure the row is still there.
-    await page.reload();
-    await expect(page.locator("body")).toContainText(locationName);
+  const addressInput = page.getByLabel(/address line 1/i).first();
+  if (await addressInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await addressInput.fill("100 Test St");
   }
+  const cityInput = page.getByLabel(/^city$/i).first();
+  if (await cityInput.isVisible().catch(() => false)) {
+    await cityInput.fill("Saint Paul");
+  }
+  const regionInput = page.getByLabel(/state \/ region/i).first();
+  if (await regionInput.isVisible().catch(() => false)) {
+    await regionInput.fill("MN");
+  }
+  const zipInput = page.getByLabel(/postal code/i).first();
+  if (await zipInput.isVisible().catch(() => false)) {
+    await zipInput.fill("55101");
+  }
+
+  // Button label is "Add location" exactly — anchor with ^ / $ so we
+  // don't match the "Add a location" h3 or any other text.
+  await page
+    .getByRole("button", { name: /^add location$/i })
+    .first()
+    .click();
+  await page.waitForLoadState("networkidle");
+
+  await page.reload();
+  await expect(page.locator("body")).toContainText(locationName, {
+    timeout: 15_000,
+  });
 });
 
 test("8. settings toggle persists across reload", async () => {
