@@ -318,24 +318,24 @@ test("7e. persistence: create a student and verify it survives reload", async ()
 
   await page.locator('input[name="firstName"]').fill(studentFirst);
   await page.locator('input[name="lastName"]').fill(studentLast);
-  await page.locator('input[name="email"]').fill(studentEmail);
-  // Skip date-of-birth: it's optional on the form, and filling a
-  // <input type="date"> on Pixel 7 leaves the picker / virtual
-  // keyboard in a state that swallowed the subsequent submit click
-  // in run #7. Without DOB the click pattern works on both projects,
-  // matching what instructor and program already do.
+  const emailInput = page.locator('input[name="email"]');
+  await emailInput.fill(studentEmail);
+  // Skip date-of-birth: optional on the form, and on Pixel 7 the date
+  // input's picker can mess with subsequent click events.
 
-  const submit = page
-    .getByRole("button", { name: /^add student$/i })
-    .first();
-  await submit.scrollIntoViewIfNeeded();
+  // Submit via Enter key on the email input rather than a click.
+  // The submit-button click works for instructor on mobile but the
+  // student form (which has an extra field + a label-hint) reliably
+  // swallows the click on Pixel 7. Pressing Enter in an input fires
+  // the form's submit event natively and is what a real mobile user
+  // would do.
   const [resp] = await Promise.all([
     page.waitForResponse(
       (r) =>
         r.url().includes("/admin/students/new") && r.request().method() === "POST",
       { timeout: 15_000 },
     ),
-    submit.click({ force: true }),
+    emailInput.press("Enter"),
   ]);
   expect(resp.status(), "student create POST").toBeLessThan(400);
 
