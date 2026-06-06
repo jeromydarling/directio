@@ -208,9 +208,12 @@ test.describe("family practice log (demo)", () => {
     }
     await studentSelect.selectOption({ index: 1 });
 
-    // Date defaults to today.
-    const marker = String(60 + (Date.now() % 30)); // 60-89 minutes
-    await page.locator('input[name="durationMinutes"]').first().fill(marker);
+    // Date defaults to today. Duration gets rendered as "1h Xm" so a
+    // bare number marker doesn't survive — use the notes textarea
+    // (renders verbatim) instead.
+    await page.locator('input[name="durationMinutes"]').first().fill("65");
+    const noteMarker = `e2e-note-${Date.now()}`;
+    await page.locator('textarea[name="notes"]').first().fill(noteMarker);
 
     const submit = page.getByRole("button", { name: /log drive/i }).first();
     await submit.scrollIntoViewIfNeeded();
@@ -226,9 +229,7 @@ test.describe("family practice log (demo)", () => {
     expect(resp.status(), "practice-log POST").toBeLessThan(400);
 
     await page.reload();
-    // Marker should appear in the list somewhere (we just stuffed it
-    // into the "total minutes" column, which renders verbatim).
-    await expect(page.locator("body")).toContainText(new RegExp(marker), {
+    await expect(page.locator("body")).toContainText(noteMarker, {
       timeout: 15_000,
     });
   });
