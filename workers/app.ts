@@ -10,6 +10,7 @@ import {
 } from "../app/lib/host-resolution.server";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
+import { captureTestInbox } from "../app/lib/test-inbox.server";
 
 export { StateAuditWorkflow } from "./state-audit-workflow";
 export { SchedulingBoardDO } from "./scheduling-board";
@@ -105,6 +106,22 @@ const handler = {
         }
       })(),
     );
+  },
+
+  // Inbound email — wired via Cloudflare Email Routing. Test
+  // addresses (e2e+...@<domain>) are buffered to KV so E2E specs can
+  // poll for magic links / receipts / reminders. Non-test recipients
+  // are no-ops here; configure other Email Routing rules in the
+  // Dashboard to forward them.
+  async email(message, env, _ctx) {
+    try {
+      const result = await captureTestInbox(message, env);
+      if (!result.captured) {
+        console.log(`[email] not buffered: ${result.reason}`);
+      }
+    } catch (err) {
+      console.error("[email] capture failed:", err);
+    }
   },
 } satisfies ExportedHandler<Env>;
 

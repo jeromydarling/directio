@@ -42,6 +42,13 @@ interface Env {
   // unset (endpoint returns 503) so production is safe.
   E2E_PURGE_TOKEN?: string;
 
+  // E2E inbound-mail capture. Cloudflare Email Routing forwards
+  // e2e+*@<domain> to the worker's email() handler, which buffers to
+  // KV. Tests poll /api/internal/test-inbox with this Bearer token
+  // to read magic-link emails, receipts, etc. Default unset so the
+  // endpoint returns 503 in production.
+  E2E_INBOX_TOKEN?: string;
+
   // Email-verification gate. Default unset / "off": signup creates
   // the user with an immediate session (no link required), which is
   // how the E2E journey reaches /admin without clicking an email.
