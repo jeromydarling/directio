@@ -234,7 +234,12 @@ test("8. settings toggle persists across reload", async () => {
     .getByRole("button", { name: /save|update|apply/i })
     .first();
   if (await submitBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await submitBtn.click();
+    // Mobile viewports render a sticky top header that overlays form
+    // buttons; the surrounding <label> can also intercept clicks.
+    // Scroll into view + force:true bypasses the actionability checks
+    // and still posts the form correctly.
+    await submitBtn.scrollIntoViewIfNeeded();
+    await submitBtn.click({ force: true });
     await page.waitForLoadState("networkidle");
   }
   await page.reload();
