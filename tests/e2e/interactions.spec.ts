@@ -208,12 +208,17 @@ test.describe("family practice log (demo)", () => {
     }
     await studentSelect.selectOption({ index: 1 });
 
-    // Date defaults to today. Duration gets rendered as "1h Xm" so a
-    // bare number marker doesn't survive — use the notes textarea
-    // (renders verbatim) instead.
-    await page.locator('input[name="durationMinutes"]').first().fill("65");
-    const noteMarker = `e2e-note-${Date.now()}`;
-    await page.locator('textarea[name="notes"]').first().fill(noteMarker);
+    // Persistence assertion: the table renders student name + formatted
+    // duration ("1h 5m" for 65 minutes) + "unsigned" status, but NOT
+    // the notes textarea contents. So we pick a duration whose
+    // formatted form is a stable, unique string for this test run.
+    // Notes are still posted (filled below) — it's a real-shaped
+    // submission — they just aren't part of the persistence check.
+    await page.locator('input[name="durationMinutes"]').first().fill("47");
+    await page
+      .locator('textarea[name="notes"]')
+      .first()
+      .fill(`e2e-${Date.now()}`);
 
     const submit = page.getByRole("button", { name: /log drive/i }).first();
     await submit.scrollIntoViewIfNeeded();
@@ -229,7 +234,12 @@ test.describe("family practice log (demo)", () => {
     expect(resp.status(), "practice-log POST").toBeLessThan(400);
 
     await page.reload();
-    await expect(page.locator("body")).toContainText(noteMarker, {
+    // formatMinutes(47) = "47 min". Demo orgs start with 0 entries
+    // so any new unsigned row with our exact duration string is ours.
+    await expect(page.locator("body")).toContainText("47 min", {
+      timeout: 15_000,
+    });
+    await expect(page.locator("body")).toContainText(/unsigned/i, {
       timeout: 15_000,
     });
   });
