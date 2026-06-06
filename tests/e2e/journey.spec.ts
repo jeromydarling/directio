@@ -231,8 +231,19 @@ test("7b. persistence: create an instructor and verify it survives reload", asyn
     .getByRole("button", { name: /^add instructor$/i })
     .first();
   await submit.scrollIntoViewIfNeeded();
-  await submit.click({ force: true });
-  await page.waitForURL(/\/admin\/instructors/, { timeout: 15_000 });
+  // Wait for the POST response BEFORE clicking — guarantees the form
+  // submit lands at the server before we navigate away. (waitForURL
+  // matching the source URL pattern was resolving instantly and
+  // racing the in-flight POST.)
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/admin/instructors/new") && r.request().method() === "POST",
+      { timeout: 15_000 },
+    ),
+    submit.click({ force: true }),
+  ]);
+  expect(resp.status(), "instructor create POST").toBeLessThan(400);
 
   await page.goto("/admin/instructors");
   await expect(page.locator("body")).toContainText(instructorLast, {
@@ -276,8 +287,15 @@ test("7d. persistence: create a program and verify it survives reload", async ()
     .getByRole("button", { name: /^create program$/i })
     .first();
   await submit.scrollIntoViewIfNeeded();
-  await submit.click({ force: true });
-  await page.waitForURL(/\/admin\/programs/, { timeout: 15_000 });
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/admin/programs/new") && r.request().method() === "POST",
+      { timeout: 15_000 },
+    ),
+    submit.click({ force: true }),
+  ]);
+  expect(resp.status(), "program create POST").toBeLessThan(400);
 
   await page.goto("/admin/programs");
   await expect(page.locator("body")).toContainText(programName, {
@@ -305,8 +323,15 @@ test("7e. persistence: create a student and verify it survives reload", async ()
     .getByRole("button", { name: /^add student$/i })
     .first();
   await submit.scrollIntoViewIfNeeded();
-  await submit.click({ force: true });
-  await page.waitForURL(/\/admin\/students/, { timeout: 15_000 });
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/admin/students/new") && r.request().method() === "POST",
+      { timeout: 15_000 },
+    ),
+    submit.click({ force: true }),
+  ]);
+  expect(resp.status(), "student create POST").toBeLessThan(400);
 
   await page.goto("/admin/students");
   await expect(page.locator("body")).toContainText(studentLast, {
