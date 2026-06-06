@@ -320,26 +320,22 @@ test("7e. persistence: create a student and verify it survives reload", async ()
   await page.locator('input[name="lastName"]').fill(studentLast);
   await page.locator('input[name="email"]').fill(studentEmail);
   // Skip date-of-birth: it's optional on the form, and filling a
-  // <input type="date"> on Pixel 7 (mobile Chromium) leaves the
-  // virtual keyboard / picker in a state that prevents the next
-  // submit-button click from firing. We don't need DOB to prove the
-  // create flow persists.
+  // <input type="date"> on Pixel 7 leaves the picker / virtual
+  // keyboard in a state that swallowed the subsequent submit click
+  // in run #7. Without DOB the click pattern works on both projects,
+  // matching what instructor and program already do.
 
-  // Submit by calling form.requestSubmit() directly — bypasses any
-  // click intercepts from sticky headers or labels, and works
-  // identically on mobile + desktop. Listens for the POST first so
-  // we don't race the navigation.
+  const submit = page
+    .getByRole("button", { name: /^add student$/i })
+    .first();
+  await submit.scrollIntoViewIfNeeded();
   const [resp] = await Promise.all([
     page.waitForResponse(
       (r) =>
         r.url().includes("/admin/students/new") && r.request().method() === "POST",
       { timeout: 15_000 },
     ),
-    page.evaluate(() => {
-      const form = document.querySelector("form") as HTMLFormElement | null;
-      if (!form) throw new Error("no form on /admin/students/new");
-      form.requestSubmit();
-    }),
+    submit.click({ force: true }),
   ]);
   expect(resp.status(), "student create POST").toBeLessThan(400);
 
