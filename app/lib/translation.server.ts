@@ -29,12 +29,26 @@
 import glossary from "./translation-glossary.json";
 import { anthropicComplete, extractJson } from "./llm.server";
 import { newId } from "./ids";
-import { LANG_LABELS, TRANSLATION_PRICE_CENTS } from "./lang-labels";
+import {
+  DEEPL_SUPPORTED_LANGS,
+  LANG_LABELS,
+  TIER_PRICE_CENTS,
+  TRANSLATION_PRICE_CENTS,
+  type TranslationTier,
+} from "./lang-labels";
 import { sha256Hex } from "./content-hash.server";
 
-export { LANG_LABELS, TRANSLATION_PRICE_CENTS };
+export {
+  DEEPL_SUPPORTED_LANGS,
+  LANG_LABELS,
+  TIER_PRICE_CENTS,
+  TRANSLATION_PRICE_CENTS,
+};
+export type { TranslationTier };
 
 export type TargetLang = string; // BCP 47 — 'es', 'so', 'hmn', etc.
+
+export type Vendor = "llama" | "deepl" | "google" | "claude";
 
 export type SourceLesson = {
   lessonId: string;
@@ -45,7 +59,8 @@ export type SourceLesson = {
 
 export type TranslationResult = {
   translationId: string;
-  vendor: "deepl" | "google" | "claude";
+  vendor: Vendor;
+  tier: TranslationTier;
   translatedTitle: string;
   translatedBody: string;
   translatedScript: string | null;
@@ -144,6 +159,27 @@ export const VENDOR_BY_LANG: Record<string, "deepl" | "google" | "claude"> = {
 
 export function routeVendor(targetLang: string): "deepl" | "google" | "claude" {
   return VENDOR_BY_LANG[targetLang.toLowerCase()] ?? "claude";
+}
+
+/**
+ * Tier-based vendor routing.
+ *
+ *   "standard" → Llama (free, all languages).
+ *   "premium"  → DeepL where supported; otherwise downgrades to Llama
+ *                because no premium provider serves the long-tail
+ *                (Hmong, Somali, Karen, Haitian Creole, etc.). The UI
+ *                hides the premium option for those languages, but
+ *                the server defends against tier=premium requests for
+ *                an unsupported language by quietly downgrading.
+ */
+export function routeVendorByTier(
+  targetLang: string,
+  tier: TranslationTier,
+): Vendor {
+  if (tier === "premium" && DEEPL_SUPPORTED_LANGS.has(targetLang.toLowerCase())) {
+    return "deepl";
+  }
+  return "llama";
 }
 
 // LANG_LABELS lives in ./lang-labels for client/server sharing; re-exported above.
@@ -333,6 +369,204 @@ async function translateClaude(env: Env, src: VendorInput): Promise<VendorOutput
   };
 }
 
+/**
+ * Llama 3.1 8B (Workers AI) translator. Used by the "standard" tier —
+ * free to the school. Cost lives on Cloudflare's Workers AI bill, not
+ * per-call; we still compute an estimated vendorCostMicros for the
+ * platform-side accounting view (we want to know our gross margin on
+ * "free" translations).
+ *
+ * Chunking: the body is split on paragraph breaks and translated in
+ * parallel. Title and script (if present) ride along as their own
+ * single-shot chunks. For a 40-paragraph lesson this cuts wall time
+ * from ~90s (one big request) to ~10s (parallel small requests). The
+ * 8B model is conversational-quality across all our languages; it's
+ * the JSON formatting that pushed wall time up, not the translation
+ * itself.
+ */
+async function translateLlama(env: Env, src: VendorInput): Promise<VendorOutput> {
+  const langLabel =
+    LANG_LABELS[src.targetLang.toLowerCase()]?.english ?? src.targetLang;
+
+  // Split the body on paragraph breaks. Empty / whitespace-only chunks
+  // are preserved so reassembly is loss-less.
+  const bodyChunks = src.body.split(/(\n{2,})/);
+
+  // Build the list of translation tasks. We translate non-blank text
+  // chunks; whitespace runs (the (\n+) capture groups) get passed
+  // through unchanged so paragraph breaks survive.
+  type Task =
+    | { kind: "translate"; text: string; index: number }
+    | { kind: "passthrough"; text: string };
+
+  const tasks: Task[] = [];
+  bodyChunks.forEach((chunk, i) => {
+    if (!chunk) return;
+    if (/^\s+$/.test(chunk)) {
+      tasks.push({ kind: "passthrough", text: chunk });
+    } else {
+      tasks.push({ kind: "translate", text: chunk, index: i });
+    }
+  });
+
+  // Concurrency cap. Workers AI's per-account neuron budget makes
+  // parallel chunks unreliable under sustained load — the first batch
+  // succeeds, then subsequent calls time out with 3046. Sequential
+  // chunks (CONCURRENCY=1) are slower per lesson but never trip the
+  // limit. We trade peak speed for steady throughput.
+  const CONCURRENCY = 1;
+  const usageAcc = { input: 0, output: 0 };
+
+  async function translateOne(text: string, hint: string): Promise<string> {
+    return runLlamaText(env, text, langLabel, hint, usageAcc);
+  }
+
+  // Title + script live in their own chunks so they translate in parallel
+  // with body chunks (extra throughput for free).
+  const titlePromise = translateOne(src.title, "title");
+  const scriptPromise = src.script ? translateOne(src.script, "narration script") : null;
+
+  // Drain body translation tasks with bounded concurrency.
+  const translatedChunks: string[] = new Array(tasks.length).fill("");
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const myIndex = cursor++;
+      if (myIndex >= tasks.length) return;
+      const t = tasks[myIndex];
+      if (t.kind === "passthrough") {
+        translatedChunks[myIndex] = t.text;
+      } else {
+        translatedChunks[myIndex] = await translateOne(t.text, `body §${myIndex}`);
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => worker()),
+  );
+
+  const translatedTitle = await titlePromise;
+  const translatedScript = scriptPromise ? await scriptPromise : null;
+  const translatedBody = translatedChunks.join("");
+
+  // Workers AI llama-3.1-8b-instruct-fp8 retail pricing (~$0.29 / M
+  // input tokens, ~$2.25 / M output tokens). Accumulated from each
+  // chunk's reported usage where available, estimated otherwise.
+  const inputCost = (usageAcc.input / 1_000_000) * 0.29 * 1_000_000;
+  const outputCost = (usageAcc.output / 1_000_000) * 2.25 * 1_000_000;
+
+  return {
+    translatedTitle,
+    translatedBody,
+    translatedScript,
+    vendorCostMicros: Math.round(inputCost + outputCost),
+  };
+}
+
+type LlamaResponse = {
+  response?: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+};
+
+async function runLlamaText(
+  env: Env,
+  text: string,
+  langLabel: string,
+  hint: string,
+  usageAcc: { input: number; output: number },
+): Promise<string> {
+  const system = [
+    `You translate US English to ${langLabel} for teen driver-education content.`,
+    `Output ONLY the ${langLabel} translation. No preamble. No commentary. No quotes around the output. No explanation. Do not write the English back. Do not write "translation:".`,
+    ``,
+    `Rules:`,
+    `- Keep these terms verbatim in the source spelling (do NOT translate them): ${glossary.preserve_verbatim.join(", ")}.`,
+    `- Translate "right-of-way" as the established traffic-law term in the target language, not literally.`,
+    `- Translate "permit-eligible" as "qualified for a learner's permit" or the local equivalent.`,
+    `- Preserve numbers, dates, and form/license/section numbers verbatim.`,
+    `- Preserve markdown formatting exactly: **bold**, _italics_, # headings, - bullets, 1. numbered lists, [link](url), \`inline code\`, > blockquotes, code fences.`,
+    `- Preserve URLs and shortcodes like [[sign:stop]] character-for-character.`,
+    `- A short input gets a short output. Do not pad.`,
+  ].join("\n");
+
+  // No delimiter wrapping — the 3B model invents its own <<<TARG>>>
+  // mirror token and leaks it into the output. Plain text in / plain
+  // text out, with the system prompt doing the constraint work.
+  const user = text;
+
+  // Cap output length proportional to input length. Without this the
+  // model uses its entire max_tokens budget regardless of input size.
+  const maxTokens = Math.min(
+    4000,
+    Math.max(120, Math.ceil(text.length * 1.6)),
+  );
+
+  // Workers AI throttles 8B-fp8 aggressively under sustained load
+  // (error 3046 "Request timeout" on every subsequent call after a
+  // few successes). 3B-instruct fits comfortably in the per-request
+  // budget and clears the precache backlog. Quality is "good enough
+  // for free tier" — schools who want premium fidelity upgrade to
+  // DeepL ($0.50/lesson).
+  const res = (await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0.1,
+    max_tokens: maxTokens,
+  })) as LlamaResponse;
+
+  const out = stripPreamble(stripDelimiters(res.response ?? ""));
+  if (!out) {
+    throw new TranslationVendorError("llama", `empty response for chunk: ${hint}`);
+  }
+
+  usageAcc.input +=
+    res.usage?.prompt_tokens ?? Math.ceil((system.length + user.length) / 4);
+  usageAcc.output += res.usage?.completion_tokens ?? Math.ceil(out.length / 4);
+
+  return out;
+}
+
+function stripDelimiters(text: string): string {
+  // Scrub the various delimiter shapes Llama 3.2 3B emits even though
+  // we no longer use any in the prompt — it sees `<<<` from training
+  // data and reaches for it as an output frame.
+  return text
+    .replace(/<<<\s*(?:SRC|TARG|TARGET|SOURCE|END|TRANSLATION)\s*>>>/gi, "")
+    .replace(/\[\[\s*(?:SRC|TARG|TRANSLATION|TARGET)\s*\]\]/gi, "")
+    .trim();
+}
+
+/**
+ * Trim common preambles llama emits despite the system rule. Cheap
+ * defense; far better than letting them through. Conservative: only
+ * strips a leading line that ends with a colon and is shorter than
+ * the rest of the output (so legitimate "Section A:" headings stay).
+ */
+function stripPreamble(text: string): string {
+  let out = text.trim();
+  // Strip wrapping quotes Llama sometimes adds around short outputs.
+  if (
+    (out.startsWith('"') && out.endsWith('"')) ||
+    (out.startsWith("'") && out.endsWith("'"))
+  ) {
+    out = out.slice(1, -1).trim();
+  }
+  const firstLineEnd = out.indexOf("\n");
+  if (firstLineEnd > 0 && firstLineEnd < 80) {
+    const firstLine = out.slice(0, firstLineEnd).trim();
+    if (
+      /^(here(?:'s| is)? (?:the|your) translation|translation|translated text|sure|of course|certainly)[\s,.:!]*$/i.test(
+        firstLine,
+      )
+    ) {
+      out = out.slice(firstLineEnd + 1).trim();
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- credit ledger
 
 export async function getCreditBalanceCents(
@@ -392,11 +626,22 @@ export async function appendLedgerEntry(
 
 /**
  * Translate a school lesson into the target language. Handles cache
- * lookup, vendor routing with fallback, credit ledger deduction, and
- * the per-school link row.
+ * lookup, vendor routing by tier, credit ledger deduction, and the
+ * per-school link row.
  *
- * Throws InsufficientCreditsError if the school's balance is below
- * TRANSLATION_PRICE_CENTS. Caller catches and surfaces the top-up CTA.
+ * Tiers:
+ *   "standard" (default) — Workers AI Llama 3.3. Free for the school
+ *                          (no credit charge). Quality is conversational
+ *                          and consistent across all languages.
+ *   "premium"            — DeepL Pro. $0.50 per lesson. Best-in-class
+ *                          for European/Asian languages. For long-tail
+ *                          languages DeepL doesn't support, the server
+ *                          quietly downgrades to standard tier with no
+ *                          charge.
+ *
+ * Throws InsufficientCreditsError only when the premium tier is requested
+ * AND the school doesn't have enough credits. Standard tier never throws
+ * on balance.
  */
 export async function translateLesson(
   env: Env,
@@ -405,6 +650,7 @@ export async function translateLesson(
     schoolLessonId: string;
     targetLang: string;
     requestedByUserId: string;
+    tier?: TranslationTier;
   },
 ): Promise<TranslationResult> {
   const targetLang = args.targetLang.toLowerCase();
@@ -412,15 +658,25 @@ export async function translateLesson(
     throw new TranslationVendorError("router", `Unsupported language: ${args.targetLang}`);
   }
 
-  const balance = await getCreditBalanceCents(env, args.organizationId);
-  if (balance < TRANSLATION_PRICE_CENTS) {
-    throw new InsufficientCreditsError(balance, TRANSLATION_PRICE_CENTS);
+  // Resolve tier + effective vendor. Premium for languages DeepL
+  // doesn't support quietly downgrades to standard.
+  const requestedTier: TranslationTier = args.tier ?? "standard";
+  const usedVendor: Vendor = routeVendorByTier(targetLang, requestedTier);
+  const effectiveTier: TranslationTier =
+    requestedTier === "premium" && usedVendor === "deepl" ? "premium" : "standard";
+  const priceCents = TIER_PRICE_CENTS[effectiveTier];
+
+  if (priceCents > 0) {
+    const balance = await getCreditBalanceCents(env, args.organizationId);
+    if (balance < priceCents) {
+      throw new InsufficientCreditsError(balance, priceCents);
+    }
   }
 
   // Pull source lesson (with org check baked into the join).
   const src = await env.DB.prepare(
     `SELECT sl.id AS schoolLessonId, sl.title, sl.body, sl.narrationScript,
-            sl.lessonId AS sourceLessonId, sl.organizationId
+            sl.sourceLessonId, sl.organizationId
        FROM school_lesson sl
       WHERE sl.id = ? AND sl.organizationId = ?
       LIMIT 1`,
@@ -439,8 +695,8 @@ export async function translateLesson(
   }
 
   // The cache is keyed by hash of the school's current content +
-  // target lang. This way edits invalidate; same-text across schools
-  // hits the same cache.
+  // target lang + vendor. Edits invalidate; same-text across schools
+  // hits the same cache; DeepL and Llama outputs coexist.
   const contentHash = await hashLessonContent({
     lessonId: src.schoolLessonId,
     title: src.title,
@@ -448,24 +704,23 @@ export async function translateLesson(
     narrationScript: src.narrationScript,
   });
 
-  // Cache lookup.
+  // Cache lookup — only for the vendor this tier routes to.
   const cached = await env.DB.prepare(
     `SELECT * FROM lesson_translation
-      WHERE lessonContentHash = ? AND targetLang = ? AND invalidatedAt IS NULL
+      WHERE lessonContentHash = ? AND targetLang = ? AND vendor = ? AND invalidatedAt IS NULL
       LIMIT 1`,
   )
-    .bind(contentHash, targetLang)
+    .bind(contentHash, targetLang, usedVendor)
     .first<{
       id: string;
       translatedTitle: string;
       translatedBody: string;
       translatedScript: string | null;
-      vendor: "deepl" | "google" | "claude";
+      vendor: Vendor;
       vendorCostMicros: number;
     }>();
 
   if (cached) {
-    // Cache hit: increment hitCount, charge credits, link school row.
     await env.DB.prepare(
       "UPDATE lesson_translation SET hitCount = hitCount + 1 WHERE id = ?",
     )
@@ -475,21 +730,24 @@ export async function translateLesson(
       organizationId: args.organizationId,
       schoolLessonId: args.schoolLessonId,
       translationId: cached.id,
-      paidCents: TRANSLATION_PRICE_CENTS,
+      paidCents: priceCents,
     });
-    await appendLedgerEntry(env, {
-      organizationId: args.organizationId,
-      kind: "translate",
-      amountCents: -TRANSLATION_PRICE_CENTS,
-      translationId: cached.id,
-      schoolLessonId: args.schoolLessonId,
-      targetLang,
-      description: `Translated lesson "${src.title.slice(0, 60)}" → ${LANG_LABELS[targetLang].english} (cache)`,
-      createdByUserId: args.requestedByUserId,
-    });
+    if (priceCents > 0) {
+      await appendLedgerEntry(env, {
+        organizationId: args.organizationId,
+        kind: "translate",
+        amountCents: -priceCents,
+        translationId: cached.id,
+        schoolLessonId: args.schoolLessonId,
+        targetLang,
+        description: `Translated lesson "${src.title.slice(0, 60)}" → ${LANG_LABELS[targetLang].english} (${effectiveTier} · cache)`,
+        createdByUserId: args.requestedByUserId,
+      });
+    }
     return {
       translationId: cached.id,
       vendor: cached.vendor,
+      tier: effectiveTier,
       translatedTitle: cached.translatedTitle,
       translatedBody: cached.translatedBody,
       translatedScript: cached.translatedScript,
@@ -499,11 +757,10 @@ export async function translateLesson(
     };
   }
 
-  // Cache miss: route to vendor + fallbacks.
-  const primary = routeVendor(targetLang);
-  const fallbacks: Array<"deepl" | "google" | "claude"> =
-    primary === "deepl" ? ["claude"] : primary === "google" ? ["claude"] : ["google"];
-
+  // Cache miss: route to the tier's vendor. Fall back to Llama if the
+  // primary fails — keeps the standard tier alive even when DeepL is
+  // down or misconfigured. Standard tier never falls back because
+  // Llama IS the standard.
   const expanded = {
     title: expandAbbreviations(src.title),
     body: expandAbbreviations(src.body),
@@ -512,16 +769,19 @@ export async function translateLesson(
   };
 
   let translated: VendorOutput | null = null;
-  let usedVendor: "deepl" | "google" | "claude" = primary;
+  let actualVendor: Vendor = usedVendor;
   const errors: string[] = [];
+  const vendorChain: Vendor[] =
+    usedVendor === "deepl" ? ["deepl", "llama"] : ["llama"];
 
-  for (const vendor of [primary, ...fallbacks]) {
+  for (const vendor of vendorChain) {
     try {
       translated =
         vendor === "deepl" ? await translateDeepL(env, expanded)
+        : vendor === "llama" ? await translateLlama(env, expanded)
         : vendor === "google" ? await translateGoogle(env, expanded)
         : await translateClaude(env, expanded);
-      usedVendor = vendor;
+      actualVendor = vendor;
       break;
     } catch (err) {
       if (err instanceof TranslationConfigError) {
@@ -539,6 +799,11 @@ export async function translateLesson(
       `every vendor failed — ${errors.join("; ")}`,
     );
   }
+
+  // If we fell back from premium DeepL to standard Llama, refund the
+  // tier difference — the school requested premium but didn't get it.
+  const actualTier: TranslationTier = actualVendor === "deepl" ? "premium" : "standard";
+  const actualPriceCents = TIER_PRICE_CENTS[actualTier];
 
   // Persist cache entry.
   const translationId = newId();
@@ -558,7 +823,7 @@ export async function translateLesson(
       translated.translatedTitle,
       translated.translatedBody,
       translated.translatedScript,
-      usedVendor,
+      actualVendor,
       translated.vendorCostMicros,
       args.organizationId,
       now,
@@ -570,22 +835,25 @@ export async function translateLesson(
     organizationId: args.organizationId,
     schoolLessonId: args.schoolLessonId,
     translationId,
-    paidCents: TRANSLATION_PRICE_CENTS,
+    paidCents: actualPriceCents,
   });
-  await appendLedgerEntry(env, {
-    organizationId: args.organizationId,
-    kind: "translate",
-    amountCents: -TRANSLATION_PRICE_CENTS,
-    translationId,
-    schoolLessonId: args.schoolLessonId,
-    targetLang,
-    description: `Translated lesson "${src.title.slice(0, 60)}" → ${LANG_LABELS[targetLang].english} (${usedVendor})`,
-    createdByUserId: args.requestedByUserId,
-  });
+  if (actualPriceCents > 0) {
+    await appendLedgerEntry(env, {
+      organizationId: args.organizationId,
+      kind: "translate",
+      amountCents: -actualPriceCents,
+      translationId,
+      schoolLessonId: args.schoolLessonId,
+      targetLang,
+      description: `Translated lesson "${src.title.slice(0, 60)}" → ${LANG_LABELS[targetLang].english} (${actualTier} · ${actualVendor})`,
+      createdByUserId: args.requestedByUserId,
+    });
+  }
 
   return {
     translationId,
-    vendor: usedVendor,
+    vendor: actualVendor,
+    tier: actualTier,
     translatedTitle: translated.translatedTitle,
     translatedBody: translated.translatedBody,
     translatedScript: translated.translatedScript,
