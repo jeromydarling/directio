@@ -223,9 +223,14 @@ test("7b. persistence: create an instructor and verify it survives reload", asyn
   const instructorLast = `Test ${TS}`;
   const instructorEmail = `e2e-instructor-${TS}@directio.dev`;
 
-  await page.getByLabel(/^first name$/i).first().fill(instructorFirst);
-  await page.getByLabel(/^last name$/i).first().fill(instructorLast);
-  await page.getByLabel(/^email$/i).first().fill(instructorEmail);
+  // Use name-attribute selectors instead of labels — Field components
+  // include a "hint" string inside the <label>, which Playwright reads
+  // as part of the accessible name. /^email$/i then doesn't match
+  // labels like "Email If they already have…". input[name=] is rock-
+  // solid because the form posts by name anyway.
+  await page.locator('input[name="firstName"]').fill(instructorFirst);
+  await page.locator('input[name="lastName"]').fill(instructorLast);
+  await page.locator('input[name="email"]').fill(instructorEmail);
 
   const submit = page
     .getByRole("button", { name: /^add instructor$/i })
@@ -257,11 +262,11 @@ test("7c. persistence: create a vehicle and verify it survives reload", async ()
   await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
 
   const vehicleLabel = `E2E Car ${TS}`;
-  const nameInput = page.getByLabel(/^label$/i).first();
+  const nameInput = page.locator('input[name="label"]');
   await expect(nameInput).toBeVisible({ timeout: 15_000 });
   await nameInput.fill(vehicleLabel);
-  await page.getByLabel(/make \/ model/i).first().fill("Honda Civic");
-  await page.getByLabel(/^year$/i).first().fill("2024");
+  await page.locator('input[name="makeModel"]').fill("Honda Civic");
+  await page.locator('input[name="year"]').fill("2024");
 
   const submit = page.getByRole("button", { name: /^add vehicle$/i }).first();
   await submit.scrollIntoViewIfNeeded();
@@ -279,7 +284,7 @@ test("7d. persistence: create a program and verify it survives reload", async ()
   await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
 
   const programName = `E2E Teen Program ${TS}`;
-  await page.getByLabel(/program name/i).first().fill(programName);
+  await page.locator('input[name="name"]').fill(programName);
 
   // Kind is a select with a "teen" default — leave it. Description is
   // optional — leave it.
@@ -311,10 +316,10 @@ test("7e. persistence: create a student and verify it survives reload", async ()
   const studentLast = `Test ${TS}`;
   const studentEmail = `e2e-student-${TS}@directio.dev`;
 
-  await page.getByLabel(/^first name$/i).first().fill(studentFirst);
-  await page.getByLabel(/^last name$/i).first().fill(studentLast);
-  await page.getByLabel(/^email$/i).first().fill(studentEmail);
-  const dob = page.getByLabel(/date of birth/i).first();
+  await page.locator('input[name="firstName"]').fill(studentFirst);
+  await page.locator('input[name="lastName"]').fill(studentLast);
+  await page.locator('input[name="email"]').fill(studentEmail);
+  const dob = page.locator('input[name="dateOfBirth"]');
   if (await dob.isVisible({ timeout: 2_000 }).catch(() => false)) {
     await dob.fill("2008-01-15");
   }
