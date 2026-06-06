@@ -32,4 +32,16 @@ interface Env {
 
   DEEPL_API_KEY?: string;
   GOOGLE_TRANSLATE_API_KEY?: string;
+
+  // E2E test cleanup. Token-guarded purge endpoint at
+  // /api/admin/purge-user wipes a user + their owned orgs. Default
+  // unset (endpoint returns 503) so production is safe.
+  E2E_PURGE_TOKEN?: string;
+
+  // Email-verification gate. Default unset / "off": signup creates
+  // the user with an immediate session (no link required), which is
+  // how the E2E journey reaches /admin without clicking an email.
+  // Set to "on" to require magic-link verification before completing
+  // signup. This is the one variable to flip.
+  EMAIL_VERIFICATION?: "on" | "off" | string;
 }

@@ -25,6 +25,14 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   const env = context.cloudflare.env;
+  // Email-verification gate. Default off — signup creates the user
+  // with an immediate session (the existing behavior), the magic-link
+  // email is sent as a save-for-next-time backup but never blocks. To
+  // require verification before completing signup, set
+  // EMAIL_VERIFICATION=on in wrangler.jsonc vars; the new-account
+  // branch below will then send only the magic link and not create a
+  // session until the user clicks it.
+  const requireVerification = env.EMAIL_VERIFICATION === "on";
   const auth = getAuth(env);
 
   // Account-merge path: if an account already exists at this email, we
@@ -43,6 +51,22 @@ export async function action({ request, context }: Route.ActionArgs) {
       });
     } catch (err) {
       console.warn("[signup] magic link send failed:", err);
+    }
+    return data({ magicLinkSent: email });
+  }
+
+  // EMAIL_VERIFICATION=on path: don't create an account yet. Send a
+  // magic link; the click finalizes signup. Returns the same UI as
+  // the existing-account merge path.
+  if (requireVerification) {
+    try {
+      await auth.api.signInMagicLink({
+        body: { email, callbackURL: "/admin" },
+        headers: request.headers,
+        asResponse: true,
+      });
+    } catch (err) {
+      console.warn("[signup] verification magic link send failed:", err);
     }
     return data({ magicLinkSent: email });
   }

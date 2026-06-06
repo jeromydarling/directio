@@ -15,3 +15,9 @@
 !.dev.vars.example
 worker-configuration.d.ts
 
+# Playwright
+/playwright-report/
+/test-results/
+/playwright/.cache/
+
+

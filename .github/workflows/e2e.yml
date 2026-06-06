@@ -1,0 +1,58 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Site under test (default: production)"
+        required: false
+        default: "https://godirectio.com"
+
+jobs:
+  playwright:
+    name: playwright / ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [desktop, mobile]
+
+    env:
+      BASE_URL: ${{ inputs.base_url || 'https://godirectio.com' }}
+      E2E_PURGE_TOKEN: ${{ secrets.E2E_PURGE_TOKEN }}
+      CI: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: install npm deps
+        run: npm ci --ignore-scripts
+
+      - name: install playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: list specs (parse check)
+        run: npx playwright test --list
+
+      - name: run playwright
+        run: npx playwright test --project=${{ matrix.project }}
+
+      - name: upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
