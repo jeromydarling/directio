@@ -215,6 +215,123 @@ test("7. persistence: create a location and verify it survives reload", async ()
   });
 });
 
+test("7b. persistence: create an instructor and verify it survives reload", async () => {
+  await page.goto("/admin/instructors/new");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const instructorFirst = "Sam";
+  const instructorLast = `Test ${TS}`;
+  const instructorEmail = `e2e-instructor-${TS}@directio.dev`;
+
+  await page.getByLabel(/^first name$/i).first().fill(instructorFirst);
+  await page.getByLabel(/^last name$/i).first().fill(instructorLast);
+  await page.getByLabel(/^email$/i).first().fill(instructorEmail);
+
+  const submit = page
+    .getByRole("button", { name: /^add instructor$/i })
+    .first();
+  await submit.scrollIntoViewIfNeeded();
+  await submit.click({ force: true });
+  await page.waitForURL(/\/admin\/instructors/, { timeout: 15_000 });
+
+  await page.goto("/admin/instructors");
+  await expect(page.locator("body")).toContainText(instructorLast, {
+    timeout: 15_000,
+  });
+});
+
+test("7c. persistence: create a vehicle and verify it survives reload", async () => {
+  // Vehicles renders an inline form on the index page (no /new route).
+  await page.goto("/admin/vehicles");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const vehicleLabel = `E2E Car ${TS}`;
+  const nameInput = page.getByLabel(/^label$/i).first();
+  await expect(nameInput).toBeVisible({ timeout: 15_000 });
+  await nameInput.fill(vehicleLabel);
+  await page.getByLabel(/make \/ model/i).first().fill("Honda Civic");
+  await page.getByLabel(/^year$/i).first().fill("2024");
+
+  const submit = page.getByRole("button", { name: /^add vehicle$/i }).first();
+  await submit.scrollIntoViewIfNeeded();
+  await submit.click({ force: true });
+  await page.waitForLoadState("networkidle");
+
+  await page.reload();
+  await expect(page.locator("body")).toContainText(vehicleLabel, {
+    timeout: 15_000,
+  });
+});
+
+test("7d. persistence: create a program and verify it survives reload", async () => {
+  await page.goto("/admin/programs/new");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const programName = `E2E Teen Program ${TS}`;
+  await page.getByLabel(/program name/i).first().fill(programName);
+
+  // Kind is a select with a "teen" default — leave it. Description is
+  // optional — leave it.
+  const submit = page
+    .getByRole("button", { name: /^create program$/i })
+    .first();
+  await submit.scrollIntoViewIfNeeded();
+  await submit.click({ force: true });
+  await page.waitForURL(/\/admin\/programs/, { timeout: 15_000 });
+
+  await page.goto("/admin/programs");
+  await expect(page.locator("body")).toContainText(programName, {
+    timeout: 15_000,
+  });
+});
+
+test("7e. persistence: create a student and verify it survives reload", async () => {
+  await page.goto("/admin/students/new");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const studentFirst = "Jamie";
+  const studentLast = `Test ${TS}`;
+  const studentEmail = `e2e-student-${TS}@directio.dev`;
+
+  await page.getByLabel(/^first name$/i).first().fill(studentFirst);
+  await page.getByLabel(/^last name$/i).first().fill(studentLast);
+  await page.getByLabel(/^email$/i).first().fill(studentEmail);
+  const dob = page.getByLabel(/date of birth/i).first();
+  if (await dob.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await dob.fill("2008-01-15");
+  }
+
+  const submit = page
+    .getByRole("button", { name: /^add student$/i })
+    .first();
+  await submit.scrollIntoViewIfNeeded();
+  await submit.click({ force: true });
+  await page.waitForURL(/\/admin\/students/, { timeout: 15_000 });
+
+  await page.goto("/admin/students");
+  await expect(page.locator("body")).toContainText(studentLast, {
+    timeout: 15_000,
+  });
+});
+
+test("7f. schedule list + board pages render", async () => {
+  // Without an enrollment (which requires Stripe checkout) we can't
+  // book a lesson. Verify the schedule LIST and BOARD pages at least
+  // render their h1 — the routes themselves are nontrivial (board
+  // mounts a Durable Object websocket) and a 500 here would mask a
+  // real regression.
+  for (const path of ["/admin/schedule", "/admin/schedule/board"]) {
+    await page.goto(path);
+    await expect(page.locator("body"), `${path} body`).not.toContainText(
+      "Oops!",
+    );
+    await expect(
+      page.getByRole("heading", { level: 1 }).first(),
+      `${path} h1`,
+    ).toBeVisible({ timeout: 15_000 });
+  }
+});
+
 test("8. settings toggle persists across reload", async () => {
   await page.goto("/admin/settings");
   await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
