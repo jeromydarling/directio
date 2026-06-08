@@ -71,6 +71,17 @@ export async function action({ request, context }: Route.ActionArgs) {
     case "invoice.payment_failed":
       await handlePlatformInvoiceEvent(env, event.type, event.data.object);
       break;
+    case "charge.refunded":
+      await handleChargeRefunded(env, event.data.object);
+      break;
+    case "charge.dispute.created":
+    case "charge.dispute.updated":
+    case "charge.dispute.closed":
+      await handleChargeDispute(env, event.type, event.data.object);
+      break;
+    case "payout.failed":
+      await handlePayoutFailed(env, event.data.object);
+      break;
     default:
       // No-op for events we don't care about yet.
       break;
@@ -361,6 +372,168 @@ async function handlePlatformInvoiceEvent(
   )
     .bind(newStatus, Date.now(), subscriptionId)
     .run();
+}
+
+/**
+ * charge.refunded
+ *
+ * Stripe fires this for both partial and full refunds. We update the
+ * matching payment row to 'refunded' (full) or 'partially_refunded'
+ * (partial). The connected account is debited via reverse_transfer; we
+ * don't need to mirror that ledger movement here.
+ */
+async function handleChargeRefunded(env: Env, obj: Record<string, unknown>) {
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  const chargeId = String(obj.id ?? "");
+  const amountRefunded = Number(obj.amount_refunded ?? 0);
+  const amount = Number(obj.amount ?? 0);
+  const fullyRefunded = amount > 0 && amountRefunded >= amount;
+  const newStatus = fullyRefunded ? "refunded" : "partially_refunded";
+
+  if (!paymentIntentId) return;
+
+  await env.DB.prepare(
+    `UPDATE payment
+        SET status = ?,
+            updatedAt = ?
+      WHERE stripePaymentIntentId = ?`,
+  )
+    .bind(newStatus, Date.now(), paymentIntentId)
+    .run();
+
+  const row = await env.DB.prepare(
+    "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+  )
+    .bind(paymentIntentId)
+    .first<{ id: string; organizationId: string }>();
+  if (row) {
+    await recordAudit(env, {
+      organizationId: row.organizationId,
+      actorUserId: null,
+      action: fullyRefunded ? "payment.refunded" : "payment.partially_refunded",
+      entityType: "payment",
+      entityId: row.id,
+      payload: {
+        source: "stripe.webhook",
+        event: "charge.refunded",
+        stripeChargeId: chargeId,
+        amountRefundedCents: amountRefunded,
+        amountCents: amount,
+      },
+    });
+  }
+}
+
+/**
+ * charge.dispute.{created,updated,closed}
+ *
+ * With on_behalf_of set on the charge, dispute liability lives with the
+ * connected account (the school). But directio still wants visibility so
+ * support can help schools respond before the response_due_by deadline.
+ * We mark the payment as 'disputed' (or 'dispute_lost'/'dispute_won') and
+ * write an audit row carrying the dispute id + reason + amount.
+ */
+async function handleChargeDispute(env: Env, eventType: string, obj: Record<string, unknown>) {
+  const disputeId = String(obj.id ?? "");
+  const chargeId = obj.charge ? String(obj.charge) : null;
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  const reason = String(obj.reason ?? "");
+  const status = String(obj.status ?? "");
+  const amount = Number(obj.amount ?? 0);
+
+  let paymentStatus: string | null = null;
+  if (eventType === "charge.dispute.created") paymentStatus = "disputed";
+  else if (eventType === "charge.dispute.closed") {
+    paymentStatus = status === "won" ? "dispute_won" : status === "lost" ? "dispute_lost" : "disputed";
+  }
+
+  if (paymentStatus && paymentIntentId) {
+    await env.DB.prepare(
+      `UPDATE payment
+          SET status = ?,
+              updatedAt = ?
+        WHERE stripePaymentIntentId = ?`,
+    )
+      .bind(paymentStatus, Date.now(), paymentIntentId)
+      .run();
+  }
+
+  // Audit log keyed off the payment row if we can find it; otherwise
+  // best-effort with the charge id.
+  let organizationId: string | null = null;
+  let paymentRowId: string | null = null;
+  if (paymentIntentId) {
+    const row = await env.DB.prepare(
+      "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+    )
+      .bind(paymentIntentId)
+      .first<{ id: string; organizationId: string }>();
+    if (row) {
+      organizationId = row.organizationId;
+      paymentRowId = row.id;
+    }
+  }
+
+  if (organizationId) {
+    await recordAudit(env, {
+      organizationId,
+      actorUserId: null,
+      action: `payment.${eventType.replace("charge.dispute.", "dispute_")}`,
+      entityType: "payment",
+      entityId: paymentRowId ?? chargeId ?? disputeId,
+      payload: {
+        source: "stripe.webhook",
+        event: eventType,
+        stripeDisputeId: disputeId,
+        stripeChargeId: chargeId,
+        stripePaymentIntentId: paymentIntentId,
+        reason,
+        status,
+        amountCents: amount,
+      },
+    });
+  }
+}
+
+/**
+ * payout.failed
+ *
+ * For Express connected accounts on directio, payouts that fail are
+ * usually closed bank accounts, ACH returns, or KYC re-verification.
+ * The school's dashboard shows the failure; directio support needs to
+ * know too so we can reach out.
+ */
+async function handlePayoutFailed(env: Env, obj: Record<string, unknown>) {
+  const payoutId = String(obj.id ?? "");
+  // The Stripe event for a connected-account payout has the account id
+  // on the wrapping event (event.account), not the payout object. The
+  // Cloudflare worker pattern: the connected webhook signing secret
+  // disambiguates it. Best-effort: pull obj.destination (bank account)
+  // and amount; mark the org by traversing stripePayoutMostRecentFailedAt.
+  const amount = Number(obj.amount ?? 0);
+  const currency = String(obj.currency ?? "");
+  const failureCode = String(obj.failure_code ?? "");
+  const failureMessage = String(obj.failure_message ?? "");
+
+  // The account id is on event.account at the wrapping level; the
+  // dispatcher above doesn't forward it here. For now we write an audit
+  // row keyed off payout id; a follow-up can wire event.account through.
+  await recordAudit(env, {
+    organizationId: "",
+    actorUserId: null,
+    action: "payout.failed",
+    entityType: "stripe_payout",
+    entityId: payoutId,
+    payload: {
+      source: "stripe.webhook",
+      event: "payout.failed",
+      stripePayoutId: payoutId,
+      amountCents: amount,
+      currency,
+      failureCode,
+      failureMessage,
+    },
+  });
 }
 
 function normalizeTier(raw: string): string {

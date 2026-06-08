@@ -187,6 +187,11 @@ export async function createCheckoutSession(
     body["payment_method_types[0]"] = "card";
     body["payment_intent_data[application_fee_amount]"] = args.platformFeeCents;
     body["payment_intent_data[transfer_data][destination]"] = args.accountId;
+    // on_behalf_of moves dispute/chargeback liability to the connected
+    // account (the school), matching directio's marketing copy that
+    // says "schools handle disputes/refunds". Without this, destination
+    // charges keep liability on the platform (directio) by default.
+    body["payment_intent_data[on_behalf_of]"] = args.accountId;
   } else if (args.option === "bnpl") {
     body.mode = "payment";
     const methods = args.bnplMethods ?? ["affirm", "klarna"];
@@ -196,6 +201,7 @@ export async function createCheckoutSession(
     });
     body["payment_intent_data[application_fee_amount]"] = args.platformFeeCents;
     body["payment_intent_data[transfer_data][destination]"] = args.accountId;
+    body["payment_intent_data[on_behalf_of]"] = args.accountId;
   } else {
     body.mode = "subscription";
     body["line_items[0][price_data][recurring][interval]"] = "month";
@@ -207,6 +213,7 @@ export async function createCheckoutSession(
     body["subscription_data[application_fee_percent]"] =
       Math.round((args.platformFeeCents / args.amountCents) * 10000) / 100;
     body["subscription_data[transfer_data][destination]"] = args.accountId;
+    body["subscription_data[on_behalf_of]"] = args.accountId;
     if (args.installmentMonths) {
       body[`subscription_data[metadata][installmentMonths]`] = args.installmentMonths;
     }
@@ -224,11 +231,22 @@ export async function createCheckoutSession(
 }
 
 /**
- * Refund a charge or PaymentIntent. The connected account keeps the
- * charge but loses the funds; directio's application_fee is
- * refunded proportionally so the school doesn't owe money it never
- * received. Caller passes the amount in cents; pass 0 / undefined
- * for a full refund.
+ * Refund a destination-charge PaymentIntent (or Charge).
+ *
+ * For destination charges (what createCheckoutSession creates) the charge
+ * itself lives on the PLATFORM account, not the connected account. The
+ * matching transfer lives on the connected account. Refunding correctly
+ * requires three things:
+ *   1. Call /refunds on the PLATFORM (no Stripe-Account header).
+ *   2. reverse_transfer=true so the connected account's transfer is
+ *      clawed back; otherwise the school keeps the money the platform
+ *      just gave back to the customer.
+ *   3. refund_application_fee=true so the platform also gives back its
+ *      slice of the original fee, proportional to the refund amount.
+ *
+ * Caller passes the amount in cents; pass 0 / undefined for a full refund.
+ * accountId is kept in the args for API symmetry and audit logging; it
+ * is no longer sent as a Stripe-Account header.
  */
 export async function refundPayment(
   env: Env,
@@ -244,6 +262,7 @@ export async function refundPayment(
     throw new Error("refundPayment needs a paymentIntentId or chargeId.");
   }
   const body: Record<string, string | number> = {
+    reverse_transfer: "true",
     refund_application_fee: "true",
   };
   if (args.paymentIntentId) body.payment_intent = args.paymentIntentId;
@@ -256,7 +275,8 @@ export async function refundPayment(
     headers: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "Stripe-Account": args.accountId,
+      // No Stripe-Account header: destination-charge refunds run on the
+      // platform account; reverse_transfer handles the connected side.
     },
     body: new URLSearchParams(
       Object.entries(body).map(([k, v]) => [k, String(v)]),
