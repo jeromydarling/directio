@@ -48,6 +48,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="color-scheme" content="dark" />
         <Meta />
         <Links />
+        {/* Google Analytics 4 — federated CROS Family stream */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-RKF41M29QE" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-RKF41M29QE', { cros_app: 'directio' });`,
+          }}
+        />
       </head>
       <body>
         {children}
