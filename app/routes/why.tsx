@@ -9,7 +9,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "directio started as a Minnesota parent's frustration with the fragmented mess of portals, paper, and surprise fees in driver education. The story, the convictions, and the technology choices.",
+        "How directio started — a Minnesota parent's frustration with fragmented portals, paper, and surprise fees in driver education. The story and the convictions.",
     },
   ];
 }

@@ -9,7 +9,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "One login, one timeline, one payment history. directio replaces the fragmented mess of portals, paper, and surprise fees families navigate to get a driver's license.",
+        "One login, one timeline, one payment history. directio replaces the portals, paper, and surprise fees families juggle to get a driver's license.",
     },
   ];
 }

@@ -10,7 +10,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "directio is built for the instructor first — daily user, mobile-first, one-handed, signal-poor-friendly. Today view, structured rubric, two-tap sign-off, open-shift queue, pay transparency, cross-school identity.",
+        "Built for the instructor first — mobile, one-handed, signal-poor-friendly. Today view, rubric, two-tap sign-off, open-shift queue, pay transparency.",
     },
   ];
 }

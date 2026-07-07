@@ -9,7 +9,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Driver-ed is a $1B+ industry running on broken software. directio hands you the entire business — classroom, scheduling, payments, paperwork, even your marketing website — so you can start with your instructor cert and a car.",
+        "Driver-ed is a $1B+ industry running on broken software. directio hands you the entire business — classroom, scheduling, payments, paperwork, and website.",
     },
   ];
 }

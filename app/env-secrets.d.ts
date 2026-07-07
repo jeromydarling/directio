@@ -38,6 +38,12 @@ interface Env {
   // unset (endpoint returns 503) so production is safe.
   E2E_PURGE_TOKEN?: string;
 
+  // Super-admin bootstrap. Token-guarded POST endpoint at
+  // /api/admin/promote-super lets the operator promote a user to
+  // platform_admin from a shell. Unset in prod → endpoint 503s so
+  // no accidental privilege escalation.
+  SUPER_BOOTSTRAP_TOKEN?: string;
+
   // Email-verification gate. Default unset / "off": signup creates
   // the user with an immediate session (no link required), which is
   // how the E2E journey reaches /admin without clicking an email.

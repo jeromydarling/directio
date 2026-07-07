@@ -21,6 +21,7 @@ export default [
   route("api/auth/*", "routes/api.auth.tsx"),
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
   route("api/admin/purge-user", "routes/api.admin.purge-user.tsx"),
+  route("api/admin/promote-super", "routes/api.admin.promote-super.tsx"),
   route("api/checkout/studio", "routes/api.checkout.studio.tsx"),
   route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
@@ -34,6 +35,7 @@ export default [
   route("api/translation/topup", "routes/api.translation.topup.tsx"),
   route("sitemap.xml", "routes/sitemap[.]xml.tsx"),
   route("robots.txt", "routes/robots[.]txt.tsx"),
+  route("llms.txt", "routes/llms[.]txt.tsx"),
   route("schools/:slug", "routes/schools.$slug.tsx"),
   route("schools/:slug/enroll", "routes/schools.$slug.enroll.tsx"),
 
@@ -120,6 +122,14 @@ export default [
     route("documents", "routes/family.documents.tsx"),
     route("practice-log", "routes/family.practice-log.tsx"),
     route("certificate/:enrollmentId", "routes/family.certificate.$enrollmentId.tsx"),
+  ]),
+
+  route("super", "routes/super.tsx", [
+    index("routes/super._index.tsx"),
+    route("orgs", "routes/super.orgs.tsx"),
+    route("orgs/:orgId", "routes/super.orgs.$orgId.tsx"),
+    route("map", "routes/super.map.tsx"),
+    route("comms", "routes/super.comms.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [

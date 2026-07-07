@@ -2,6 +2,7 @@ import { createRequestHandler } from "react-router";
 import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
 import { sendDailyDigests } from "../app/lib/daily-digest.server";
 import { sweepExpiredDemos } from "../app/lib/demo-seeder.server";
+import { sendWeeklyDigests } from "../app/lib/weekly-digest.server";
 import {
   redirectWwwToApex,
   resolveSchoolForHost,
@@ -43,6 +44,7 @@ export default {
       // For now, every non-passthrough path on a custom domain renders
       // the school's home page. (Future: per-section pages.)
       const newUrl = new URL(request.url);
+      const originalPath = newUrl.pathname;
       if (newUrl.pathname === "/" || newUrl.pathname === "") {
         newUrl.pathname = `/schools/${schoolSlug}`;
       } else if (newUrl.pathname === "/enroll") {
@@ -50,7 +52,18 @@ export default {
       } else {
         newUrl.pathname = `/schools/${schoolSlug}`;
       }
-      const rewritten = new Request(newUrl.toString(), request);
+      // Preserve the original visitor-facing path. The root loader
+      // consumes it to compute a correct canonical URL for the SEO
+      // <link rel=canonical> that reflects what customers see, not the
+      // internal rewrite target.
+      const rewrittenHeaders = new Headers(request.headers);
+      rewrittenHeaders.set("X-Original-Path", originalPath);
+      const rewritten = new Request(newUrl.toString(), {
+        method: request.method,
+        headers: rewrittenHeaders,
+        body: request.body,
+        redirect: request.redirect,
+      });
       return requestHandler(rewritten, { cloudflare: { env, ctx } });
     }
 
@@ -93,6 +106,19 @@ export default {
           }
         } catch (err) {
           console.error("scheduled daily digest failed:", err);
+        }
+        try {
+          // Weekly value digest — Mondays only; the lib no-ops on
+          // any other weekday. Reduces churn by showing owners what
+          // the platform did for them.
+          const result = await sendWeeklyDigests(env, Date.now());
+          if (result.sent > 0 || result.errored > 0) {
+            console.log(
+              `[cron] weekly digest sent=${result.sent} skipped=${result.skipped} errored=${result.errored}`,
+            );
+          }
+        } catch (err) {
+          console.error("scheduled weekly digest failed:", err);
         }
         try {
           const result = await sweepExpiredDemos(env);

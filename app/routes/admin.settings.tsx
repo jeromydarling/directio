@@ -93,7 +93,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const orgRow = await db
     .prepare(
       `SELECT jurisdiction, dailyDigestEnabled, dailyDigestRecipientEmail,
-              dailyDigestLastSentOnDate, geolocationPolicy,
+              dailyDigestLastSentOnDate, weeklyDigestOptOut,
+              weeklyDigestLastSentOnDate, geolocationPolicy,
               requireAudioCompletionBeforeQuiz
          FROM organization WHERE id = ?`,
     )
@@ -103,6 +104,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       dailyDigestEnabled: number;
       dailyDigestRecipientEmail: string | null;
       dailyDigestLastSentOnDate: string | null;
+      weeklyDigestOptOut: number;
+      weeklyDigestLastSentOnDate: string | null;
       geolocationPolicy: string;
       requireAudioCompletionBeforeQuiz: number;
     }>();
@@ -120,6 +123,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       enabled: Boolean(orgRow?.dailyDigestEnabled),
       recipient: orgRow?.dailyDigestRecipientEmail ?? "",
       lastSentOnDate: orgRow?.dailyDigestLastSentOnDate ?? null,
+      weeklyOptOut: Boolean(orgRow?.weeklyDigestOptOut),
+      weeklyLastSentOnDate: orgRow?.weeklyDigestLastSentOnDate ?? null,
     },
     geolocationPolicy: (orgRow?.geolocationPolicy ?? "off") as
       | "off"
@@ -177,6 +182,9 @@ export async function action({ request, context }: Route.ActionArgs) {
     const enabled = formData.get("dailyDigestEnabled") === "on" ? 1 : 0;
     const email =
       String(formData.get("dailyDigestRecipientEmail") ?? "").trim() || null;
+    // The weekly digest opts in by default, so the settings form
+    // captures the *opt-out* — checkbox unchecked means "do not send".
+    const weeklyOptOut = formData.get("weeklyDigestEnabled") === "on" ? 0 : 1;
     if (enabled && !email) {
       return data(
         { error: "Pick a recipient email if the daily digest is on." },
@@ -185,10 +193,11 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
     await context.cloudflare.env.DB.prepare(
       `UPDATE organization
-          SET dailyDigestEnabled = ?, dailyDigestRecipientEmail = ?
+          SET dailyDigestEnabled = ?, dailyDigestRecipientEmail = ?,
+              weeklyDigestOptOut = ?
         WHERE id = ?`,
     )
-      .bind(enabled, email, tenant.organization.id)
+      .bind(enabled, email, weeklyOptOut, tenant.organization.id)
       .run();
     await recordAudit(context.cloudflare.env, {
       organizationId: tenant.organization.id,
@@ -196,7 +205,11 @@ export async function action({ request, context }: Route.ActionArgs) {
       action: "organization.daily_digest_updated",
       entityType: "organization",
       entityId: tenant.organization.id,
-      payload: { enabled: Boolean(enabled), hasEmail: Boolean(email) },
+      payload: {
+        enabled: Boolean(enabled),
+        hasEmail: Boolean(email),
+        weeklyOptOut: Boolean(weeklyOptOut),
+      },
     });
     return redirect("/admin/settings");
   }
@@ -340,18 +353,24 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
-          Daily digest email
+          Email digests
         </h2>
         <Card>
           <p className="text-sm text-ink-600 dark:text-ink-300">
-            One email a day with the top-line numbers — revenue, fees
+            One email a day with the operational top-line — revenue, fees
             recovered, payroll accrued, lessons in the next 24h, outstanding
-            A/R, instructor licenses expiring. Sends once a day per the
-            platform's hourly cron; tomorrow's digest covers the previous day.
+            A/R, instructor licenses expiring. On Mondays, a separate weekly
+            digest shows what directio did for your business the past week
+            (students onboarded, lessons dispatched, hours saved) with one
+            concrete next-step recommendation.
           </p>
           {digest.enabled && digest.lastSentOnDate && (
             <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
-              Last sent on {digest.lastSentOnDate}.
+              Daily last sent {digest.lastSentOnDate}
+              {digest.weeklyLastSentOnDate
+                ? ` · Weekly last sent ${digest.weeklyLastSentOnDate}`
+                : ""}
+              .
             </p>
           )}
           <Form method="post" className="mt-3 grid gap-3 md:grid-cols-2">
@@ -364,6 +383,15 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
                 className="h-4 w-4 rounded border-ink-300"
               />
               Send me the daily digest
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink-700 dark:text-ink-200">
+              <input
+                type="checkbox"
+                name="weeklyDigestEnabled"
+                defaultChecked={!digest.weeklyOptOut}
+                className="h-4 w-4 rounded border-ink-300"
+              />
+              Send me the Monday value digest
             </label>
             <Field label="Recipient email">
               <TextInput

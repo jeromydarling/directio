@@ -55,24 +55,23 @@ export function meta({ data }: Route.MetaArgs) {
   const ogTagline = sections.meta?.ogTagline ?? sections.hero?.title ?? org.name;
   const ogImage = `${canonical}/og.png`;
 
+  // canonical + og:url + og:site_name + og:image + theme-color are
+  // emitted from root's <Layout>, which reads X-Original-Path so a
+  // custom-domain hit already resolves to the customer-facing URL.
+  // We only emit the per-school title, description, and OG-image tags
+  // here.
   return [
     { title },
     { name: "description", content: description },
     { name: "keywords", content: (sections.meta?.keywords ?? []).join(", ") },
-    { name: "theme-color", content: org.brandColor ?? "#5470c0" },
     { property: "og:title", content: title },
     { property: "og:description", content: description },
-    { property: "og:type", content: "website" },
-    { property: "og:url", content: canonical },
-    { property: "og:site_name", content: org.name },
     { property: "og:image", content: ogImage },
     { property: "og:image:width", content: "1200" },
     { property: "og:image:height", content: "630" },
-    { name: "twitter:card", content: "summary_large_image" },
     { name: "twitter:title", content: title },
     { name: "twitter:description", content: ogTagline },
     { name: "twitter:image", content: ogImage },
-    { tagName: "link", rel: "canonical", href: canonical },
   ];
 }
 
