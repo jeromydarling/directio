@@ -6,6 +6,7 @@
  */
 
 import { isEmailConfigured, sendEmail } from "./email.server";
+import { escapeHtml as escape, isoDate, moneyUsd as money } from "./format";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -113,9 +114,11 @@ async function computeDigest(env: Env, orgId: string, now: number): Promise<Dige
         .bind(orgId, since24h)
         .first<{ n: number }>(),
       env.DB.prepare(
+        // 'failed' attempts are excluded — retries create new rows and
+        // old failures aren't receivables.
         `SELECT COALESCE(SUM(amountCents), 0) AS cents FROM payment
           WHERE organizationId = ?
-            AND status IN ('pending','requires_action','failed')`,
+            AND status IN ('pending','requires_action')`,
       )
         .bind(orgId)
         .first<{ cents: number }>(),
@@ -183,33 +186,3 @@ function digestHtml(name: string, d: Digest, today: string): string {
 </body></html>`;
 }
 
-function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
-function money(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Math.round(cents) / 100);
-}
-
-function escape(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => {
-    switch (c) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return c;
-    }
-  });
-}

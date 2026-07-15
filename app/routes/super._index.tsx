@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/super._index";
 import { requirePlatformAdmin } from "~/lib/super.server";
+import { HEALTH_WATCH_MIN } from "~/lib/super-shared";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,7 +46,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       // Only orgs whose score has actually been computed — the column
       // defaults to 50, so unvisited orgs would otherwise skew this.
       `SELECT COUNT(*) AS n FROM organization
-        WHERE crmHealthScore < 45 AND crmHealthComputedAt IS NOT NULL`,
+        WHERE crmHealthScore < ${HEALTH_WATCH_MIN} AND crmHealthComputedAt IS NOT NULL`,
     ).first<{ n: number }>(),
     env.DB.prepare(
       // Platform subscriptions live as columns on organization

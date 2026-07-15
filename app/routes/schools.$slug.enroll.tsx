@@ -207,12 +207,11 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     .bind(newId(), org.id, parentUserId, now)
     .run();
 
-  // Create the student. The email is stored but NOT linked to any
-  // existing user here — a parent-typed (or typo'd) email on a public
-  // form must not attach a stranger's account to a minor's records.
-  // The student links themselves later via verified magic-link sign-in
+  // Create the student. The email is stored but userId stays NULL — a
+  // parent-typed (or typo'd) email on a public form must not attach a
+  // stranger's account to a minor's records. The student links
+  // themselves later via verified magic-link sign-in
   // (claimPendingMemberships).
-  const studentUserId: string | null = null;
   const studentId = newId();
   await db
     .prepare(
@@ -222,7 +221,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     .bind(
       studentId,
       org.id,
-      studentUserId,
+      null,
       studentFirst,
       studentLast,
       studentEmail,
@@ -357,7 +356,7 @@ export default function PublicEnrollment({ loaderData, actionData }: Route.Compo
             </h1>
             <p className="mt-2 text-sm text-ink-700 dark:text-ink-200">
               An account at this email — <strong>{magicLinkSent}</strong> — already exists.
-              We sent a one-tap sign-in link there so you can open your portal and pay {org.name} for this enrollment. The link works for one hour.
+              We sent a one-tap sign-in link there so you can open your portal and pay {org.name} for this enrollment. The link works for 15 minutes — if it expires, request a new one from the sign-in page.
             </p>
             <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
               If you don't see the email in a minute or two, check spam. You can also{" "}

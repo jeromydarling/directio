@@ -1,5 +1,6 @@
 import { createRequestHandler } from "react-router";
 import { autoCloseExpiredPayPeriods } from "../app/lib/comp";
+import { cronBeatKey } from "../app/lib/cron-specs";
 import { sendDailyDigests } from "../app/lib/daily-digest.server";
 import { sweepExpiredDemos } from "../app/lib/demo-seeder.server";
 import { sendWeeklyDigests } from "../app/lib/weekly-digest.server";
@@ -20,6 +21,13 @@ declare module "react-router" {
       env: Env;
       ctx: ExecutionContext;
     };
+    /**
+     * Visitor-facing path when the Worker rewrote a custom-domain hit
+     * to /schools/:slug. Set ONLY by the rewrite in fetch() below —
+     * unforgeable, unlike a request header. Root's loader uses it for
+     * canonical URLs.
+     */
+    originalPath?: string;
   }
 }
 
@@ -34,18 +42,6 @@ export default {
     // is one cheap redirect, not a full render that then 301s.
     const wwwRedirect = redirectWwwToApex(request);
     if (wwwRedirect) return wwwRedirect;
-
-    // X-Original-Path is a TRUSTED header set only by the custom-
-    // domain rewrite below (the root loader builds canonical URLs
-    // from it). Strip any client-supplied value so a request can't
-    // poison <link rel=canonical> / og:url.
-    if (request.headers.has("X-Original-Path")) {
-      const cleaned = new Headers(request.headers);
-      cleaned.delete("X-Original-Path");
-      // Cast: reconstructing a Request drops the cf-properties type
-      // parameter, but the runtime object is unchanged.
-      request = new Request(request, { headers: cleaned }) as typeof request;
-    }
 
     const url = new URL(request.url);
     const host = request.headers.get("Host") ?? url.host;
@@ -64,31 +60,24 @@ export default {
       } else {
         newUrl.pathname = `/schools/${schoolSlug}`;
       }
-      // Preserve the original visitor-facing path. The root loader
-      // consumes it to compute a correct canonical URL for the SEO
-      // <link rel=canonical> that reflects what customers see, not the
-      // internal rewrite target.
-      const rewrittenHeaders = new Headers(request.headers);
-      rewrittenHeaders.set("X-Original-Path", originalPath);
-      const rewritten = new Request(newUrl.toString(), {
-        method: request.method,
-        headers: rewrittenHeaders,
-        body: request.body,
-        redirect: request.redirect,
-      });
-      return requestHandler(rewritten, { cloudflare: { env, ctx } });
+      // The visitor-facing path rides in AppLoadContext (not a
+      // header): unforgeable by clients, no strip step to keep alive.
+      // Root's loader uses it for the canonical URL.
+      const rewritten = new Request(newUrl.toString(), request);
+      return requestHandler(rewritten, { cloudflare: { env, ctx }, originalPath });
     }
 
     return requestHandler(request, { cloudflare: { env, ctx } });
   },
 
   async scheduled(event, env, ctx) {
-    // Cron fires every 15 minutes (wrangler.jsonc). Reminder sweeps
-    // run on every tick — an hourly cadence made "1 hour before your
-    // lesson" emails land anywhere from 30 to 90 minutes out. The
-    // heavier jobs (digests, state monitor, pay periods, demo sweep)
-    // only run on the top-of-hour tick; they each dedupe internally.
-    const topOfHour = new Date(event.scheduledTime).getUTCMinutes() < 5;
+    // Two cron triggers (wrangler.jsonc): "15,30,45 * * * *" runs the
+    // BTW reminder sweep only — an hourly cadence made "1 hour before
+    // your lesson" emails land anywhere from 30 to 90 minutes out —
+    // and "0 * * * *" runs everything. Routing on event.cron keeps the
+    // schedule in config; there's no magic minute-window in code to
+    // fall out of sync with the cron expression.
+    const topOfHour = event.cron !== "15,30,45 * * * *";
 
     // Heartbeat wrapper: record each sweep's last run + outcome in KV
     // so /healthz can report cron health without a log-diving session.
@@ -165,7 +154,7 @@ async function recordBeat(
   payload: { at: number; ok: boolean; info?: unknown; error?: string },
 ) {
   try {
-    await env.CACHE.put(`cron:last:${name}`, JSON.stringify(payload), {
+    await env.CACHE.put(cronBeatKey(name), JSON.stringify(payload), {
       // Keep long enough that a silent stall is visible, short enough
       // that stale entries self-clean.
       expirationTtl: 7 * 24 * 60 * 60,

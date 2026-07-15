@@ -1,6 +1,7 @@
 import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/signup";
 import { generateClaimPendingPassword, getAuth } from "~/lib/auth.server";
+import { isEmailConfigured } from "~/lib/email.server";
 import { getSession } from "~/lib/session.server";
 import { clientIp, rateLimit } from "~/lib/rate-limit.server";
 import { AuthShell } from "~/components/auth-shell";
@@ -74,31 +75,51 @@ export async function action({ request, context }: Route.ActionArgs) {
   // inherit their school records (account takeover). The actual
   // linking happens in claimPendingMemberships() on first verified
   // sign-in.
-  const pendingStudent = await env.DB.prepare(
-    "SELECT id FROM student WHERE email = ? AND userId IS NULL LIMIT 1",
-  )
-    .bind(email)
-    .first<{ id: string }>();
-  const pendingInstructor = await env.DB.prepare(
-    "SELECT id FROM instructor WHERE email = ? AND userId IS NULL LIMIT 1",
-  )
-    .bind(email)
-    .first<{ id: string }>();
+  const [pendingStudent, pendingInstructor] = await Promise.all([
+    env.DB.prepare("SELECT id FROM student WHERE email = ? AND userId IS NULL LIMIT 1")
+      .bind(email)
+      .first<{ id: string }>(),
+    env.DB.prepare("SELECT id FROM instructor WHERE email = ? AND userId IS NULL LIMIT 1")
+      .bind(email)
+      .first<{ id: string }>(),
+  ]);
   const hasPendingRecords = Boolean(pendingStudent || pendingInstructor);
 
   // Magic-link-first paths: explicit verification mode, or an email
   // that matches school-created records. The click finalizes signup
-  // (Better Auth creates the user with emailVerified=true).
+  // (Better Auth creates the user with emailVerified=true, carrying
+  // the name from the form).
   if (requireVerification || hasPendingRecords) {
+    // This path has NO fallback session — if we can't deliver the
+    // email, saying "check your inbox" is a lockout with a smile.
+    if (!isEmailConfigured(env)) {
+      return data(
+        {
+          error:
+            "Sign-in emails are temporarily unavailable. Please try again shortly or contact support@godirectio.com.",
+        },
+        { status: 503 },
+      );
+    }
     const callbackURL = pendingInstructor ? "/instructor" : hasPendingRecords ? "/me" : "/admin";
     try {
-      await auth.api.signInMagicLink({
-        body: { email, callbackURL },
+      const response = await auth.api.signInMagicLink({
+        body: { email, name, callbackURL },
         headers: request.headers,
         asResponse: true,
       });
+      if (!response.ok) {
+        return data(
+          { error: await readErrorMessage(response) },
+          { status: response.status },
+        );
+      }
     } catch (err) {
       console.warn("[signup] verification magic link send failed:", err);
+      return data(
+        { error: "We couldn't send the sign-in email. Please try again." },
+        { status: 500 },
+      );
     }
     return data({ magicLinkSent: email });
   }

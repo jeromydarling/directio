@@ -177,11 +177,19 @@ export async function claimPendingMemberships(
   const now = Date.now();
   const stmts: D1PreparedStatement[] = [];
 
-  const studentMatches = await env.DB.prepare(
-    "SELECT id, organizationId FROM student WHERE email = ? AND userId IS NULL",
-  )
-    .bind(user.email)
-    .all<{ id: string; organizationId: string }>();
+  const [studentMatches, instructorMatches] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id, organizationId FROM student WHERE email = ? AND userId IS NULL",
+    )
+      .bind(user.email)
+      .all<{ id: string; organizationId: string }>(),
+    env.DB.prepare(
+      "SELECT id, organizationId FROM instructor WHERE email = ? AND userId IS NULL",
+    )
+      .bind(user.email)
+      .all<{ id: string; organizationId: string }>(),
+  ]);
+
   for (const m of studentMatches.results) {
     stmts.push(
       env.DB.prepare("UPDATE student SET userId = ?, updatedAt = ? WHERE id = ?").bind(
@@ -195,11 +203,6 @@ export async function claimPendingMemberships(
     );
   }
 
-  const instructorMatches = await env.DB.prepare(
-    "SELECT id, organizationId FROM instructor WHERE email = ? AND userId IS NULL",
-  )
-    .bind(user.email)
-    .all<{ id: string; organizationId: string }>();
   for (const m of instructorMatches.results) {
     stmts.push(
       env.DB.prepare("UPDATE instructor SET userId = ? WHERE id = ?").bind(user.id, m.id),

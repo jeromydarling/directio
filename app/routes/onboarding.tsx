@@ -2,6 +2,7 @@ import { Form, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/onboarding";
 import { getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
+import { claimPendingMemberships } from "~/lib/tenant.server";
 import { AuthShell } from "~/components/auth-shell";
 
 export function meta(_: Route.MetaArgs) {
@@ -12,6 +13,27 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
   const session = await getSession(request, env);
   if (!session?.user) throw redirect("/login");
+
+  // Before showing "set up your school", claim any student/instructor
+  // records a school pre-created with this VERIFIED email. Onboarding
+  // is the funnel every no-membership user lands on (login and home
+  // both route here), so this is where the claim must happen —
+  // otherwise an invited student who signs in via the login form gets
+  // told to create a school.
+  if (Boolean(session.user.emailVerified)) {
+    const claimed = await claimPendingMemberships(env, {
+      id: session.user.id,
+      email: session.user.email,
+    });
+    if (claimed) {
+      const role = await env.DB.prepare(
+        "SELECT role FROM member WHERE userId = ? ORDER BY createdAt ASC LIMIT 1",
+      )
+        .bind(session.user.id)
+        .first<{ role: string }>();
+      throw redirect(role?.role === "instructor" ? "/instructor" : "/me");
+    }
+  }
 
   // If the user already belongs to an organization, skip onboarding.
   const existing = await env.DB.prepare(

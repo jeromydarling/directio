@@ -1,7 +1,12 @@
 import { Form, Link, useSearchParams } from "react-router";
 import type { Route } from "./+types/super.orgs";
 import { requirePlatformAdmin } from "~/lib/super.server";
-import { healthBand, likePattern } from "~/lib/super-shared";
+import {
+  HEALTH_HEALTHY_MIN,
+  HEALTH_WATCH_MIN,
+  healthBand,
+  likePattern,
+} from "~/lib/super-shared";
 
 export function meta(_: Route.MetaArgs) {
   return [
@@ -26,11 +31,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     params.push(likePattern(q), likePattern(q));
   }
   if (band === "healthy") {
-    filters.push("o.crmHealthScore >= 75");
+    filters.push(`o.crmHealthScore >= ${HEALTH_HEALTHY_MIN}`);
   } else if (band === "watch") {
-    filters.push("o.crmHealthScore >= 45 AND o.crmHealthScore < 75");
+    filters.push(
+      `o.crmHealthScore >= ${HEALTH_WATCH_MIN} AND o.crmHealthScore < ${HEALTH_HEALTHY_MIN}`,
+    );
   } else if (band === "at-risk") {
-    filters.push("o.crmHealthScore < 45");
+    filters.push(`o.crmHealthScore < ${HEALTH_WATCH_MIN}`);
   }
   if (tagId) {
     filters.push(

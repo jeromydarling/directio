@@ -5,6 +5,7 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useMatches,
   useRouteLoaderData,
 } from "react-router";
 
@@ -26,14 +27,15 @@ export const links: Route.LinksFunction = () => [
 
 // Root loader exposes canonical URL bits to the shared <head>. Cheap
 // enough to run on every request — no DB touch. The canonical URL
-// respects apex-only (www stripped) and reads X-Original-Path when the
-// Worker rewrote a custom-domain hit to /schools/:slug, so families
-// visiting a school's own domain see the URL they know.
-export function loader({ request }: Route.LoaderArgs) {
+// respects apex-only (www stripped) and uses context.originalPath when
+// the Worker rewrote a custom-domain hit to /schools/:slug, so
+// families visiting a school's own domain see the URL they know.
+// (originalPath rides in AppLoadContext, set only by the Worker —
+// unlike a request header, clients can't forge it.)
+export function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const host = url.host.replace(/^www\./, "");
-  const rewrittenPath = request.headers.get("X-Original-Path");
-  const pathname = rewrittenPath ?? url.pathname;
+  const pathname = context.originalPath ?? url.pathname;
   const origin = `https://${host}`;
   return {
     origin,
@@ -42,13 +44,32 @@ export function loader({ request }: Route.LoaderArgs) {
   };
 }
 
+// Route loaders can override the shared <head> SEO tags by returning
+// these optional fields. schools.$slug uses this so a school's
+// verified custom domain stays THE canonical URL even when the page
+// is served at godirectio.com/schools/:slug.
+type SeoOverride = {
+  canonical?: unknown;
+  org?: { name?: string | null; brandColor?: string | null } | null;
+};
+
 export function Layout({ children }: { children: React.ReactNode }) {
   // Root loader always runs, but data can be undefined during error
   // boundaries. Fall back to sensible defaults so we never emit an
   // empty canonical / og:url.
   const data = useRouteLoaderData<typeof loader>("root");
-  const canonical = data?.canonical ?? "https://godirectio.com/";
-  const origin = data?.origin ?? "https://godirectio.com";
+  const matches = useMatches();
+  const seo = matches
+    .map((m) => m.data as SeoOverride | undefined)
+    .find((d) => d && typeof d.canonical === "string");
+
+  const canonical =
+    (typeof seo?.canonical === "string" ? seo.canonical : undefined) ??
+    data?.canonical ??
+    "https://godirectio.com/";
+  const siteName = seo?.org?.name ?? "directio";
+  const themeColor = seo?.org?.brandColor ?? "#0f172a";
+
   return (
     <html lang="en" className="dark">
       <head>
@@ -58,11 +79,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <link rel="canonical" href={canonical} />
         <meta property="og:url" content={canonical} />
         <meta property="og:type" content="website" />
-        <meta property="og:site_name" content="directio" />
-        <meta property="og:image" content={`${origin}/og.png`} />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:site" content="@godirectio" />
-        <meta name="theme-color" content="#0f172a" />
+        <meta property="og:site_name" content={siteName} />
+        <meta name="twitter:card" content="summary" />
+        <meta name="theme-color" content={themeColor} />
         <Meta />
         <Links />
       </head>

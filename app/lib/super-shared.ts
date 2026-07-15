@@ -3,9 +3,15 @@
 // importing from super.server.ts drags the server module into the
 // client bundle and fails the build.
 
+// Band thresholds — interpolated into the /super SQL filters too, so
+// tuning them here moves the badges, the list filter, and the
+// dashboard at-risk count together.
+export const HEALTH_HEALTHY_MIN = 75;
+export const HEALTH_WATCH_MIN = 45;
+
 export function healthBand(score: number): "healthy" | "watch" | "at-risk" {
-  if (score >= 75) return "healthy";
-  if (score >= 45) return "watch";
+  if (score >= HEALTH_HEALTHY_MIN) return "healthy";
+  if (score >= HEALTH_WATCH_MIN) return "watch";
   return "at-risk";
 }
 

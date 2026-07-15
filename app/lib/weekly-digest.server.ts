@@ -17,6 +17,7 @@
  */
 
 import { isEmailConfigured, sendEmail } from "./email.server";
+import { escapeHtml as escape, isoDate, moneyUsd as money } from "./format";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -110,8 +111,7 @@ type Weekly = {
   translationsRun: number;
   quizzesAutoGraded: number;
   narrationsGenerated: number;
-  permitsIssued: number;
-  certificatesPrinted: number;
+  programsCompleted: number;
   roadTestsPassed: number;
   outstandingArCents: number;
   hoursSaved: number;
@@ -127,6 +127,10 @@ async function computeWeekly(
   // We intentionally issue N small parallel queries instead of one
   // giant CTE. D1's planner is simple; small queries with indexed
   // predicates are cheaper than one union.
+  // NO .catch(() => 0) fallbacks here: an earlier build pointed six of
+  // these at tables that didn't exist and the catches silently zeroed
+  // the whole digest for months' worth of sends. If a query is wrong,
+  // we want the cron heartbeat to go red, not a quietly empty email.
   const [
     rev,
     enroll,
@@ -135,23 +139,23 @@ async function computeWeekly(
     translations,
     quizzes,
     narrations,
-    permits,
-    certs,
+    completions,
     roadTests,
     ar,
   ] = await Promise.all([
     env.DB.prepare(
       `SELECT COALESCE(SUM(schoolNetCents), 0) AS cents, COUNT(*) AS n
          FROM payment
-        WHERE organizationId = ? AND status = 'succeeded' AND createdAt >= ?`,
+        WHERE organizationId = ? AND status = 'succeeded'
+          AND createdAt >= ? AND createdAt < ?`,
     )
-      .bind(orgId, weekStart)
+      .bind(orgId, weekStart, weekEnd)
       .first<{ cents: number; n: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM enrollment
-        WHERE organizationId = ? AND createdAt >= ?`,
+        WHERE organizationId = ? AND createdAt >= ? AND createdAt < ?`,
     )
-      .bind(orgId, weekStart)
+      .bind(orgId, weekStart, weekEnd)
       .first<{ n: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM appointment
@@ -168,52 +172,49 @@ async function computeWeekly(
     )
       .bind(orgId, now, now + WEEK_MS)
       .first<{ n: number }>(),
+    // Shared translation cache — per-org attribution is "this org was
+    // the first to request it", which is exactly the work the org
+    // initiated.
     env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM translation_cache
-        WHERE organizationId = ? AND createdAt >= ?`,
+      `SELECT COUNT(*) AS n FROM lesson_translation
+        WHERE firstRequestedByOrgId = ? AND createdAt >= ? AND createdAt < ?`,
     )
-      .bind(orgId, weekStart)
-      .first<{ n: number }>()
-      .catch(() => ({ n: 0 })),
+      .bind(orgId, weekStart, weekEnd)
+      .first<{ n: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM quiz_attempt
-        WHERE organizationId = ? AND completedAt >= ?`,
+        WHERE organizationId = ? AND createdAt >= ? AND createdAt < ?`,
     )
-      .bind(orgId, weekStart)
-      .first<{ n: number }>()
-      .catch(() => ({ n: 0 })),
+      .bind(orgId, weekStart, weekEnd)
+      .first<{ n: number }>(),
     env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM lesson_audio_cache
-        WHERE organizationId = ? AND createdAt >= ?`,
+      `SELECT COUNT(*) AS n FROM school_lesson
+        WHERE organizationId = ?
+          AND narrationAudioGeneratedAt >= ? AND narrationAudioGeneratedAt < ?`,
     )
-      .bind(orgId, weekStart)
-      .first<{ n: number }>()
-      .catch(() => ({ n: 0 })),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM credential_submission
-        WHERE organizationId = ? AND issuedAt >= ?`,
-    )
-      .bind(orgId, weekStart)
-      .first<{ n: number }>()
-      .catch(() => ({ n: 0 })),
+      .bind(orgId, weekStart, weekEnd)
+      .first<{ n: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM enrollment
-        WHERE organizationId = ? AND certificatePrintedAt >= ?`,
+        WHERE organizationId = ? AND completedAt >= ? AND completedAt < ?`,
     )
-      .bind(orgId, weekStart)
-      .first<{ n: number }>()
-      .catch(() => ({ n: 0 })),
+      .bind(orgId, weekStart, weekEnd)
+      .first<{ n: number }>(),
     env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM road_test_result
-        WHERE organizationId = ? AND passed = 1 AND takenOn >= ?`,
+      `SELECT COUNT(*) AS n FROM road_test_outcome
+        WHERE organizationId = ? AND passed = 1
+          AND createdAt >= ? AND createdAt < ?`,
     )
-      .bind(orgId, isoDate(weekStart))
-      .first<{ n: number }>()
-      .catch(() => ({ n: 0 })),
+      .bind(orgId, weekStart, weekEnd)
+      .first<{ n: number }>(),
+    // Real receivables only: 'failed' attempts are excluded — families
+    // who retry create a fresh payment row, and counting old failures
+    // as A/R produced "send a reminder" insights for money already
+    // collected.
     env.DB.prepare(
       `SELECT COALESCE(SUM(amountCents), 0) AS cents FROM payment
         WHERE organizationId = ?
-          AND status IN ('pending','requires_action','failed')`,
+          AND status IN ('pending','requires_action')`,
     )
       .bind(orgId)
       .first<{ cents: number }>(),
@@ -243,8 +244,7 @@ async function computeWeekly(
     translationsRun,
     quizzesAutoGraded,
     narrationsGenerated,
-    permitsIssued: permits?.n ?? 0,
-    certificatesPrinted: certs?.n ?? 0,
+    programsCompleted: completions?.n ?? 0,
     roadTestsPassed: roadTests?.n ?? 0,
     outstandingArCents: ar?.cents ?? 0,
     hoursSaved: Math.round((minutesSaved / 60) * 10) / 10,
@@ -256,8 +256,7 @@ function hasSignal(d: Weekly): boolean {
     d.revenueCents > 0 ||
     d.enrollmentCount > 0 ||
     d.appointmentsCompleted > 0 ||
-    d.permitsIssued > 0 ||
-    d.certificatesPrinted > 0 ||
+    d.programsCompleted > 0 ||
     d.roadTestsPassed > 0
   );
 }
@@ -278,8 +277,8 @@ function buildInsight(d: Weekly): string {
   if (d.translationsRun > 0) {
     return `You served ${d.translationsRun} translated lesson view${plural(d.translationsRun)} this week. The Translations page has a precache button that eliminates the wait on the next language you add.`;
   }
-  if (d.certificatesPrinted > 0) {
-    return `${d.certificatesPrinted} completion certificate${plural(d.certificatesPrinted)} printed. Families who see the branded certificate are your best social proof — the certificate page has a "share" button.`;
+  if (d.programsCompleted > 0) {
+    return `${d.programsCompleted} student${plural(d.programsCompleted)} finished their program this week. Families at the finish line are your best social proof — their certificate page is one tap from a review.`;
   }
   return `Steady week. Consider publishing to /schools/your-slug (Website tab) if you haven't yet — the URL is the #1 SEO signal your school actually exists.`;
 }
@@ -305,9 +304,8 @@ function weeklyText(
   lines.push(`Students onboarded:      ${d.enrollmentCount}`);
   lines.push(`Lessons dispatched:      ${d.appointmentsCompleted}`);
   lines.push(`Lessons upcoming (7d):   ${d.appointmentsUpcoming}`);
-  if (d.permitsIssued > 0) lines.push(`Permits issued:          ${d.permitsIssued}`);
+  if (d.programsCompleted > 0) lines.push(`Programs completed:      ${d.programsCompleted}`);
   if (d.roadTestsPassed > 0) lines.push(`Road tests passed:       ${d.roadTestsPassed}`);
-  if (d.certificatesPrinted > 0) lines.push(`Certificates printed:    ${d.certificatesPrinted}`);
   lines.push("");
   lines.push("Automation:");
   if (d.translationsRun > 0) lines.push(`  Translations rendered: ${d.translationsRun}`);
@@ -349,9 +347,8 @@ function weeklyHtml(
     ${row("Students onboarded", String(d.enrollmentCount))}
     ${row("Lessons dispatched", String(d.appointmentsCompleted))}
     ${row("Lessons upcoming (7d)", String(d.appointmentsUpcoming))}
-    ${d.permitsIssued > 0 ? row("Permits issued", String(d.permitsIssued)) : ""}
+    ${d.programsCompleted > 0 ? row("Programs completed", String(d.programsCompleted)) : ""}
     ${d.roadTestsPassed > 0 ? row("Road tests passed", String(d.roadTestsPassed)) : ""}
-    ${d.certificatesPrinted > 0 ? row("Certificates printed", String(d.certificatesPrinted)) : ""}
   </table>
 
   <h3 style="font-size:13px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin:22px 0 6px">What we handled for you</h3>
@@ -366,37 +363,6 @@ function weeklyHtml(
 </body></html>`;
 }
 
-function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
 function plural(n: number): string {
   return n === 1 ? "" : "s";
-}
-
-function money(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Math.round(cents) / 100);
-}
-
-function escape(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => {
-    switch (c) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return c;
-    }
-  });
 }

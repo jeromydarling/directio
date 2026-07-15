@@ -393,8 +393,8 @@ export async function action({
   const now = Date.now();
   const attemptId = newId();
   const student = await findStudentForUser(
-    tenant.organization.id ? context.cloudflare.env : context.cloudflare.env,
-    { id: tenant.user.id, email: tenant.user.email },
+    context.cloudflare.env,
+    tenant.user,
     tenant.organization.id,
   );
   const stmts: D1PreparedStatement[] = [

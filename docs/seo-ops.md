@@ -81,6 +81,6 @@ comparison row, a price change. If none of those changed, add a
 - Do not add tracking-parameter variants of URLs to the sitemap. UTM
   parameters get canonicalized to the clean URL by the root layout;
   the sitemap should never contain a `?utm_*` URL.
-- Do not remove the `X-Original-Path` header from the Worker's
-  custom-domain rewrite. Root layout reads it to build a correct
+- Do not remove `originalPath` from the Worker's custom-domain rewrite
+  (it rides in AppLoadContext). Root layout reads it to build a correct
   canonical URL for schools hitting their own domain.

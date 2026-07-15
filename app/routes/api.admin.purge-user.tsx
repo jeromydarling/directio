@@ -1,5 +1,6 @@
 import { data } from "react-router";
 import type { Route } from "./+types/api.admin.purge-user";
+import { timingSafeEqualStr } from "~/lib/tokens.server";
 
 /**
  * Token-guarded purge endpoint for end-to-end test cleanup.
@@ -101,14 +102,4 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export function loader() {
   return data({ error: "POST only" }, { status: 405 });
-}
-
-function timingSafeEqualStr(a: string, b: string): boolean {
-  const enc = new TextEncoder();
-  const ab = enc.encode(a);
-  const bb = enc.encode(b);
-  if (ab.length !== bb.length) return false;
-  let diff = 0;
-  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
-  return diff === 0;
 }

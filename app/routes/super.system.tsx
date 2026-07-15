@@ -1,4 +1,5 @@
 import type { Route } from "./+types/super.system";
+import { CRON_SPECS, cronBeatKey } from "~/lib/cron-specs";
 import { requirePlatformAdmin } from "~/lib/super.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -10,15 +11,6 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-const CRON_SPECS: Array<{ name: string; cadence: string; staleAfterMs: number }> = [
-  { name: "btw-reminders", cadence: "every 15 min", staleAfterMs: 45 * 60 * 1000 },
-  { name: "state-monitor", cadence: "hourly", staleAfterMs: 3 * 60 * 60 * 1000 },
-  { name: "pay-period-close", cadence: "hourly", staleAfterMs: 3 * 60 * 60 * 1000 },
-  { name: "daily-digest", cadence: "hourly (sends 1×/day)", staleAfterMs: 3 * 60 * 60 * 1000 },
-  { name: "weekly-digest", cadence: "hourly (sends Mondays)", staleAfterMs: 3 * 60 * 60 * 1000 },
-  { name: "demo-sweep", cadence: "hourly", staleAfterMs: 3 * 60 * 60 * 1000 },
-];
-
 type Beat = { at: number; ok: boolean; info?: unknown; error?: string } | null;
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -26,29 +18,28 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
   const now = Date.now();
 
-  const beats: Array<{
-    name: string;
-    cadence: string;
-    beat: Beat;
-    state: "ok" | "failing" | "stale" | "never";
-  }> = [];
-  for (const spec of CRON_SPECS) {
+  const rawBeats = await Promise.allSettled(
+    CRON_SPECS.map((spec) => env.CACHE.get(cronBeatKey(spec.name))),
+  );
+  const beats = CRON_SPECS.map((spec, i) => {
+    const r = rawBeats[i];
     let beat: Beat = null;
-    try {
-      const raw = await env.CACHE.get(`cron:last:${spec.name}`);
-      beat = raw ? (JSON.parse(raw) as Beat) : null;
-    } catch {
-      // KV unavailable → beats show "never"; the page still loads.
+    if (r.status === "fulfilled" && r.value) {
+      try {
+        beat = JSON.parse(r.value) as Beat;
+      } catch {
+        // Corrupt beat renders as "never"; the page still loads.
+      }
     }
     const state = !beat
-      ? "never"
+      ? ("never" as const)
       : !beat.ok
-        ? "failing"
+        ? ("failing" as const)
         : now - beat.at > spec.staleAfterMs
-          ? "stale"
-          : "ok";
-    beats.push({ name: spec.name, cadence: spec.cadence, beat, state });
-  }
+          ? ("stale" as const)
+          : ("ok" as const);
+    return { name: spec.name, cadence: spec.cadence, beat, state };
+  });
 
   const [events24h, lastEvent, orgCount, userCount] = await Promise.all([
     env.DB.prepare(

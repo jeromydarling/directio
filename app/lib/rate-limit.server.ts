@@ -51,9 +51,3 @@ export async function rateLimit(
   }
 }
 
-export function tooManyRequests(message = "Too many requests. Please try again later.") {
-  return new Response(JSON.stringify({ error: message }), {
-    status: 429,
-    headers: { "Content-Type": "application/json" },
-  });
-}

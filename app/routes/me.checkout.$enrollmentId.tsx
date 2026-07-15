@@ -30,8 +30,10 @@ type EnrollmentRow = {
   stripeChargesEnabled: number;
 };
 
+// platformFeeBps deliberately absent: old package rows still carry it
+// in their JSON, but the fee is platform-controlled (PLATFORM_FEE_BPS)
+// and typed nowhere so nobody wires it back in.
 type PaymentOptionsCfg = {
-  platformFeeBps?: number;
   installmentsAllowed?: boolean;
   installmentMonths?: number;
   bnpl?: string[];
@@ -258,7 +260,18 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
       ? Math.ceil(enrollment.priceCents / options.installmentMonths)
       : 0;
 
-  const succeeded = payments.find((p) => p.status === "succeeded");
+  // "Paid in full" = a one-time/bnpl success or a completed plan.
+  // Individual installment child rows (kind='installment_payment')
+  // are collected money but NOT full payment; an 'active' plan means
+  // installments are running and no new checkout should start.
+  const succeeded = payments.find(
+    (p) =>
+      (p.status === "succeeded" && p.kind !== "installment_payment") ||
+      p.status === "plan_completed",
+  );
+  const activePlan = payments.find(
+    (p) => p.status === "active" && p.kind === "installment_subscription",
+  );
   const stripeReady =
     stripeConfigured && enrollment.stripeAccountId && enrollment.stripeChargesEnabled === 1;
 
@@ -307,6 +320,17 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
           </p>
           <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
             Your school has your payment on file. No further action needed.
+          </p>
+        </Card>
+      ) : activePlan ? (
+        <Card className="border-brand-300 bg-brand-50/40 dark:border-brand-700 dark:bg-brand-950/20">
+          <p className="font-display text-xl font-semibold text-ink-900 dark:text-ink-50">
+            Payment plan active
+          </p>
+          <p className="mt-1 text-sm text-ink-700 dark:text-ink-200">
+            Your monthly installments are running — each payment appears in the
+            history below as it lands. The plan closes automatically after the
+            final installment.
           </p>
         </Card>
       ) : (

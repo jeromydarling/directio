@@ -127,9 +127,12 @@ export async function recomputeAndPersistHealth(
       .bind(organizationId)
       .first<{ at: number | null }>(),
     env.DB.prepare(
+      // 'failed' attempts are not receivables — families retry with a
+      // new payment row; counting old failures inflated A/R and docked
+      // health scores for money already collected.
       `SELECT COALESCE(SUM(amountCents), 0) AS cents FROM payment
         WHERE organizationId = ?
-          AND status IN ('pending','requires_action','failed')`,
+          AND status IN ('pending','requires_action')`,
     )
       .bind(organizationId)
       .first<{ cents: number }>(),

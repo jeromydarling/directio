@@ -1,4 +1,7 @@
 import type { Route } from "./+types/healthz";
+import { CRON_NAMES, cronBeatKey } from "~/lib/cron-specs";
+import { isEmailConfigured } from "~/lib/email.server";
+import { isStripeConfigured } from "~/lib/stripe.server";
 
 /**
  * Health probe. Returns 200 with subsystem detail when the core
@@ -11,49 +14,49 @@ import type { Route } from "./+types/healthz";
  * silently dead" is visible without opening Workers Logs.
  */
 
-const CRON_NAMES = [
-  "btw-reminders",
-  "state-monitor",
-  "pay-period-close",
-  "daily-digest",
-  "weekly-digest",
-  "demo-sweep",
-];
-
 export async function loader({ context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
   const startedAt = Date.now();
 
-  let dbOk = false;
-  let dbError: string | null = null;
-  try {
-    await env.DB.prepare("SELECT 1").first();
-    dbOk = true;
-  } catch (err) {
-    dbError = err instanceof Error ? err.message : String(err);
-  }
+  // D1 ping and the KV heartbeat reads are independent — run the
+  // whole set in one parallel round instead of 7 serial trips.
+  const [dbResult, ...beatResults] = await Promise.allSettled([
+    env.DB.prepare("SELECT 1").first(),
+    ...CRON_NAMES.map((name) => env.CACHE.get(cronBeatKey(name))),
+  ]);
 
-  let kvOk = false;
+  const dbOk = dbResult.status === "fulfilled";
+  const dbError =
+    dbResult.status === "rejected"
+      ? dbResult.reason instanceof Error
+        ? dbResult.reason.message
+        : String(dbResult.reason)
+      : null;
+
+  let kvOk = true;
   const crons: Record<string, unknown> = {};
-  try {
-    for (const name of CRON_NAMES) {
-      const raw = await env.CACHE.get(`cron:last:${name}`);
-      crons[name] = raw ? JSON.parse(raw) : null;
+  CRON_NAMES.forEach((name, i) => {
+    const r = beatResults[i];
+    if (r.status === "fulfilled") {
+      crons[name] = r.value ? JSON.parse(r.value) : null;
+    } else {
+      // KV down degrades detail, not health — the app serves without it.
+      crons[name] = null;
+      kvOk = false;
     }
-    kvOk = true;
-  } catch {
-    // KV down degrades detail, not health — the app serves without it.
-  }
+  });
 
   const body = {
     ok: dbOk,
     checks: {
       d1: dbOk ? "ok" : `error: ${dbError}`,
       kv: kvOk ? "ok" : "unavailable",
-      email: Boolean(env.EMAIL && typeof env.EMAIL.send === "function")
-        ? "bound"
-        : "missing",
-      stripe: Boolean(env.STRIPE_SECRET_KEY) ? "configured" : "missing",
+      // Same helpers the real features gate on — an earlier version
+      // re-implemented these checks more loosely, so /healthz called
+      // Stripe "configured" while every payment route 503'd on a
+      // placeholder key.
+      email: isEmailConfigured(env) ? "bound" : "missing",
+      stripe: isStripeConfigured(env) ? "configured" : "missing",
     },
     crons,
     latencyMs: Date.now() - startedAt,

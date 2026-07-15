@@ -3,6 +3,7 @@ import type { Route } from "./+types/admin.website";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
+import { rateLimit } from "~/lib/rate-limit.server";
 import {
   generateWebsite,
   type WebsiteIntake,
@@ -146,6 +147,18 @@ export async function action({ request, context }: Route.ActionArgs) {
         { error: "School name and city are required." },
         { status: 400 },
       );
+
+    // Cost guard: each generation is a full-site Claude call.
+    const rl = await rateLimit(env, `website-generate:${orgId}`, {
+      limit: 10,
+      windowSeconds: 3600,
+    });
+    if (!rl.allowed) {
+      return data(
+        { error: "Site-generation budget reached for this hour. Try again later." },
+        { status: 429 },
+      );
+    }
 
     let generated: { sections: WebsiteSections; modelUsed: string; inputTokens: number; outputTokens: number };
     try {
