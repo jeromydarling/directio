@@ -171,6 +171,73 @@ include the SUPER_BOOTSTRAP_TOKEN value anywhere in the report.
 
 ---
 
+## Round 2 — resumption prompt (after the first chat closed mid-run)
+
+Status when this was written: secrets set, PR #1 created but unmerged,
+super-admin promotion done directly in D1, Search Console TXT in DNS,
+email routing untouched. Paste the block below.
+
+---
+
+You are operating my browser to finish directio's launch checklist — a
+previous session completed most of it. I'm signed in to Cloudflare,
+GitHub, Google, and Gmail. Four tasks, in order. Do NOT touch Stripe.
+Do NOT delete or modify existing DNS records, secrets, or webhooks —
+only add what's listed. Give me a ✅/⚠️/❌ checklist at the end.
+
+Context: repo github.com/jeromydarling/directio · Cloudflare account
+f84f7181c051be0040e972dcad48e697 · zone godirectio.com · Worker
+"directio" · my email jeromy.darling@gmail.com. Super-admin promotion
+is ALREADY DONE — skip anything about promote-super or
+SUPER_BOOTSTRAP_TOKEN.
+
+TASK 1 — Merge PR #1 and watch CI.
+Open github.com/jeromydarling/directio/pull/1 and merge it (merge
+commit is fine; it has no conflicts). Then open the Actions tab:
+- "deploy" must finish green (it typechecks, builds, applies
+  migrations, deploys, then health-checks https://godirectio.com/healthz).
+  If it fails on authentication, open Settings → Secrets → Actions and
+  confirm CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID exist; report
+  the failing log lines either way.
+- "e2e" may fail on its first post-merge run for timing reasons —
+  re-run it once from the Actions tab; only report if the re-run fails.
+
+TASK 2 — Email Routing (this is urgent: support@godirectio.com is
+printed on every page of the site and currently bounces).
+Cloudflare dash → zone godirectio.com → Email → Email Routing:
+1. Enable routing if prompted, accepting the MX/TXT records Cloudflare
+   proposes — but STOP and report if the zone already has other MX
+   records.
+2. Add destination address jeromy.darling@gmail.com; open Gmail and
+   click the verification link Cloudflare sends.
+3. Custom address support@godirectio.com → Send to an email →
+   jeromy.darling@gmail.com.
+4. Custom address e2e@godirectio.com → Send to a Worker → directio.
+5. From Gmail, send a test email to support@godirectio.com and confirm
+   it arrives back in the inbox.
+
+TASK 3 — Two 30-second confirmations.
+1. search.google.com/search-console → godirectio.com property: confirm
+   it shows Verified (the DNS TXT is already in place — click Verify
+   if it's still pending), and under Sitemaps confirm sitemap.xml is
+   submitted; submit it if not.
+2. Cloudflare dash → Workers & Pages → directio → Settings → Variables
+   and Secrets: confirm a secret named SAAS_API_TOKEN exists. If it's
+   missing, create an API token (My Profile → API Tokens → Custom
+   Token) with Zone → SSL and Certificates → Edit on godirectio.com,
+   and save it as the SAAS_API_TOKEN secret on the Worker.
+
+TASK 4 — Fix double-deploy risk.
+Cloudflare dash → Workers & Pages → directio → Settings → Build (or
+"Builds"). If a Git-connected build is configured and watching any
+branch, note which branch and DISABLE the automatic builds (or
+disconnect the repo). The GitHub Actions "deploy" workflow is now the
+only deployer — it's the one that runs database migrations and the
+post-deploy health gate; Workers Builds deploying in parallel skips
+both. Report what you found and what you changed.
+
+---
+
 ## Parked for later — Stripe (do not run yet)
 
 Waiting on Stripe support to raise the webhook-destination cap 16 → 32.
