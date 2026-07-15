@@ -40,6 +40,7 @@ export default [
   route("sitemap.xml", "routes/sitemap[.]xml.tsx"),
   route("robots.txt", "routes/robots[.]txt.tsx"),
   route("llms.txt", "routes/llms[.]txt.tsx"),
+  route("healthz", "routes/healthz.tsx"),
   route("schools/:slug", "routes/schools.$slug.tsx"),
   route("schools/:slug/enroll", "routes/schools.$slug.enroll.tsx"),
 

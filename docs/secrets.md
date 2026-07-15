@@ -59,7 +59,55 @@ npx wrangler secret put ELEVENLABS_API_KEY
 # Anthropic — Claude via AI Gateway. Powers quiz generation, the
 # library importer, llm.server helpers, and the family help assistant.
 npx wrangler secret put ANTHROPIC_API_KEY
+
+# Cloudflare-for-SaaS — API token used to create custom hostnames when
+# a school connects their own domain (app/lib/saas.server.ts). Token
+# needs Zone → SSL and Certificates:Edit + Zone → Custom Hostnames:Edit
+# on the godirectio.com zone. Without it, school custom domains fall
+# back to the manual-TXT path with no auto-HTTPS.
+npx wrangler secret put SAAS_API_TOKEN
+
+# Premium lesson translations. Standard tier uses Workers AI (no key).
+# If both are unset the premium tier errors cleanly; standard works.
+npx wrangler secret put DEEPL_API_KEY
+npx wrangler secret put GOOGLE_TRANSLATE_API_KEY
 ```
+
+## Operational secrets (optional, feature-gated)
+
+```sh
+# E2E cleanup — enables POST /api/admin/purge-user (only e2e+/demo+
+# prefixed accounts can be purged). Unset → endpoint returns 503.
+npx wrangler secret put E2E_PURGE_TOKEN
+
+# E2E test inbox — enables GET/DELETE /api/internal/test-inbox.
+npx wrangler secret put E2E_INBOX_TOKEN
+
+# Super-admin bootstrap — enables POST /api/admin/promote-super, used
+# once to promote the first platform admin. Unset → 503.
+npx wrangler secret put SUPER_BOOTSTRAP_TOKEN
+
+# State knowledge-base seeding (R2 uploads via /api/internal/state-kb-seed).
+npx wrangler secret put STATE_KB_SEED_KEY
+```
+
+`EMAIL_VERIFICATION` is a var, not a secret: unset/"off" = signup gives
+an immediate session (magic link still sent as backup); "on" = signup
+always requires the magic-link click. Emails matching school-created
+student/instructor records ALWAYS require the click, regardless of this
+flag.
+
+## GitHub Actions secrets (repo → Settings → Secrets → Actions)
+
+The deploy + backup workflows (.github/workflows/deploy.yml,
+backup.yml) and the e2e workflow need:
+
+| Repo secret             | Used by             | Notes                                                        |
+| ----------------------- | ------------------- | ------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`  | deploy, d1-backup   | Workers Scripts:Edit + D1:Edit + Workers KV Storage:Edit.     |
+| `CLOUDFLARE_ACCOUNT_ID` | deploy, d1-backup   | Not sensitive, but kept as a secret for tidiness.             |
+| `E2E_PURGE_TOKEN`       | e2e                 | Must match the Worker secret of the same name.                |
+| `E2E_INBOX_TOKEN`       | e2e (mail spec)     | Must match the Worker secret of the same name.                |
 
 ## Outbound email (no secret needed)
 

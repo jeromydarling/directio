@@ -28,6 +28,12 @@ export const PASSTHROUGH_PREFIXES = [
   "/onboarding",
   "/sitemap.xml",
   "/robots.txt",
+  "/llms.txt",
+  "/healthz",
+  "/terms",
+  "/privacy",
+  "/refund-policy",
+  "/support",
   "/.well-known/",
 ];
 

@@ -18,9 +18,13 @@
   //                             redirectWwwToApex hook in workers/app.ts)
   //   - directio.jer-f84.workers.dev  (disabled in dashboard)
 
+  // Every 15 minutes. BTW lesson reminders run on every tick (an
+  // hourly cadence made "1 hour before" emails land 30-90 min out);
+  // digests/monitors/sweeps gate themselves to the top-of-hour tick
+  // inside workers/app.ts.
   "triggers": {
     "crons": [
-      "0 * * * *"
+      "*/15 * * * *"
     ]
   },
 

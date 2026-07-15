@@ -1,0 +1,72 @@
+# Deploy pipeline — the operator never needs a terminal.
+#
+# On every push to main: typecheck → build → apply D1 migrations →
+# deploy the Worker. Also runnable by hand from the Actions tab
+# (workflow_dispatch), including from a feature branch for a preview
+# check of build+typecheck (deploy steps only run on main).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN  — API token with Workers Scripts:Edit,
+#                           D1:Edit, Workers KV:Edit on the account.
+#   CLOUDFLARE_ACCOUNT_ID — the account id (dash → Workers → overview).
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: install deps
+        run: npm ci --ignore-scripts
+
+      - name: generate types
+        run: npx wrangler types && npx react-router typegen
+
+      - name: typecheck
+        run: npx tsc -b
+
+      - name: build
+        run: npm run build
+
+      # Migrations first, then code. All migrations are additive
+      # (docs/runbook: never ship a destructive migration in the same
+      # deploy as the code that depends on it).
+      - name: apply D1 migrations
+        if: github.ref == 'refs/heads/main'
+        run: npx wrangler d1 migrations apply directio-dev --remote
+
+      - name: deploy worker
+        if: github.ref == 'refs/heads/main'
+        run: npx wrangler deploy
+
+      - name: post-deploy health check
+        if: github.ref == 'refs/heads/main'
+        run: |
+          sleep 10
+          status=$(curl -s -o /tmp/health.json -w "%{http_code}" https://godirectio.com/healthz)
+          cat /tmp/health.json
+          if [ "$status" != "200" ]; then
+            echo "::error::healthz returned $status after deploy"
+            exit 1
+          fi

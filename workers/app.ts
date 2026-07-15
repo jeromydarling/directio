@@ -80,65 +80,95 @@ export default {
     return requestHandler(request, { cloudflare: { env, ctx } });
   },
 
-  async scheduled(_event, env, ctx) {
+  async scheduled(event, env, ctx) {
+    // Cron fires every 15 minutes (wrangler.jsonc). Reminder sweeps
+    // run on every tick — an hourly cadence made "1 hour before your
+    // lesson" emails land anywhere from 30 to 90 minutes out. The
+    // heavier jobs (digests, state monitor, pay periods, demo sweep)
+    // only run on the top-of-hour tick; they each dedupe internally.
+    const topOfHour = new Date(event.scheduledTime).getUTCMinutes() < 5;
+
+    // Heartbeat wrapper: record each sweep's last run + outcome in KV
+    // so /healthz can report cron health without a log-diving session.
+    const beat = async (name: string, fn: () => Promise<unknown>) => {
+      const startedAt = Date.now();
+      try {
+        const info = await fn();
+        await recordBeat(env, name, { at: startedAt, ok: true, info });
+      } catch (err) {
+        console.error(`[cron] ${name} failed:`, err);
+        await recordBeat(env, name, {
+          at: startedAt,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
     ctx.waitUntil(
       (async () => {
-        try {
+        await beat("btw-reminders", async () => {
           await runBtwReminderSweep(env, { hoursAhead: 24 });
           await runBtwReminderSweep(env, { hoursAhead: 1 });
-        } catch (err) {
-          console.error("scheduled reminder sweep failed:", err);
-        }
-        try {
-          await runStateChangeMonitor(env, { batchSize: 5 });
-        } catch (err) {
-          console.error("scheduled state-change monitor failed:", err);
-        }
-        try {
+        });
+
+        if (!topOfHour) return;
+
+        await beat("state-monitor", () => runStateChangeMonitor(env, { batchSize: 5 }));
+        await beat("pay-period-close", async () => {
           const result = await autoCloseExpiredPayPeriods(env.DB, Date.now());
           if (result.closedPeriods > 0) {
             console.log(
               `[cron] auto-closed ${result.closedPeriods} pay period(s), totalCents=${result.totalCents}`,
             );
           }
-        } catch (err) {
-          console.error("scheduled pay-period close failed:", err);
-        }
-        try {
-          // Daily digest dispatch — only sends to orgs whose
-          // dailyDigestLastSentOnDate is not today (UTC), so running
-          // hourly is fine; the per-org dedupe lives in the lib.
+          return result;
+        });
+        await beat("daily-digest", async () => {
+          // Only sends to orgs whose dailyDigestLastSentOnDate is not
+          // today (UTC); per-org dedupe lives in the lib.
           const result = await sendDailyDigests(env, Date.now());
           if (result.sent > 0 || result.errored > 0) {
             console.log(
               `[cron] daily digest sent=${result.sent} skipped=${result.skipped} errored=${result.errored}`,
             );
           }
-        } catch (err) {
-          console.error("scheduled daily digest failed:", err);
-        }
-        try {
-          // Weekly value digest — Mondays only; the lib no-ops on
-          // any other weekday. Reduces churn by showing owners what
-          // the platform did for them.
+          return result;
+        });
+        await beat("weekly-digest", async () => {
+          // Mondays only; the lib no-ops on any other weekday.
           const result = await sendWeeklyDigests(env, Date.now());
           if (result.sent > 0 || result.errored > 0) {
             console.log(
               `[cron] weekly digest sent=${result.sent} skipped=${result.skipped} errored=${result.errored}`,
             );
           }
-        } catch (err) {
-          console.error("scheduled weekly digest failed:", err);
-        }
-        try {
+          return result;
+        });
+        await beat("demo-sweep", async () => {
           const result = await sweepExpiredDemos(env);
           if (result.swept > 0) {
             console.log(`[cron] swept ${result.swept} expired demo org(s)`);
           }
-        } catch (err) {
-          console.error("scheduled demo sweep failed:", err);
-        }
+          return result;
+        });
       })(),
     );
   },
 } satisfies ExportedHandler<Env>;
+
+async function recordBeat(
+  env: Env,
+  name: string,
+  payload: { at: number; ok: boolean; info?: unknown; error?: string },
+) {
+  try {
+    await env.CACHE.put(`cron:last:${name}`, JSON.stringify(payload), {
+      // Keep long enough that a silent stall is visible, short enough
+      // that stale entries self-clean.
+      expirationTtl: 7 * 24 * 60 * 60,
+    });
+  } catch (err) {
+    console.error(`[cron] heartbeat write failed for ${name}:`, err);
+  }
+}

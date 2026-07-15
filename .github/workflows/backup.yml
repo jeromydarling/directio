@@ -1,0 +1,53 @@
+# Nightly D1 backup.
+#
+# Exports the production database (named directio-dev — historical
+# name, it IS production) to SQL and stores it as a GitHub Actions
+# artifact for 30 days. Cloudflare D1 Time Travel provides ~30 days of
+# point-in-time recovery on top of this; the export is the
+# belt-and-suspenders copy that survives account-level problems and
+# lets us restore into a fresh database.
+#
+# Restore (from a terminal or a workflow_dispatch job):
+#   npx wrangler d1 execute <db> --remote --file=backup.sql
+#
+# Required repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+# (same as deploy.yml).
+name: d1-backup
+
+on:
+  schedule:
+    - cron: "17 9 * * *" # daily, 09:17 UTC (~4:17am US Central)
+  workflow_dispatch: {}
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: install deps
+        run: npm ci --ignore-scripts
+
+      - name: export database
+        run: |
+          npx wrangler d1 export directio-dev --remote --output=directio-backup.sql
+          ls -lh directio-backup.sql
+
+      - name: upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-backup-${{ github.run_id }}
+          path: directio-backup.sql
+          retention-days: 30
+          if-no-files-found: error
