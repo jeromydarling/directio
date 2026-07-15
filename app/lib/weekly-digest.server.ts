@@ -43,7 +43,13 @@ export async function sendWeeklyDigests(
   }
 
   const monday = isoDate(now);
-  const weekStart = now - WEEK_MS;
+  // Calendar week, not a rolling window: midnight UTC this Monday
+  // back to midnight UTC last Monday. Otherwise the reported "week"
+  // shifts by however late in the day the cron tick fired.
+  const mondayMidnight = new Date(now);
+  mondayMidnight.setUTCHours(0, 0, 0, 0);
+  const weekEnd = mondayMidnight.getTime();
+  const weekStart = weekEnd - WEEK_MS;
 
   const orgs = await env.DB.prepare(
     `SELECT id, name, dailyDigestRecipientEmail
@@ -69,7 +75,7 @@ export async function sendWeeklyDigests(
       continue;
     }
     try {
-      const digest = await computeWeekly(env, org.id, weekStart, now);
+      const digest = await computeWeekly(env, org.id, weekStart, weekEnd, now);
       if (!hasSignal(digest)) {
         // Zero-activity week — skip so a quiet org doesn't get a
         // dispiriting all-zeros email. Still stamp the send date so
@@ -115,6 +121,7 @@ async function computeWeekly(
   env: Env,
   orgId: string,
   weekStart: number,
+  weekEnd: number,
   now: number,
 ): Promise<Weekly> {
   // We intentionally issue N small parallel queries instead of one
@@ -151,7 +158,7 @@ async function computeWeekly(
         WHERE organizationId = ? AND status = 'completed'
           AND endsAt >= ? AND endsAt < ?`,
     )
-      .bind(orgId, weekStart, now)
+      .bind(orgId, weekStart, weekEnd)
       .first<{ n: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM appointment

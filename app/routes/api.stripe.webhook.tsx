@@ -286,6 +286,15 @@ async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
   const payoutsEnabled = Boolean(obj.payouts_enabled);
   const detailsSubmitted = Boolean(obj.details_submitted);
   const newStatus = chargesEnabled && payoutsEnabled ? "active" : detailsSubmitted ? "restricted" : "pending";
+
+  // Only audit real transitions — account.updated fires for lots of
+  // non-status reasons and we don't want audit noise.
+  const before = await env.DB.prepare(
+    "SELECT id, stripeAccountStatus FROM organization WHERE stripeAccountId = ? LIMIT 1",
+  )
+    .bind(accountId)
+    .first<{ id: string; stripeAccountStatus: string | null }>();
+
   await env.DB.prepare(
     `UPDATE organization
         SET stripeAccountStatus = ?,
@@ -304,6 +313,23 @@ async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
       accountId,
     )
     .run();
+
+  if (before && before.stripeAccountStatus !== newStatus) {
+    await recordAudit(env, {
+      organizationId: before.id,
+      actorUserId: null,
+      action: "stripe.account_status_changed",
+      entityType: "organization",
+      entityId: before.id,
+      payload: {
+        from: before.stripeAccountStatus,
+        to: newStatus,
+        chargesEnabled,
+        payoutsEnabled,
+        detailsSubmitted,
+      },
+    });
+  }
 }
 
 /**

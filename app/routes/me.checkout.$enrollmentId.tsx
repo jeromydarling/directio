@@ -154,6 +154,16 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const description = `${enrollment.programName} — ${enrollment.packageName ?? "package"}`;
   const now = Date.now();
 
+  // Sweep earlier abandoned attempts for this enrollment so the
+  // family's payment history doesn't accumulate a 'pending' row for
+  // every checkout they opened and closed.
+  await env.DB.prepare(
+    `UPDATE payment SET status = 'abandoned', updatedAt = ?
+      WHERE enrollmentId = ? AND organizationId = ? AND status = 'pending'`,
+  )
+    .bind(now, enrollment.id, tenant.organization.id)
+    .run();
+
   // Record the payment attempt up front; the webhook will flip status
   // to succeeded/failed when Stripe tells us what happened.
   await env.DB.prepare(
