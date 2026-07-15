@@ -58,6 +58,15 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const intent = String(formData.get("intent") ?? "");
 
   if (intent === "add-package") {
+    // Verify the program actually belongs to this tenant before
+    // inserting a package that references it.
+    const owned = await context.cloudflare.env.DB.prepare(
+      "SELECT id FROM program WHERE id = ? AND organizationId = ?",
+    )
+      .bind(params.programId, tenant.organization.id)
+      .first<{ id: string }>();
+    if (!owned) return data({ error: "Program not found." }, { status: 404 });
+
     const name = String(formData.get("name") ?? "").trim();
     const priceDollars = parseFloat(String(formData.get("price") ?? "0"));
     const btwLessons = parseInt(String(formData.get("btwLessons") ?? "0"), 10);

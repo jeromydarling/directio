@@ -1,7 +1,7 @@
 import { Form, Link, useSearchParams } from "react-router";
 import type { Route } from "./+types/super.orgs";
 import { requirePlatformAdmin } from "~/lib/super.server";
-import { healthBand } from "~/lib/super-shared";
+import { healthBand, likePattern } from "~/lib/super-shared";
 
 export function meta(_: Route.MetaArgs) {
   return [
@@ -22,8 +22,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const filters: string[] = [];
   const params: (string | number)[] = [];
   if (q) {
-    filters.push("(o.name LIKE ? OR o.slug LIKE ?)");
-    params.push(`%${q}%`, `%${q}%`);
+    filters.push("(o.name LIKE ? ESCAPE '\\' OR o.slug LIKE ? ESCAPE '\\')");
+    params.push(likePattern(q), likePattern(q));
   }
   if (band === "healthy") {
     filters.push("o.crmHealthScore >= 75");

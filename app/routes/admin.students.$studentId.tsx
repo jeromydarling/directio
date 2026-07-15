@@ -276,15 +276,15 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     const now = Date.now();
     if (completedAt !== null) {
       await env.DB.prepare(
-        "UPDATE enrollment SET journeyState = ?, status = 'completed', completedAt = ?, updatedAt = ? WHERE id = ?",
+        "UPDATE enrollment SET journeyState = ?, status = 'completed', completedAt = ?, updatedAt = ? WHERE id = ? AND organizationId = ?",
       )
-        .bind(target, completedAt, now, enrollmentId)
+        .bind(target, completedAt, now, enrollmentId, tenant.organization.id)
         .run();
     } else {
       await env.DB.prepare(
-        "UPDATE enrollment SET journeyState = ?, updatedAt = ? WHERE id = ?",
+        "UPDATE enrollment SET journeyState = ?, updatedAt = ? WHERE id = ? AND organizationId = ?",
       )
-        .bind(target, now, enrollmentId)
+        .bind(target, now, enrollmentId, tenant.organization.id)
         .run();
     }
 

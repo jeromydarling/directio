@@ -38,6 +38,7 @@ export default function SuperLayout({ loaderData }: Route.ComponentProps) {
           <SuperNavLink to="/super/orgs">Organizations</SuperNavLink>
           <SuperNavLink to="/super/map">Map</SuperNavLink>
           <SuperNavLink to="/super/comms">Communications</SuperNavLink>
+          <SuperNavLink to="/super/system">System</SuperNavLink>
         </nav>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">

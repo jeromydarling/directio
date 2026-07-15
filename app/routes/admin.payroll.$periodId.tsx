@@ -192,9 +192,9 @@ export async function action({ request, context, params }: Route.ActionArgs) {
               approvedAt = NULL,
               approvedByUserId = NULL,
               updatedAt = ?
-        WHERE id = ?`,
+        WHERE id = ? AND organizationId = ?`,
     )
-      .bind(cents, note, now, draft.id)
+      .bind(cents, note, now, draft.id, tenant.organization.id)
       .run();
     await recordAudit(env, {
       organizationId: tenant.organization.id,
@@ -218,9 +218,9 @@ export async function action({ request, context, params }: Route.ActionArgs) {
     await env.DB.prepare(
       `UPDATE payout_draft
           SET approvedAt = ?, approvedByUserId = ?, updatedAt = ?
-        WHERE id = ?`,
+        WHERE id = ? AND organizationId = ?`,
     )
-      .bind(now, tenant.user.id, now, draft.id)
+      .bind(now, tenant.user.id, now, draft.id, tenant.organization.id)
       .run();
     await recordAudit(env, {
       organizationId: tenant.organization.id,
@@ -239,9 +239,9 @@ export async function action({ request, context, params }: Route.ActionArgs) {
     await env.DB.prepare(
       `UPDATE payout_draft
           SET paidAt = ?, payoutMethod = ?, externalRef = ?, updatedAt = ?
-        WHERE id = ?`,
+        WHERE id = ? AND organizationId = ?`,
     )
-      .bind(now, method, externalRef, now, draft.id)
+      .bind(now, method, externalRef, now, draft.id, tenant.organization.id)
       .run();
     // Mark the contributing lesson_payouts as paid so the instructor's
     // pending-payout tile clears the moment payment lands.
@@ -267,15 +267,15 @@ export async function action({ request, context, params }: Route.ActionArgs) {
     // If all drafts in this period are paid, flip the period to 'paid'.
     const unpaid = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM payout_draft
-        WHERE payPeriodId = ? AND paidAt IS NULL`,
+        WHERE payPeriodId = ? AND organizationId = ? AND paidAt IS NULL`,
     )
-      .bind(draft.payPeriodId)
+      .bind(draft.payPeriodId, tenant.organization.id)
       .first<{ n: number }>();
     if ((unpaid?.n ?? 0) === 0) {
       await env.DB.prepare(
-        `UPDATE pay_period SET status = 'paid', paidAt = ? WHERE id = ?`,
+        `UPDATE pay_period SET status = 'paid', paidAt = ? WHERE id = ? AND organizationId = ?`,
       )
-        .bind(now, draft.payPeriodId)
+        .bind(now, draft.payPeriodId, tenant.organization.id)
         .run();
     }
     return redirect(`/admin/payroll/${params.periodId}`);

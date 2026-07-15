@@ -136,6 +136,7 @@ export default [
     route("orgs/:orgId", "routes/super.orgs.$orgId.tsx"),
     route("map", "routes/super.map.tsx"),
     route("comms", "routes/super.comms.tsx"),
+    route("system", "routes/super.system.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [

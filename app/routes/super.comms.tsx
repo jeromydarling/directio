@@ -1,6 +1,7 @@
 import { Form, Link } from "react-router";
 import type { Route } from "./+types/super.comms";
 import { requirePlatformAdmin } from "~/lib/super.server";
+import { likePattern } from "~/lib/super-shared";
 
 export function meta(_: Route.MetaArgs) {
   return [
@@ -19,8 +20,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const filters: string[] = [];
   const params: (string | number)[] = [];
   if (q) {
-    filters.push("(c.subject LIKE ? OR c.body LIKE ? OR o.name LIKE ?)");
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+    filters.push(
+      "(c.subject LIKE ? ESCAPE '\\' OR c.body LIKE ? ESCAPE '\\' OR o.name LIKE ? ESCAPE '\\')",
+    );
+    params.push(likePattern(q), likePattern(q), likePattern(q));
   }
   if (kind) {
     filters.push("c.kind = ?");
