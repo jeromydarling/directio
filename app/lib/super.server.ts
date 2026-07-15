@@ -94,12 +94,6 @@ export function computeHealthScore(input: OrgHealthInput, now: number): number {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-export function healthBand(score: number): "healthy" | "watch" | "at-risk" {
-  if (score >= 75) return "healthy";
-  if (score >= 45) return "watch";
-  return "at-risk";
-}
-
 export async function recomputeAndPersistHealth(
   env: Env,
   organizationId: string,
@@ -147,8 +141,11 @@ export async function recomputeAndPersistHealth(
       .bind(organizationId, now)
       .first<{ n: number }>(),
     env.DB.prepare(
-      `SELECT MAX(u.updatedAt) AS at
-         FROM member m JOIN user u ON u.id = m.userId
+      // Real engagement signal: latest Better Auth session activity
+      // for any owner/admin. user.updatedAt (the old source) moves on
+      // any profile edit and never decays, so it overstated health.
+      `SELECT MAX(s.updatedAt) AS at
+         FROM member m JOIN session s ON s.userId = m.userId
         WHERE m.organizationId = ? AND m.role IN ('owner','admin')`,
     )
       .bind(organizationId)

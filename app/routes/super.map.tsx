@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/super.map";
-import { requirePlatformAdmin, healthBand } from "~/lib/super.server";
+import { requirePlatformAdmin } from "~/lib/super.server";
+import { healthBand } from "~/lib/super-shared";
 
 export function meta(_: Route.MetaArgs) {
   return [

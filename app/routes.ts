@@ -27,6 +27,7 @@ export default [
   route("api/admin/purge-user", "routes/api.admin.purge-user.tsx"),
   route("api/admin/promote-super", "routes/api.admin.promote-super.tsx"),
   route("api/checkout/studio", "routes/api.checkout.studio.tsx"),
+  route("api/billing/portal", "routes/api.billing.portal.tsx"),
   route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
   route("audio/narration/*", "routes/audio.narration.$.tsx"),

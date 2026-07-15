@@ -42,7 +42,9 @@ export default {
     if (request.headers.has("X-Original-Path")) {
       const cleaned = new Headers(request.headers);
       cleaned.delete("X-Original-Path");
-      request = new Request(request, { headers: cleaned });
+      // Cast: reconstructing a Request drops the cf-properties type
+      // parameter, but the runtime object is unchanged.
+      request = new Request(request, { headers: cleaned }) as typeof request;
     }
 
     const url = new URL(request.url);

@@ -42,14 +42,21 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       .bind(since30)
       .first<{ n: number }>(),
     env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM organization WHERE crmHealthScore < 45`,
+      // Only orgs whose score has actually been computed — the column
+      // defaults to 50, so unvisited orgs would otherwise skew this.
+      `SELECT COUNT(*) AS n FROM organization
+        WHERE crmHealthScore < 45 AND crmHealthComputedAt IS NOT NULL`,
     ).first<{ n: number }>(),
     env.DB.prepare(
-      `SELECT COALESCE(SUM(amountCents), 0) AS cents FROM platform_subscription
-        WHERE status IN ('active', 'trialing')`,
+      // Platform subscriptions live as columns on organization
+      // (migration 0051), not a separate table. Studio is the only
+      // paid tier today at $29/mo.
+      `SELECT COUNT(*) AS n FROM organization
+        WHERE subscriptionTier = 'studio'
+          AND stripePlatformSubscriptionStatus IN ('active', 'trialing')`,
     )
-      .first<{ cents: number }>()
-      .catch(() => ({ cents: 0 })),
+      .first<{ n: number }>()
+      .then((r) => ({ cents: (r?.n ?? 0) * 2900 })),
     env.DB.prepare(
       `SELECT COALESCE(SUM(schoolNetCents), 0) AS cents FROM payment
         WHERE status = 'succeeded' AND createdAt >= ?`,

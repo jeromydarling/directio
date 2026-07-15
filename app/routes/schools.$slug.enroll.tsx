@@ -14,6 +14,9 @@ type OrgRow = {
   publicSlug: string;
   publicPublishedAt: number | null;
   stripeChargesEnabled: number;
+  cancellationDeadlineHours: number;
+  lateCancelFeeCents: number;
+  noShowFeeCents: number;
 };
 
 type PackageRow = {
@@ -31,7 +34,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const org = await db
     .prepare(
-      `SELECT id, name, publicSlug, publicPublishedAt, stripeChargesEnabled
+      `SELECT id, name, publicSlug, publicPublishedAt, stripeChargesEnabled,
+              cancellationDeadlineHours, lateCancelFeeCents, noShowFeeCents
          FROM organization WHERE publicSlug = ? AND publicPublishedAt IS NOT NULL`,
     )
     .bind(params.slug)
@@ -483,6 +487,48 @@ export default function PublicEnrollment({ loaderData, actionData }: Route.Compo
                   ))}
                 </Select>
               </Field>
+            </Card>
+
+            <Card>
+              <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+                Every fee, up front
+              </h3>
+              <ul className="mt-3 space-y-2 text-sm text-ink-700 dark:text-ink-200">
+                <li className="flex items-start justify-between gap-4">
+                  <span>Tuition (the package you picked above)</span>
+                  <span className="shrink-0 font-medium">shown at checkout</span>
+                </li>
+                <li className="flex items-start justify-between gap-4">
+                  <span>
+                    Late cancellation (inside {org.cancellationDeadlineHours}h of a
+                    lesson)
+                  </span>
+                  <span className="shrink-0 font-medium">
+                    {org.lateCancelFeeCents > 0
+                      ? new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(org.lateCancelFeeCents / 100)
+                      : "No fee"}
+                  </span>
+                </li>
+                <li className="flex items-start justify-between gap-4">
+                  <span>Missed lesson (no-show)</span>
+                  <span className="shrink-0 font-medium">
+                    {org.noShowFeeCents > 0
+                      ? new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(org.noShowFeeCents / 100)
+                      : "No fee"}
+                  </span>
+                </li>
+              </ul>
+              <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+                There are no other fees. Fees are set by {org.name}, collected
+                only after a late cancel or no-show actually happens, and never
+                charged to your card automatically.
+              </p>
             </Card>
 
             <Card>

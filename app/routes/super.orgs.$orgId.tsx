@@ -2,9 +2,9 @@ import { Form, Link, data, redirect } from "react-router";
 import type { Route } from "./+types/super.orgs.$orgId";
 import {
   requirePlatformAdmin,
-  healthBand,
   recomputeAndPersistHealth,
 } from "~/lib/super.server";
+import { healthBand } from "~/lib/super-shared";
 import { newId } from "~/lib/ids";
 import { sendEmail, isEmailConfigured } from "~/lib/email.server";
 
@@ -221,14 +221,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     if (!isEmailConfigured(env)) {
       return data({ error: "Email binding is not configured." }, { status: 400 });
     }
-    const to = String(form.get("to") ?? "").trim();
-    const subject = String(form.get("subject") ?? "").trim();
+    // Strip CR/LF from header-bound fields (header-injection guard)
+    // and sanity-check the recipient shape.
+    const to = String(form.get("to") ?? "").replace(/[\r\n]/g, "").trim();
+    const subject = String(form.get("subject") ?? "").replace(/[\r\n]/g, " ").trim();
     const body = String(form.get("body") ?? "").trim();
     if (!to || !subject || !body) {
       return data(
         { error: "To, subject, and body are all required." },
         { status: 400 },
       );
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      return data({ error: "That recipient doesn't look like an email address." }, { status: 400 });
     }
     const { id: sentId } = await sendEmail(env, {
       to,

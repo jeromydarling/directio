@@ -353,6 +353,40 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+          Plan &amp; billing
+        </h2>
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-ink-600 dark:text-ink-300">
+                Current plan:{" "}
+                <span className="font-semibold capitalize text-ink-900 dark:text-ink-50">
+                  {tenant.organization.subscriptionTier}
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">
+                {tenant.organization.subscriptionTier === "free"
+                  ? "Upgrade to Studio for the AI-generated marketing site + custom domain."
+                  : "Update your card, download invoices, or cancel — changes take effect at the end of the billing period."}
+              </p>
+            </div>
+            {tenant.organization.subscriptionTier === "free" ? (
+              <Form method="post" action="/api/checkout/studio">
+                <Button type="submit">Upgrade to Studio</Button>
+              </Form>
+            ) : (
+              <Form method="post" action="/api/billing/portal">
+                <Button type="submit" variant="secondary">
+                  Manage billing
+                </Button>
+              </Form>
+            )}
+          </div>
+        </Card>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
           Email digests
         </h2>
         <Card>
