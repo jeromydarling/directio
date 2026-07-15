@@ -465,6 +465,7 @@ function MarketingFooter({ env }: { env: string }) {
           title="Company"
           links={[
             { label: "Why we built it", to: "/why" },
+            { label: "Support", to: "/support" },
             { label: "Sign in", to: "/login" },
             { label: "Sign up", to: "/signup" },
             { label: "GitHub", to: "https://github.com/jeromydarling/directio", external: true },
@@ -472,8 +473,25 @@ function MarketingFooter({ env }: { env: string }) {
         />
       </div>
       <div className="border-t border-ink-200/60 dark:border-ink-800/60">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-6 text-xs text-ink-500 sm:px-6 dark:text-ink-400">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-6 text-xs text-ink-500 sm:px-6 dark:text-ink-400">
           <span>© {new Date().getFullYear()} directio</span>
+          <nav className="flex flex-wrap items-center gap-4">
+            <a href="/terms" className="transition hover:text-ink-900 dark:hover:text-ink-100">
+              Terms
+            </a>
+            <a href="/privacy" className="transition hover:text-ink-900 dark:hover:text-ink-100">
+              Privacy
+            </a>
+            <a href="/refund-policy" className="transition hover:text-ink-900 dark:hover:text-ink-100">
+              Refunds
+            </a>
+            <a
+              href="mailto:support@godirectio.com"
+              className="transition hover:text-ink-900 dark:hover:text-ink-100"
+            >
+              support@godirectio.com
+            </a>
+          </nav>
           <span className="rounded-full bg-ink-100 px-2 py-0.5 font-mono uppercase tracking-wider text-ink-600 dark:bg-ink-900 dark:text-ink-300">
             {env}
           </span>

@@ -569,7 +569,7 @@ export default function Compare({ loaderData }: Route.ComponentProps) {
             <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
               Competitor capabilities reflect their publicly-listed features and
               what schools have told us. If we got something wrong, email
-              hello@directio.app and we'll update this page — and credit you.
+              support@godirectio.com and we'll update this page — and credit you.
             </p>
           </Reveal>
         </div>

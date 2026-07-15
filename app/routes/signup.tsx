@@ -195,6 +195,17 @@ export default function Signup({ actionData }: Route.ComponentProps) {
             {submitting ? "Creating account…" : "Create account"}
           </button>
           <p className="text-xs text-ink-500 dark:text-ink-400">
+            By creating an account, you agree to the{" "}
+            <Link to="/terms" className="underline hover:text-ink-700 dark:hover:text-ink-200">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link to="/privacy" className="underline hover:text-ink-700 dark:hover:text-ink-200">
+              Privacy Policy
+            </Link>
+            .
+          </p>
+          <p className="text-xs text-ink-500 dark:text-ink-400">
             We'll send you a one-tap sign-in link by email. You can set a
             password later in account settings if you prefer one.
           </p>
