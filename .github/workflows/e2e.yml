@@ -24,6 +24,7 @@ jobs:
     env:
       BASE_URL: ${{ inputs.base_url || 'https://godirectio.com' }}
       E2E_PURGE_TOKEN: ${{ secrets.E2E_PURGE_TOKEN }}
+      E2E_INBOX_TOKEN: ${{ secrets.E2E_INBOX_TOKEN }}
       CI: "true"
 
     steps:

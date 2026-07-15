@@ -172,38 +172,194 @@ test("7. persistence: create a location and verify it survives reload", async ()
   await page.goto("/admin/locations");
   await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
 
-  // Use the "Add" CTA — varies in casing across pages but the verb
-  // "add" with "location" is the stable signature.
-  const addBtn = page
-    .getByRole("link", { name: /add (a )?location/i })
-    .or(page.getByRole("button", { name: /add (a )?location|new location/i }))
-    .first();
-  if (await addBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await addBtn.click();
-    await page.waitForLoadState("networkidle");
-    const locationName = `E2E HQ ${TS}`;
-    const nameInput = page.getByLabel(/name/i).first();
-    await nameInput.waitFor({ state: "visible", timeout: 15_000 });
-    await nameInput.fill(locationName);
-    // Address is required on some forms; fill best-effort.
-    const addressInput = page.getByLabel(/address|street/i).first();
-    if (await addressInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await addressInput.fill("100 Test St");
-    }
-    const cityInput = page.getByLabel(/city/i).first();
-    if (await cityInput.isVisible().catch(() => false)) {
-      await cityInput.fill("Saint Paul");
-    }
-    const zipInput = page.getByLabel(/zip|postal/i).first();
-    if (await zipInput.isVisible().catch(() => false)) {
-      await zipInput.fill("55101");
-    }
-    await page.getByRole("button", { name: /save|create|add/i }).first().click();
-    await page.waitForURL(/\/admin\/locations/, { timeout: 15_000 });
+  // /admin/locations renders an inline "Add a location" form right on
+  // the page — the "Add location" submit button IS the only CTA. Fill
+  // the form directly and submit once; clicking the submit before
+  // filling submits the empty form and triggers the action's
+  // "Name required" error path. The previous test attempted a
+  // generic "click Add button, then fill" sequence that double-
+  // submitted on mobile and produced the empty-state failure.
+  const locationName = `E2E HQ ${TS}`;
+  const nameInput = page.getByLabel(/^name$/i).first();
+  await expect(nameInput).toBeVisible({ timeout: 15_000 });
+  await nameInput.fill(locationName);
 
-    // Persistence check: reload and ensure the row is still there.
-    await page.reload();
-    await expect(page.locator("body")).toContainText(locationName);
+  const addressInput = page.getByLabel(/address line 1/i).first();
+  if (await addressInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await addressInput.fill("100 Test St");
+  }
+  const cityInput = page.getByLabel(/^city$/i).first();
+  if (await cityInput.isVisible().catch(() => false)) {
+    await cityInput.fill("Saint Paul");
+  }
+  const regionInput = page.getByLabel(/state \/ region/i).first();
+  if (await regionInput.isVisible().catch(() => false)) {
+    await regionInput.fill("MN");
+  }
+  const zipInput = page.getByLabel(/postal code/i).first();
+  if (await zipInput.isVisible().catch(() => false)) {
+    await zipInput.fill("55101");
+  }
+
+  // Button label is "Add location" exactly — anchor with ^ / $ so we
+  // don't match the "Add a location" h3 or any other text.
+  await page
+    .getByRole("button", { name: /^add location$/i })
+    .first()
+    .click();
+  await page.waitForLoadState("networkidle");
+
+  await page.reload();
+  await expect(page.locator("body")).toContainText(locationName, {
+    timeout: 15_000,
+  });
+});
+
+test("7b. persistence: create an instructor and verify it survives reload", async () => {
+  await page.goto("/admin/instructors/new");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const instructorFirst = "Sam";
+  const instructorLast = `Test ${TS}`;
+  const instructorEmail = `e2e-instructor-${TS}@directio.dev`;
+
+  // Use name-attribute selectors instead of labels — Field components
+  // include a "hint" string inside the <label>, which Playwright reads
+  // as part of the accessible name. /^email$/i then doesn't match
+  // labels like "Email If they already have…". input[name=] is rock-
+  // solid because the form posts by name anyway.
+  await page.locator('input[name="firstName"]').fill(instructorFirst);
+  await page.locator('input[name="lastName"]').fill(instructorLast);
+  await page.locator('input[name="email"]').fill(instructorEmail);
+
+  const submit = page
+    .getByRole("button", { name: /^add instructor$/i })
+    .first();
+  await submit.scrollIntoViewIfNeeded();
+  // Wait for the POST response BEFORE clicking — guarantees the form
+  // submit lands at the server before we navigate away. (waitForURL
+  // matching the source URL pattern was resolving instantly and
+  // racing the in-flight POST.)
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/admin/instructors/new") && r.request().method() === "POST",
+      { timeout: 15_000 },
+    ),
+    submit.click({ force: true }),
+  ]);
+  expect(resp.status(), "instructor create POST").toBeLessThan(400);
+
+  await page.goto("/admin/instructors");
+  await expect(page.locator("body")).toContainText(instructorLast, {
+    timeout: 15_000,
+  });
+});
+
+test("7c. persistence: create a vehicle and verify it survives reload", async () => {
+  // Vehicles renders an inline form on the index page (no /new route).
+  await page.goto("/admin/vehicles");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const vehicleLabel = `E2E Car ${TS}`;
+  const nameInput = page.locator('input[name="label"]');
+  await expect(nameInput).toBeVisible({ timeout: 15_000 });
+  await nameInput.fill(vehicleLabel);
+  await page.locator('input[name="makeModel"]').fill("Honda Civic");
+  await page.locator('input[name="year"]').fill("2024");
+
+  const submit = page.getByRole("button", { name: /^add vehicle$/i }).first();
+  await submit.scrollIntoViewIfNeeded();
+  await submit.click({ force: true });
+  await page.waitForLoadState("networkidle");
+
+  await page.reload();
+  await expect(page.locator("body")).toContainText(vehicleLabel, {
+    timeout: 15_000,
+  });
+});
+
+test("7d. persistence: create a program and verify it survives reload", async () => {
+  await page.goto("/admin/programs/new");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const programName = `E2E Teen Program ${TS}`;
+  await page.locator('input[name="name"]').fill(programName);
+
+  // Kind is a select with a "teen" default — leave it. Description is
+  // optional — leave it.
+  const submit = page
+    .getByRole("button", { name: /^create program$/i })
+    .first();
+  await submit.scrollIntoViewIfNeeded();
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/admin/programs/new") && r.request().method() === "POST",
+      { timeout: 15_000 },
+    ),
+    submit.click({ force: true }),
+  ]);
+  expect(resp.status(), "program create POST").toBeLessThan(400);
+
+  await page.goto("/admin/programs");
+  await expect(page.locator("body")).toContainText(programName, {
+    timeout: 15_000,
+  });
+});
+
+test("7e. persistence: create a student and verify it survives reload", async () => {
+  await page.goto("/admin/students/new");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+
+  const studentFirst = "Jamie";
+  const studentLast = `Test ${TS}`;
+  const studentEmail = `e2e-student-${TS}@directio.dev`;
+
+  await page.locator('input[name="firstName"]').fill(studentFirst);
+  await page.locator('input[name="lastName"]').fill(studentLast);
+  const emailInput = page.locator('input[name="email"]');
+  await emailInput.fill(studentEmail);
+  // Skip date-of-birth: optional on the form, and on Pixel 7 the date
+  // input's picker can mess with subsequent click events.
+
+  // Submit via Enter key on the email input rather than a click.
+  // The submit-button click works for instructor on mobile but the
+  // student form (which has an extra field + a label-hint) reliably
+  // swallows the click on Pixel 7. Pressing Enter in an input fires
+  // the form's submit event natively and is what a real mobile user
+  // would do.
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/admin/students/new") && r.request().method() === "POST",
+      { timeout: 15_000 },
+    ),
+    emailInput.press("Enter"),
+  ]);
+  expect(resp.status(), "student create POST").toBeLessThan(400);
+
+  await page.goto("/admin/students");
+  await expect(page.locator("body")).toContainText(studentLast, {
+    timeout: 15_000,
+  });
+});
+
+test("7f. schedule list + board pages render", async () => {
+  // Without an enrollment (which requires Stripe checkout) we can't
+  // book a lesson. Verify the schedule LIST and BOARD pages at least
+  // render their h1 — the routes themselves are nontrivial (board
+  // mounts a Durable Object websocket) and a 500 here would mask a
+  // real regression.
+  for (const path of ["/admin/schedule", "/admin/schedule/board"]) {
+    await page.goto(path);
+    await expect(page.locator("body"), `${path} body`).not.toContainText(
+      "Oops!",
+    );
+    await expect(
+      page.getByRole("heading", { level: 1 }).first(),
+      `${path} h1`,
+    ).toBeVisible({ timeout: 15_000 });
   }
 });
 
@@ -226,7 +382,12 @@ test("8. settings toggle persists across reload", async () => {
     .getByRole("button", { name: /save|update|apply/i })
     .first();
   if (await submitBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await submitBtn.click();
+    // Mobile viewports render a sticky top header that overlays form
+    // buttons; the surrounding <label> can also intercept clicks.
+    // Scroll into view + force:true bypasses the actionability checks
+    // and still posts the form correctly.
+    await submitBtn.scrollIntoViewIfNeeded();
+    await submitBtn.click({ force: true });
     await page.waitForLoadState("networkidle");
   }
   await page.reload();

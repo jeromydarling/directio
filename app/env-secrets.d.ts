@@ -15,6 +15,10 @@
 interface Env {
   BETTER_AUTH_SECRET?: string;
 
+  // Server-side Sentry DSN. Also forwarded to the client via window.ENV in
+  // app/root.tsx (DSNs are publishable). Unset → Sentry no-ops.
+  SENTRY_DSN?: string;
+
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
@@ -43,6 +47,13 @@ interface Env {
   // platform_admin from a shell. Unset in prod → endpoint 503s so
   // no accidental privilege escalation.
   SUPER_BOOTSTRAP_TOKEN?: string;
+
+  // E2E inbound-mail capture. Cloudflare Email Routing forwards
+  // e2e+*@<domain> to the worker's email() handler, which buffers to
+  // KV. Tests poll /api/internal/test-inbox with this Bearer token
+  // to read magic-link emails, receipts, etc. Default unset so the
+  // endpoint returns 503 in production.
+  E2E_INBOX_TOKEN?: string;
 
   // Email-verification gate. Default unset / "off": signup creates
   // the user with an immediate session (no link required), which is

@@ -214,6 +214,11 @@ export async function createCheckoutSession(
     body["payment_method_types[0]"] = "card";
     body["payment_intent_data[application_fee_amount]"] = args.platformFeeCents;
     body["payment_intent_data[transfer_data][destination]"] = args.accountId;
+    // on_behalf_of moves dispute/chargeback liability to the connected
+    // account (the school), matching directio's marketing copy that
+    // says "schools handle disputes/refunds". Without this, destination
+    // charges keep liability on the platform (directio) by default.
+    body["payment_intent_data[on_behalf_of]"] = args.accountId;
   } else if (args.option === "bnpl") {
     body.mode = "payment";
     const methods = args.bnplMethods ?? ["affirm", "klarna"];
@@ -223,6 +228,7 @@ export async function createCheckoutSession(
     });
     body["payment_intent_data[application_fee_amount]"] = args.platformFeeCents;
     body["payment_intent_data[transfer_data][destination]"] = args.accountId;
+    body["payment_intent_data[on_behalf_of]"] = args.accountId;
   } else {
     const months = Math.max(2, args.installmentMonths ?? 3);
     // Each monthly invoice charges amountCents ÷ months (rounded up
@@ -245,6 +251,10 @@ export async function createCheckoutSession(
     );
     body["subscription_data[application_fee_percent]"] = feePercent;
     body["subscription_data[transfer_data][destination]"] = args.accountId;
+    // on_behalf_of moves dispute/chargeback liability to the connected
+    // account (the school), matching the marketing copy that says
+    // schools handle disputes/refunds. Federation-wide policy.
+    body["subscription_data[on_behalf_of]"] = args.accountId;
     body["subscription_data[metadata][installmentMonths]"] = months;
   }
 

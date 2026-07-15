@@ -32,6 +32,10 @@ export const links: Route.LinksFunction = () => [
 // families visiting a school's own domain see the URL they know.
 // (originalPath rides in AppLoadContext, set only by the Worker —
 // unlike a request header, clients can't forge it.)
+//
+// ENV is the minimal, safe-to-publish slice of env forwarded to the
+// client via window.ENV. SENTRY_DSN is a publishable value (DSNs are
+// meant to ship in the browser); never forward a secret here.
 export function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const host = url.host.replace(/^www\./, "");
@@ -41,6 +45,9 @@ export function loader({ request, context }: Route.LoaderArgs) {
     origin,
     pathname,
     canonical: `${origin}${pathname}`,
+    ENV: {
+      SENTRY_DSN: context.cloudflare.env.SENTRY_DSN,
+    },
   };
 }
 
@@ -56,7 +63,9 @@ type SeoOverride = {
 export function Layout({ children }: { children: React.ReactNode }) {
   // Root loader always runs, but data can be undefined during error
   // boundaries. Fall back to sensible defaults so we never emit an
-  // empty canonical / og:url.
+  // empty canonical / og:url. The ENV bag is injected before
+  // <Scripts /> so the client entry can read window.ENV.SENTRY_DSN
+  // during hydration.
   const data = useRouteLoaderData<typeof loader>("root");
   const matches = useMatches();
   const seo = matches
@@ -84,10 +93,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content={themeColor} />
         <Meta />
         <Links />
+        {/* Google Analytics 4 — federated CROS Family stream */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-RKF41M29QE" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-RKF41M29QE', { cros_app: 'directio' });`,
+          }}
+        />
       </head>
       <body>
         {children}
         <ScrollRestoration />
+        {data?.ENV && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `window.ENV=${JSON.stringify(data.ENV)}`,
+            }}
+          />
+        )}
         <Scripts />
       </body>
     </html>
