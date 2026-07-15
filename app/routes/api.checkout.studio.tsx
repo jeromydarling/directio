@@ -50,7 +50,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   try {
-    const { url } = await createPlatformCheckoutSession(env, {
+    const { sessionId, url } = await createPlatformCheckoutSession(env, {
       tier: "studio_monthly",
       successUrl: `${origin}/admin?subscribed=studio&session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/pricing?canceled=studio`,
@@ -58,6 +58,16 @@ export async function action({ request, context }: Route.ActionArgs) {
       organizationId: member.organizationId,
       userId: session.user.id,
     });
+    // Pre-record the intent. The webhook refuses to flip a tier for
+    // any session that doesn't have a matching row here — session
+    // metadata alone is forgeable.
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO stripe_checkout_intent
+         (sessionId, organizationId, kind, tier, createdByUserId, createdAt)
+       VALUES (?, ?, 'platform_subscription', 'studio', ?, ?)`,
+    )
+      .bind(sessionId, member.organizationId, session.user.id, Date.now())
+      .run();
     return redirect(url, 303);
   } catch (err) {
     if (err instanceof StripeNotConfiguredError) {

@@ -1,6 +1,7 @@
 import { data } from "react-router";
 import type { Route } from "./+types/api.internal.narrate-catalog";
 import { requireTenant } from "~/lib/tenant.server";
+import { rateLimit } from "~/lib/rate-limit.server";
 import { DEFAULT_VOICE, hashScript, narrateAndCache } from "~/lib/narrate.server";
 
 /**
@@ -10,7 +11,9 @@ import { DEFAULT_VOICE, hashScript, narrateAndCache } from "~/lib/narrate.server
  * doesn't have to wait, and used again whenever we add new lessons
  * or want to add a new default voice.
  *
- * Auth: any signed-in tenant member can trigger it. The shared cache
+ * Auth: owner/admin only — each uncached render is a real Workers AI
+ * spend billed to directio, so this must not be reachable by every
+ * demo/student session. Rate-limited per org on top. The shared cache
  * makes it idempotent and the work is capped per call by `limit`
  * (default 5, max 40) to stay under Worker time budgets.
  *
@@ -21,7 +24,17 @@ import { DEFAULT_VOICE, hashScript, narrateAndCache } from "~/lib/narrate.server
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const env = context.cloudflare.env;
-  await requireTenant(request, env);
+  const tenant = await requireTenant(request, env);
+  if (tenant.role !== "owner" && tenant.role !== "admin") {
+    return data({ error: "Owner or admin role required." }, { status: 403 });
+  }
+  const rl = await rateLimit(env, `narrate-catalog:${tenant.organization.id}`, {
+    limit: 10,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data({ error: "Narration budget reached for this hour." }, { status: 429 });
+  }
 
   const url = new URL(request.url);
   const packSlug = url.searchParams.get("packSlug") ?? "national-teen-core";

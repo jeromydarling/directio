@@ -1,5 +1,6 @@
 import type { Route } from "./+types/api.stripe.webhook";
 import { recordAudit } from "~/lib/audit.server";
+import { cancelSubscription, getInstallmentProgress } from "~/lib/stripe.server";
 import { appendLedgerEntry } from "~/lib/translation.server";
 
 /**
@@ -42,11 +43,35 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
   if (!verified) return new Response("Invalid signature", { status: 400 });
 
-  let event: { id: string; type: string; data: { object: Record<string, unknown> } };
+  let event: {
+    id: string;
+    type: string;
+    account?: string; // present on Connect (connected-account) events
+    data: { object: Record<string, unknown> };
+  };
   try {
     event = JSON.parse(raw);
   } catch {
     return new Response("Bad JSON", { status: 400 });
+  }
+
+  // Idempotency: Stripe redelivers events on timeout/5xx. Record the
+  // event id first; a redelivery finds the row and skips all side
+  // effects. Fail-open if the table is missing (migration not applied
+  // yet) — better to double-process than to 500 forever.
+  if (event.id) {
+    try {
+      const inserted = await env.DB.prepare(
+        "INSERT OR IGNORE INTO stripe_event (id, type, receivedAt) VALUES (?, ?, ?)",
+      )
+        .bind(event.id, event.type, Date.now())
+        .run();
+      if (!inserted.meta?.changes) {
+        return new Response("ok (duplicate)", { status: 200 });
+      }
+    } catch (err) {
+      console.error("[stripe-webhook] event dedupe unavailable:", err);
+    }
   }
 
   switch (event.type) {
@@ -70,6 +95,19 @@ export async function action({ request, context }: Route.ActionArgs) {
     case "invoice.paid":
     case "invoice.payment_failed":
       await handlePlatformInvoiceEvent(env, event.type, event.data.object);
+      break;
+    case "charge.dispute.created":
+    case "charge.dispute.closed":
+      await handleDispute(env, event.type, event.data.object);
+      break;
+    case "charge.refunded":
+      await handleChargeRefunded(env, event.data.object);
+      break;
+    case "payout.failed":
+      await handlePayoutFailed(env, event.account ?? null, event.data.object);
+      break;
+    case "radar.early_fraud_warning.created":
+      await handleFraudWarning(env, event.data.object);
       break;
     default:
       // No-op for events we don't care about yet.
@@ -133,16 +171,27 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
   // Branch 2: platform-self subscription (Studio etc.). Direct charge to
   // directio; flips the org's subscriptionTier and records subscription IDs.
   if (metadata.directio_platform_tier) {
-    const organizationId = metadata.directio_organization_id;
-    const tier = metadata.directio_platform_tier;
-    const stripeCustomerId = obj.customer ? String(obj.customer) : null;
-    const stripeSubscriptionId = obj.subscription ? String(obj.subscription) : null;
-    if (!organizationId) {
-      // Signed-out checkout: cannot attribute yet. Stripe has the Customer +
-      // Subscription; we'll reconcile during the post-signup flow. No-op
-      // here so the webhook still returns 200 and Stripe stops retrying.
+    // Trust boundary: the org id must come from OUR pre-recorded
+    // checkout intent (written by /api/checkout/studio when it created
+    // the session), never from session metadata alone — metadata rides
+    // in from Stripe and a forged/stale value would flip a tier on an
+    // arbitrary org.
+    const intent = await env.DB.prepare(
+      `SELECT organizationId, tier FROM stripe_checkout_intent
+        WHERE sessionId = ? AND kind = 'platform_subscription'`,
+    )
+      .bind(sessionId)
+      .first<{ organizationId: string; tier: string | null }>();
+    if (!intent) {
+      console.warn(
+        `[stripe-webhook] platform-tier session ${sessionId} has no recorded intent; ignoring`,
+      );
       return;
     }
+    const organizationId = intent.organizationId;
+    const tier = intent.tier ?? metadata.directio_platform_tier;
+    const stripeCustomerId = obj.customer ? String(obj.customer) : null;
+    const stripeSubscriptionId = obj.subscription ? String(obj.subscription) : null;
 
     await env.DB.prepare(
       `UPDATE organization
@@ -353,7 +402,7 @@ async function handlePlatformInvoiceEvent(
   if (!subscriptionId) return;
 
   const newStatus = eventType === "invoice.paid" ? "active" : "past_due";
-  await env.DB.prepare(
+  const updated = await env.DB.prepare(
     `UPDATE organization
         SET stripePlatformSubscriptionStatus = ?,
             subscriptionUpdatedAt = ?
@@ -361,6 +410,196 @@ async function handlePlatformInvoiceEvent(
   )
     .bind(newStatus, Date.now(), subscriptionId)
     .run();
+
+  // Not a platform subscription → this is a family installment plan
+  // (enrollment tuition paid monthly). Fixed-length plans aren't
+  // first-class in Stripe, so on each paid invoice we ask Stripe how
+  // many invoices have been paid and cancel the subscription once the
+  // agreed number of months is reached. Stateless — no local counter
+  // to race with redeliveries.
+  if (!updated.meta?.changes && eventType === "invoice.paid") {
+    try {
+      const progress = await getInstallmentProgress(env, subscriptionId);
+      if (
+        progress.installmentMonths !== null &&
+        progress.paidInvoices >= progress.installmentMonths
+      ) {
+        await cancelSubscription(env, subscriptionId);
+        const payment = await env.DB.prepare(
+          "SELECT id, organizationId FROM payment WHERE stripeSubscriptionId = ? LIMIT 1",
+        )
+          .bind(subscriptionId)
+          .first<{ id: string; organizationId: string }>();
+        if (payment) {
+          await recordAudit(env, {
+            organizationId: payment.organizationId,
+            actorUserId: null,
+            action: "payment.installment_plan_completed",
+            entityType: "payment",
+            entityId: payment.id,
+            payload: {
+              stripeSubscriptionId: subscriptionId,
+              months: progress.installmentMonths,
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[stripe-webhook] installment check failed for ${subscriptionId}:`,
+        err,
+      );
+    }
+  }
+}
+
+/**
+ * charge.dispute.created / charge.dispute.closed
+ *
+ * A family disputed a charge with their bank. Funds are pulled from
+ * the school's balance while the dispute is open; the school needs to
+ * see this on their payments dashboard, not find out from a Stripe
+ * email they never read.
+ */
+async function handleDispute(env: Env, eventType: string, obj: Record<string, unknown>) {
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  if (!paymentIntentId) return;
+
+  const disputeStatus = String(obj.status ?? "");
+  const newPaymentStatus =
+    eventType === "charge.dispute.created"
+      ? "disputed"
+      : disputeStatus === "won"
+        ? "succeeded"
+        : "dispute_lost";
+
+  await env.DB.prepare(
+    "UPDATE payment SET status = ?, updatedAt = ? WHERE stripePaymentIntentId = ?",
+  )
+    .bind(newPaymentStatus, Date.now(), paymentIntentId)
+    .run();
+
+  const payment = await env.DB.prepare(
+    "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+  )
+    .bind(paymentIntentId)
+    .first<{ id: string; organizationId: string }>();
+  if (payment) {
+    await recordAudit(env, {
+      organizationId: payment.organizationId,
+      actorUserId: null,
+      action:
+        eventType === "charge.dispute.created"
+          ? "payment.dispute_opened"
+          : `payment.dispute_${disputeStatus || "closed"}`,
+      entityType: "payment",
+      entityId: payment.id,
+      payload: {
+        disputeId: obj.id ? String(obj.id) : null,
+        reason: obj.reason ? String(obj.reason) : null,
+        amountCents: typeof obj.amount === "number" ? obj.amount : null,
+        status: disputeStatus,
+      },
+    });
+  }
+}
+
+/**
+ * charge.refunded — refunds issued from the Stripe dashboard (or by
+ * a dispute) rather than through our /admin/payments flow. Mirrors
+ * the state so the school's dashboard agrees with Stripe.
+ */
+async function handleChargeRefunded(env: Env, obj: Record<string, unknown>) {
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  if (!paymentIntentId) return;
+  const fullyRefunded = Boolean(obj.refunded);
+
+  if (fullyRefunded) {
+    await env.DB.prepare(
+      "UPDATE payment SET status = 'refunded', updatedAt = ? WHERE stripePaymentIntentId = ? AND status != 'refunded'",
+    )
+      .bind(Date.now(), paymentIntentId)
+      .run();
+  }
+
+  const payment = await env.DB.prepare(
+    "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+  )
+    .bind(paymentIntentId)
+    .first<{ id: string; organizationId: string }>();
+  if (payment) {
+    await recordAudit(env, {
+      organizationId: payment.organizationId,
+      actorUserId: null,
+      action: fullyRefunded ? "payment.refunded" : "payment.partially_refunded",
+      entityType: "payment",
+      entityId: payment.id,
+      payload: {
+        source: "stripe.webhook",
+        amountRefundedCents:
+          typeof obj.amount_refunded === "number" ? obj.amount_refunded : null,
+      },
+    });
+  }
+}
+
+/**
+ * payout.failed — a school's bank rejected their Stripe payout
+ * (closed account, bad routing number). Connect event: the account id
+ * arrives at the event's top level, not in the object.
+ */
+async function handlePayoutFailed(
+  env: Env,
+  accountId: string | null,
+  obj: Record<string, unknown>,
+) {
+  if (!accountId) return;
+  const org = await env.DB.prepare(
+    "SELECT id FROM organization WHERE stripeAccountId = ? LIMIT 1",
+  )
+    .bind(accountId)
+    .first<{ id: string }>();
+  if (!org) return;
+  await recordAudit(env, {
+    organizationId: org.id,
+    actorUserId: null,
+    action: "stripe.payout_failed",
+    entityType: "organization",
+    entityId: org.id,
+    payload: {
+      payoutId: obj.id ? String(obj.id) : null,
+      amountCents: typeof obj.amount === "number" ? obj.amount : null,
+      failureMessage: obj.failure_message ? String(obj.failure_message) : null,
+    },
+  });
+}
+
+/**
+ * radar.early_fraud_warning.created — Stripe's issuer-network signal
+ * that a charge is likely fraudulent. Best handled by refunding
+ * proactively before it becomes a dispute; we surface it in the audit
+ * log so it's at least visible.
+ */
+async function handleFraudWarning(env: Env, obj: Record<string, unknown>) {
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  if (!paymentIntentId) return;
+  const payment = await env.DB.prepare(
+    "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+  )
+    .bind(paymentIntentId)
+    .first<{ id: string; organizationId: string }>();
+  if (!payment) return;
+  await recordAudit(env, {
+    organizationId: payment.organizationId,
+    actorUserId: null,
+    action: "payment.fraud_warning",
+    entityType: "payment",
+    entityId: payment.id,
+    payload: {
+      chargeId: obj.charge ? String(obj.charge) : null,
+      fraudType: obj.fraud_type ? String(obj.fraud_type) : null,
+    },
+  });
 }
 
 function normalizeTier(raw: string): string {

@@ -155,10 +155,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 
     try {
       const result = await refundPayment(env, {
-        accountId: row.stripeAccountId,
         paymentIntentId: row.stripePaymentIntentId,
         chargeId: row.stripeChargeId,
         reason,
+        idempotencyKey: `refund-${row.id}`,
       });
       await env.DB.prepare(
         "UPDATE payment SET status = 'refunded', updatedAt = ? WHERE id = ?",

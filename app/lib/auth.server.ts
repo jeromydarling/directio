@@ -8,6 +8,7 @@ import { isEmailConfigured, sendEmail } from "./email.server";
 let _auth: ReturnType<typeof createAuth> | null = null;
 
 function createAuth(env: Env) {
+  const isProd = env.APP_ENV === "production";
   return betterAuth({
     database: {
       dialect: new D1Dialect({ database: env.DB }),
@@ -15,6 +16,12 @@ function createAuth(env: Env) {
     },
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.APP_URL,
+    // Reject cross-site form posts to auth endpoints: only our own
+    // origin may drive sign-in/sign-up.
+    trustedOrigins: [env.APP_URL],
+    advanced: {
+      useSecureCookies: isProd,
+    },
     emailAndPassword: {
       // Password is supported but never required. Per spec #6: passwordless
       // is a permanent lifecycle, not a temporary state. Parents may
@@ -26,16 +33,22 @@ function createAuth(env: Env) {
     plugins: [
       organization(),
       magicLink({
-        // Magic-link sign-in is the canonical auth flow. Tokens last
-        // long enough for the parent to open their email on the same
-        // device they paid on (or the next one), but short enough to
-        // be safe.
-        expiresIn: 60 * 60, // 1 hour
+        // Magic links are bearer credentials — 15 minutes is the
+        // industry ceiling. The email says "sign in now", not "save
+        // this for later".
+        expiresIn: 15 * 60,
         sendMagicLink: async ({ email, url }) => {
           if (!isEmailConfigured(env)) {
-            // Quietly degrade in dev: better-auth swallows the throw,
-            // and we record a console line so the link is recoverable
-            // from the worker log if it ever needs to be.
+            if (isProd) {
+              // NEVER log the URL in prod — a magic-link URL in the
+              // observability pipeline is a leaked credential.
+              console.error(
+                "[magic-link] EMAIL binding missing in production; link not delivered",
+              );
+              return;
+            }
+            // Dev without the email binding: the console line is how
+            // the developer gets the link.
             console.log(`[magic-link] ${email} → ${url}`);
             return;
           }
@@ -75,7 +88,7 @@ export function generateClaimPendingPassword(): string {
 function magicLinkHtml(url: string): string {
   return `<!doctype html><html><body style="font-family:system-ui,sans-serif;color:#111;max-width:520px;margin:24px auto;padding:0 16px">
   <h2 style="font-size:20px;margin:0 0 12px">Your directio sign-in link</h2>
-  <p>Click the button below to sign in. The link works for one hour.</p>
+  <p>Click the button below to sign in. The link works for 15 minutes.</p>
   <p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;background:#1e3a8a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600">Open my portal</a></p>
   <p style="font-size:13px;color:#555">If the button doesn't work, paste this URL into your browser:<br><span style="word-break:break-all">${escapeHtml(url)}</span></p>
   <p style="font-size:12px;color:#888;margin-top:32px">If you didn't request this, you can safely ignore it.</p>
@@ -83,7 +96,7 @@ function magicLinkHtml(url: string): string {
 }
 
 function magicLinkText(url: string): string {
-  return `Your directio sign-in link\n\nOpen this URL within the next hour to sign in:\n${url}\n\nIf you didn't request this, you can safely ignore it.\n`;
+  return `Your directio sign-in link\n\nOpen this URL within the next 15 minutes to sign in:\n${url}\n\nIf you didn't request this, you can safely ignore it.\n`;
 }
 
 function escapeHtml(s: string): string {

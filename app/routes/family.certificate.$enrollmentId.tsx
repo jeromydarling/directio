@@ -84,7 +84,7 @@ export async function loader({ request, params, context }: Route.LoaderArgs) {
         AND (g.userId = ? OR s.userId = ? OR s.email = ?)
       LIMIT 1`,
   )
-    .bind(enrollmentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.email)
+    .bind(enrollmentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.ownershipEmail)
     .first();
   if (!isAdmin && !isOwnFamily) throw new Response("Not authorized", { status: 403 });
 

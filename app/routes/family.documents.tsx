@@ -53,7 +53,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
          WHERE s.organizationId = ?
            AND (g.userId = ? OR s.userId = ? OR s.email = ?)`,
     )
-    .bind(orgId, tenant.user.id, tenant.user.id, tenant.user.email)
+    .bind(orgId, tenant.user.id, tenant.user.id, tenant.user.ownershipEmail)
     .all<KidRow>();
 
   if (kids.results.length === 0) {
@@ -140,7 +140,7 @@ export async function action({ request, context }: Route.ActionArgs) {
            AND (g.userId = ? OR s.userId = ? OR s.email = ?)
          LIMIT 1`,
     )
-      .bind(studentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.email)
+      .bind(studentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.ownershipEmail)
       .first();
     if (!ok) return data({ error: "Not your student." }, { status: 403 });
 
@@ -220,7 +220,7 @@ export async function action({ request, context }: Route.ActionArgs) {
            AND (g.userId = ? OR s.userId = ? OR s.email = ?)
          LIMIT 1`,
     )
-      .bind(studentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.email)
+      .bind(studentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.ownershipEmail)
       .first();
     if (!ok) return data({ error: "Not your student." }, { status: 403 });
 

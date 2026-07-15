@@ -7,6 +7,7 @@ import {
   StripeNotConfiguredError,
   createCheckoutSession,
   isStripeConfigured,
+  platformFeeCentsFor,
   type PaymentOption,
 } from "~/lib/stripe.server";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
@@ -137,8 +138,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     /* ignore */
   }
 
-  const platformFeeBps = opts.platformFeeBps ?? 250;
-  const platformFeeCents = Math.round((enrollment.priceCents * platformFeeBps) / 10000);
+  // Platform-controlled fee — deliberately ignores any platformFeeBps
+  // stored in older packages' paymentOptions JSON.
+  const platformFeeCents = platformFeeCentsFor(enrollment.priceCents);
   const schoolNetCents = enrollment.priceCents - platformFeeCents;
   const installmentMonths = opts.installmentMonths ?? 3;
 
@@ -196,6 +198,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         directio_enrollment_id: enrollment.id,
         directio_organization_id: tenant.organization.id,
       },
+      idempotencyKey: `checkout-${paymentId}`,
     });
 
     await env.DB.prepare(
@@ -238,9 +241,11 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const amount = enrollment.priceCents ?? 0;
+  // Matches the server-side Math.ceil so the displayed monthly price
+  // is exactly what Stripe will charge.
   const monthly =
     options.installmentMonths && enrollment.priceCents
-      ? Math.round(enrollment.priceCents / options.installmentMonths)
+      ? Math.ceil(enrollment.priceCents / options.installmentMonths)
       : 0;
 
   const succeeded = payments.find((p) => p.status === "succeeded");

@@ -2,6 +2,7 @@ import { data } from "react-router";
 import type { Route } from "./+types/api.lesson.translate";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
+import { rateLimit } from "~/lib/rate-limit.server";
 import {
   InsufficientCreditsError,
   TIER_PRICE_CENTS,
@@ -34,6 +35,18 @@ export async function action({ request, context }: Route.ActionArgs) {
     !tenant.organization.isDemo
   ) {
     return data({ error: "Forbidden" }, { status: 403 });
+  }
+  // Cost guard on top of the credit ledger — demo orgs bypass the
+  // ledger, so this is their only ceiling.
+  const rl = await rateLimit(env, `translate:${tenant.organization.id}`, {
+    limit: 60,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "Translation budget reached for this hour. Try again later." },
+      { status: 429 },
+    );
   }
 
   const form = await request.formData();

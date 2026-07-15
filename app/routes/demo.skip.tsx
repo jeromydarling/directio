@@ -3,27 +3,50 @@ import type { Route } from "./+types/demo.skip";
 import { generateClaimPendingPassword, getAuth } from "~/lib/auth.server";
 import { seedDemoOrg } from "~/lib/demo-seeder.server";
 import { newId } from "~/lib/ids";
+import { clientIp, rateLimit } from "~/lib/rate-limit.server";
 import { STATE_LABEL } from "~/lib/state-coverage";
 
 /**
  * Bookmark-friendly demo bypass. No form, no UI — hit the URL and
  * you're in a fresh demo with a new sandbox identity.
  *
- *   /demo/skip                          → defaults: random email, owner, MN
+ *   /demo/skip                          → defaults: random identity, owner, MN
  *   /demo/skip?as=instructor            → land in /instructor
  *   /demo/skip?as=family                → land in /family
  *   /demo/skip?as=student               → land in /me
- *   /demo/skip?email=you@example.com    → reuse identity if it exists
- *   /demo/skip?state=TX&role=owner      → customize the seed
+ *   /demo/skip?state=TX&role=owner     → customize the seed
  *
- * Always creates a new demo organization. The user lands wherever
- * `as` points (defaults to /admin). If their email already has an
- * account, we send them in via that account; otherwise we sign them
- * up with a throwaway password and forward the session cookie.
+ * Always creates a new demo organization with a RANDOM identity. This
+ * loader creates rows on GET (a deliberate trade for bookmarkability),
+ * so it is defended in depth:
+ *   - Sec-Fetch gate: only top-level, non-cross-site navigations get
+ *     through. An <img src="/demo/skip"> embedded on another site
+ *     sends Sec-Fetch-Dest: image / Sec-Fetch-Site: cross-site and is
+ *     bounced without side effects.
+ *   - Per-IP rate limit: 5/hour.
+ *   - No email parameter: an earlier build accepted ?email=… which
+ *     let anyone aim magic-link email floods at a victim's inbox.
  */
 export async function loader({ request, context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
   const url = new URL(request.url);
+
+  // CSRF/embed gate. Browsers send Sec-Fetch-* on all requests; a
+  // missing header (curl, old clients, Playwright variants) is
+  // allowed — the rate limit below still applies.
+  const fetchDest = request.headers.get("Sec-Fetch-Dest");
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+  if ((fetchDest && fetchDest !== "document") || fetchSite === "cross-site") {
+    return redirect("/demo");
+  }
+
+  const rl = await rateLimit(env, `demo-skip:${clientIp(request)}`, {
+    limit: 5,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return redirect("/demo?limited=1");
+  }
 
   const as = (url.searchParams.get("as") ?? "owner").toLowerCase();
   const role = ["owner", "admin", "instructor", "curious"].includes(as)
@@ -33,13 +56,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const stateParam = (url.searchParams.get("state") ?? "MN").toUpperCase();
   const stateCode = STATE_LABEL[stateParam] ? stateParam : "MN";
 
-  const emailParam = (url.searchParams.get("email") ?? "").trim().toLowerCase();
-  const email =
-    emailParam && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailParam)
-      ? emailParam
-      : `demo+${newId().slice(0, 8)}@directio.app`;
-
-  const name = (url.searchParams.get("name") ?? "Demo Runner").trim().slice(0, 80);
+  const email = `demo+${newId().slice(0, 8)}@directio.app`;
+  const name = "Demo Runner";
 
   const landing =
     as === "instructor" ? "/instructor"
@@ -49,29 +67,6 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const auth = getAuth(env);
   const responseHeaders = new Headers();
-
-  const existing = await env.DB.prepare("SELECT id FROM user WHERE email = ?")
-    .bind(email)
-    .first<{ id: string }>();
-
-  let userId: string;
-  if (existing) {
-    userId = existing.id;
-    // We can't forge a session for an existing user from here without
-    // their cooperation, so fall back to magic-link — fine for the
-    // bookmark case where the operator is testing repeatedly.
-    try {
-      await auth.api.signInMagicLink({
-        body: { email, callbackURL: landing },
-        headers: request.headers,
-        asResponse: true,
-      });
-    } catch (err) {
-      console.warn("[demo.skip] magic-link send failed:", err);
-    }
-    await seedDemoOrg(env, { name, email, role, stateCode }, userId);
-    return redirect(`/demo?magic=${encodeURIComponent(email)}`);
-  }
 
   let authResponse: Response;
   try {
@@ -93,7 +88,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .bind(email)
     .first<{ id: string }>();
   if (!newUser) return redirect("/demo");
-  userId = newUser.id;
+  const userId = newUser.id;
 
   const seed = await seedDemoOrg(env, { name, email, role, stateCode }, userId);
   await env.DB.prepare(

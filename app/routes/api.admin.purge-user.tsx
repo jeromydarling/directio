@@ -8,7 +8,10 @@ import type { Route } from "./+types/api.admin.purge-user";
  * app, then calls this endpoint in afterAll to clean up. Without it,
  * each CI run would accumulate a test account in production D1.
  *
- * Auth: Bearer token via env.E2E_PURGE_TOKEN. Header OR query string.
+ * Auth: Bearer token via env.E2E_PURGE_TOKEN — Authorization header
+ * ONLY. Query-string tokens leak into access logs, Referer headers,
+ * and browser history; given this endpoint's blast radius (delete a
+ * user + every org they own), that's a leaked skeleton key.
  * Returns 503 if no token configured (so production is safe by default
  * — operator must explicitly set the token to enable purges).
  *
@@ -35,27 +38,34 @@ export async function action({ request, context }: Route.ActionArgs) {
     );
   }
 
-  const url = new URL(request.url);
-  const headerToken = (request.headers.get("Authorization") ?? "").replace(
+  const provided = (request.headers.get("Authorization") ?? "").replace(
     /^Bearer\s+/i,
     "",
   );
-  const queryToken = url.searchParams.get("token") ?? "";
-  const provided = headerToken || queryToken;
-  if (!provided || provided !== purgeToken) {
+  if (!provided || !timingSafeEqualStr(provided, purgeToken)) {
     return data({ error: "unauthorized" }, { status: 401 });
   }
 
-  let email =
-    url.searchParams.get("email") ??
-    (await request
-      .clone()
-      .formData()
-      .then((f) => String(f.get("email") ?? ""))
-      .catch(() => ""));
-  email = email.trim().toLowerCase();
+  // Email comes from the POST body only — keeping the target out of
+  // URLs for the same log-leak reason as the token.
+  const email = await request
+    .clone()
+    .formData()
+    .then((f) => String(f.get("email") ?? "").trim().toLowerCase())
+    .catch(() => "");
   if (!email) {
-    return data({ error: "email required" }, { status: 400 });
+    return data({ error: "email required (form body)" }, { status: 400 });
+  }
+
+  // Safety rail: this endpoint exists for E2E cleanup. Only test-
+  // prefixed accounts can be purged, so a leaked token can't delete a
+  // real customer.
+  const local = email.split("@")[0] ?? "";
+  if (!local.startsWith("e2e+") && !local.startsWith("demo+")) {
+    return data(
+      { error: "only e2e+/demo+ prefixed accounts can be purged" },
+      { status: 403 },
+    );
   }
 
   const user = await env.DB.prepare(
@@ -91,4 +101,14 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 export function loader() {
   return data({ error: "POST only" }, { status: 405 });
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
 }

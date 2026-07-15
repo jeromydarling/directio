@@ -43,7 +43,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
          WHERE s.organizationId = ?
            AND (g.userId = ? OR s.userId = ? OR s.email = ?)`,
     )
-    .bind(orgId, tenant.user.id, tenant.user.id, tenant.user.email)
+    .bind(orgId, tenant.user.id, tenant.user.id, tenant.user.ownershipEmail)
     .all<{ studentId: string }>();
 
   if (kids.results.length === 0) {
@@ -115,7 +115,7 @@ export async function action({ request, context }: Route.ActionArgs) {
         AND (g.userId = ? OR s.userId = ? OR s.email = ?)
       LIMIT 1`,
   )
-    .bind(appointmentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.email)
+    .bind(appointmentId, tenant.organization.id, tenant.user.id, tenant.user.id, tenant.user.ownershipEmail)
     .first<{ id: string; startsAt: number }>();
   if (!appt) return data({ error: "Not your appointment." }, { status: 403 });
 

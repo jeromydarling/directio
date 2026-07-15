@@ -25,7 +25,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
   const auth = request.headers.get("Authorization") ?? "";
   const provided = auth.replace(/^Bearer\s+/i, "").trim();
-  if (!provided || provided !== token) {
+  if (!provided || !timingSafeEqualStr(provided, token)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -40,21 +40,34 @@ export async function action({ request, context }: Route.ActionArgs) {
   )
     .bind(email)
     .first<{ id: string; email: string }>();
-  if (!user) {
-    return new Response(`no user with email ${email}`, { status: 404 });
+  if (user) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO platform_admin (userId, role, addedAt)
+       VALUES (?, 'admin', ?)`,
+    )
+      .bind(user.id, Date.now())
+      .run();
+  } else {
+    console.warn(`[promote-super] no user for the requested email`);
   }
 
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO platform_admin (userId, role, addedAt)
-     VALUES (?, 'admin', ?)`,
-  )
-    .bind(user.id, Date.now())
-    .run();
-
-  return new Response(`ok: ${email} is now a platform admin\n`, {
+  // Same 200 shape whether or not the user exists — a leaked token
+  // must not double as an email-enumeration oracle. The operator
+  // confirms by loading /super.
+  return new Response("ok — if that account exists, it is now a platform admin\n", {
     status: 200,
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
 }
 
 // GET returns a short human hint so it's clear this is the right URL.

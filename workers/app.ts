@@ -35,6 +35,16 @@ export default {
     const wwwRedirect = redirectWwwToApex(request);
     if (wwwRedirect) return wwwRedirect;
 
+    // X-Original-Path is a TRUSTED header set only by the custom-
+    // domain rewrite below (the root loader builds canonical URLs
+    // from it). Strip any client-supplied value so a request can't
+    // poison <link rel=canonical> / og:url.
+    if (request.headers.has("X-Original-Path")) {
+      const cleaned = new Headers(request.headers);
+      cleaned.delete("X-Original-Path");
+      request = new Request(request, { headers: cleaned });
+    }
+
     const url = new URL(request.url);
     const host = request.headers.get("Host") ?? url.host;
     const schoolSlug = await resolveSchoolForHost(env, host);
