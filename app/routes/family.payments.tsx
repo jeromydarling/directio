@@ -46,7 +46,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       tenant.organization.id,
       tenant.user.id,
       tenant.organization.id,
-      tenant.user.email,
+      tenant.user.ownershipEmail,
       tenant.organization.id,
     )
     .all<PaymentRow>();

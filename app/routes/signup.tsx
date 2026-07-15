@@ -1,8 +1,9 @@
 import { Form, Link, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/signup";
 import { generateClaimPendingPassword, getAuth } from "~/lib/auth.server";
+import { isEmailConfigured } from "~/lib/email.server";
 import { getSession } from "~/lib/session.server";
-import { newId } from "~/lib/ids";
+import { clientIp, rateLimit } from "~/lib/rate-limit.server";
 import { AuthShell } from "~/components/auth-shell";
 
 export function meta(_: Route.MetaArgs) {
@@ -25,6 +26,18 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   const env = context.cloudflare.env;
+
+  // Abuse guard: signup triggers account creation + magic-link email.
+  const rl = await rateLimit(env, `signup:${clientIp(request)}`, {
+    limit: 10,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "Too many signup attempts from this network. Try again in an hour." },
+      { status: 429 },
+    );
+  }
   // Email-verification gate. Default off — signup creates the user
   // with an immediate session (the existing behavior), the magic-link
   // email is sent as a save-for-next-time backup but never blocks. To
@@ -55,18 +68,58 @@ export async function action({ request, context }: Route.ActionArgs) {
     return data({ magicLinkSent: email });
   }
 
-  // EMAIL_VERIFICATION=on path: don't create an account yet. Send a
-  // magic link; the click finalizes signup. Returns the same UI as
-  // the existing-account merge path.
-  if (requireVerification) {
+  // If a school has already created a student or instructor record
+  // with this email, the account MUST be claimed through a magic-link
+  // click — the click proves the person owns the inbox. Handing out an
+  // immediate session here would let anyone type a student's email and
+  // inherit their school records (account takeover). The actual
+  // linking happens in claimPendingMemberships() on first verified
+  // sign-in.
+  const [pendingStudent, pendingInstructor] = await Promise.all([
+    env.DB.prepare("SELECT id FROM student WHERE email = ? AND userId IS NULL LIMIT 1")
+      .bind(email)
+      .first<{ id: string }>(),
+    env.DB.prepare("SELECT id FROM instructor WHERE email = ? AND userId IS NULL LIMIT 1")
+      .bind(email)
+      .first<{ id: string }>(),
+  ]);
+  const hasPendingRecords = Boolean(pendingStudent || pendingInstructor);
+
+  // Magic-link-first paths: explicit verification mode, or an email
+  // that matches school-created records. The click finalizes signup
+  // (Better Auth creates the user with emailVerified=true, carrying
+  // the name from the form).
+  if (requireVerification || hasPendingRecords) {
+    // This path has NO fallback session — if we can't deliver the
+    // email, saying "check your inbox" is a lockout with a smile.
+    if (!isEmailConfigured(env)) {
+      return data(
+        {
+          error:
+            "Sign-in emails are temporarily unavailable. Please try again shortly or contact support@godirectio.com.",
+        },
+        { status: 503 },
+      );
+    }
+    const callbackURL = pendingInstructor ? "/instructor" : hasPendingRecords ? "/me" : "/admin";
     try {
-      await auth.api.signInMagicLink({
-        body: { email, callbackURL: "/admin" },
+      const response = await auth.api.signInMagicLink({
+        body: { email, name, callbackURL },
         headers: request.headers,
         asResponse: true,
       });
+      if (!response.ok) {
+        return data(
+          { error: await readErrorMessage(response) },
+          { status: response.status },
+        );
+      }
     } catch (err) {
       console.warn("[signup] verification magic link send failed:", err);
+      return data(
+        { error: "We couldn't send the sign-in email. Please try again." },
+        { status: 500 },
+      );
     }
     return data({ magicLinkSent: email });
   }
@@ -85,70 +138,18 @@ export async function action({ request, context }: Route.ActionArgs) {
       if (key.toLowerCase() === "set-cookie") headers.append("Set-Cookie", value);
     });
 
-    // If a school has already created a student or instructor record
-    // with this email, auto-join the user to that school as a member
-    // with the right role. Avoids /onboarding for invited people.
-    const newUser = await env.DB.prepare("SELECT id FROM user WHERE email = ?")
-      .bind(email)
-      .first<{ id: string }>();
-
-    let destination = "/admin";
-    if (newUser) {
-      const now = Date.now();
-      const stmts: D1PreparedStatement[] = [];
-
-      const studentMatches = await env.DB.prepare(
-        "SELECT id, organizationId FROM student WHERE email = ? AND userId IS NULL",
-      )
-        .bind(email)
-        .all<{ id: string; organizationId: string }>();
-
-      for (const m of studentMatches.results) {
-        stmts.push(
-          env.DB.prepare("UPDATE student SET userId = ?, updatedAt = ? WHERE id = ?").bind(
-            newUser.id,
-            now,
-            m.id,
-          ),
-          env.DB.prepare(
-            "INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'student', ?)",
-          ).bind(newId(), m.organizationId, newUser.id, now),
-        );
-      }
-
-      const instructorMatches = await env.DB.prepare(
-        "SELECT id, organizationId FROM instructor WHERE email = ? AND userId IS NULL",
-      )
-        .bind(email)
-        .all<{ id: string; organizationId: string }>();
-
-      for (const m of instructorMatches.results) {
-        stmts.push(
-          env.DB.prepare("UPDATE instructor SET userId = ? WHERE id = ?").bind(newUser.id, m.id),
-          env.DB.prepare(
-            "INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'instructor', ?)",
-          ).bind(newId(), m.organizationId, newUser.id, now),
-        );
-      }
-
-      if (stmts.length > 0) {
-        await env.DB.batch(stmts);
-        destination = instructorMatches.results.length > 0 ? "/instructor" : "/me";
-      }
-
-      // Send a magic-link as the canonical sign-in method for next time.
-      try {
-        await auth.api.signInMagicLink({
-          body: { email, callbackURL: destination },
-          headers: request.headers,
-          asResponse: true,
-        });
-      } catch (err) {
-        console.warn("[signup] magic link backup send failed:", err);
-      }
+    // Send a magic-link as the canonical sign-in method for next time.
+    try {
+      await auth.api.signInMagicLink({
+        body: { email, callbackURL: "/admin" },
+        headers: request.headers,
+        asResponse: true,
+      });
+    } catch (err) {
+      console.warn("[signup] magic link backup send failed:", err);
     }
 
-    return redirect(destination, { headers });
+    return redirect("/admin", { headers });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not create account.";
     return data({ error: message }, { status: 400 });
@@ -191,11 +192,11 @@ export default function Signup({ actionData }: Route.ComponentProps) {
       {magicLinkSent ? (
         <div className="rounded-xl border border-emerald-300 bg-emerald-50/40 p-4 dark:border-emerald-800 dark:bg-emerald-950/30">
           <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-            Looks like you're already with us.
+            Check your email to finish signing in.
           </p>
           <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
             We sent a sign-in link to <strong>{magicLinkSent}</strong>. Tap it
-            within the next hour to open your portal.
+            within the next 15 minutes to open your portal.
           </p>
         </div>
       ) : (
@@ -214,6 +215,17 @@ export default function Signup({ actionData }: Route.ComponentProps) {
           >
             {submitting ? "Creating account…" : "Create account"}
           </button>
+          <p className="text-xs text-ink-500 dark:text-ink-400">
+            By creating an account, you agree to the{" "}
+            <Link to="/terms" className="underline hover:text-ink-700 dark:hover:text-ink-200">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link to="/privacy" className="underline hover:text-ink-700 dark:hover:text-ink-200">
+              Privacy Policy
+            </Link>
+            .
+          </p>
           <p className="text-xs text-ink-500 dark:text-ink-400">
             We'll send you a one-tap sign-in link by email. You can set a
             password later in account settings if you prefer one.

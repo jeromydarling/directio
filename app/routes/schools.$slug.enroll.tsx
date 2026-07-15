@@ -4,6 +4,7 @@ import { generateClaimPendingPassword, getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
+import { clientIp, rateLimit } from "~/lib/rate-limit.server";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
@@ -13,6 +14,9 @@ type OrgRow = {
   publicSlug: string;
   publicPublishedAt: number | null;
   stripeChargesEnabled: number;
+  cancellationDeadlineHours: number;
+  lateCancelFeeCents: number;
+  noShowFeeCents: number;
 };
 
 type PackageRow = {
@@ -30,7 +34,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
   const org = await db
     .prepare(
-      `SELECT id, name, publicSlug, publicPublishedAt, stripeChargesEnabled
+      `SELECT id, name, publicSlug, publicPublishedAt, stripeChargesEnabled,
+              cancellationDeadlineHours, lateCancelFeeCents, noShowFeeCents
          FROM organization WHERE publicSlug = ? AND publicPublishedAt IS NOT NULL`,
     )
     .bind(params.slug)
@@ -70,6 +75,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     .first<{ id: string; name: string; publicSlug: string }>();
   if (!org) throw new Response("Not found", { status: 404 });
 
+  // Public unauthenticated endpoint that creates accounts + sends
+  // email — throttle it.
+  const rl = await rateLimit(env, `enroll:${clientIp(request)}`, {
+    limit: 10,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "Too many enrollment attempts from this network. Try again in an hour." },
+      { status: 429 },
+    );
+  }
+
   const packageId = String(formData.get("packageId") ?? "");
   const studentFirst = String(formData.get("studentFirst") ?? "").trim();
   const studentLast = String(formData.get("studentLast") ?? "").trim();
@@ -77,10 +95,20 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const parentName = String(formData.get("parentName") ?? "").trim();
   const parentEmail = String(formData.get("parentEmail") ?? "").trim();
   const parentPhone = String(formData.get("parentPhone") ?? "").trim() || null;
+  const consent = formData.get("consent") === "on";
 
   if (!packageId || !studentFirst || !studentLast || !parentName || !parentEmail) {
     return data(
       { error: "Please fill in the student name, your name, and your email." },
+      { status: 400 },
+    );
+  }
+  if (!consent) {
+    return data(
+      {
+        error:
+          "Please confirm you are the student's parent or legal guardian and agree to the policies.",
+      },
       { status: 400 },
     );
   }
@@ -179,15 +207,11 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     .bind(newId(), org.id, parentUserId, now)
     .run();
 
-  // Create the student. If studentEmail is set and matches an existing
-  // user, link to them; otherwise just store the email.
-  let studentUserId: string | null = null;
-  if (studentEmail) {
-    const u = await db.prepare("SELECT id FROM user WHERE email = ?").bind(studentEmail).first<{
-      id: string;
-    }>();
-    if (u) studentUserId = u.id;
-  }
+  // Create the student. The email is stored but userId stays NULL — a
+  // parent-typed (or typo'd) email on a public form must not attach a
+  // stranger's account to a minor's records. The student links
+  // themselves later via verified magic-link sign-in
+  // (claimPendingMemberships).
   const studentId = newId();
   await db
     .prepare(
@@ -197,7 +221,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     .bind(
       studentId,
       org.id,
-      studentUserId,
+      null,
       studentFirst,
       studentLast,
       studentEmail,
@@ -255,6 +279,11 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       studentId,
       source: "public_catalog",
       accountFlow,
+      // Consent record: guardian attestation + policy agreement,
+      // captured with the form submission timestamp (createdAt).
+      guardianConsent: true,
+      consentText:
+        "I am this student's parent or legal guardian, and I agree to the school's policies and directio's Terms of Service and Privacy Policy.",
     },
   });
 
@@ -327,7 +356,7 @@ export default function PublicEnrollment({ loaderData, actionData }: Route.Compo
             </h1>
             <p className="mt-2 text-sm text-ink-700 dark:text-ink-200">
               An account at this email — <strong>{magicLinkSent}</strong> — already exists.
-              We sent a one-tap sign-in link there so you can open your portal and pay {org.name} for this enrollment. The link works for one hour.
+              We sent a one-tap sign-in link there so you can open your portal and pay {org.name} for this enrollment. The link works for 15 minutes — if it expires, request a new one from the sign-in page.
             </p>
             <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
               If you don't see the email in a minute or two, check spam. You can also{" "}
@@ -459,10 +488,73 @@ export default function PublicEnrollment({ loaderData, actionData }: Route.Compo
               </Field>
             </Card>
 
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-ink-500 dark:text-ink-400">
-                By continuing you agree to {org.name}'s policies.
+            <Card>
+              <h3 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+                Every fee, up front
+              </h3>
+              <ul className="mt-3 space-y-2 text-sm text-ink-700 dark:text-ink-200">
+                <li className="flex items-start justify-between gap-4">
+                  <span>Tuition (the package you picked above)</span>
+                  <span className="shrink-0 font-medium">shown at checkout</span>
+                </li>
+                <li className="flex items-start justify-between gap-4">
+                  <span>
+                    Late cancellation (inside {org.cancellationDeadlineHours}h of a
+                    lesson)
+                  </span>
+                  <span className="shrink-0 font-medium">
+                    {org.lateCancelFeeCents > 0
+                      ? new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(org.lateCancelFeeCents / 100)
+                      : "No fee"}
+                  </span>
+                </li>
+                <li className="flex items-start justify-between gap-4">
+                  <span>Missed lesson (no-show)</span>
+                  <span className="shrink-0 font-medium">
+                    {org.noShowFeeCents > 0
+                      ? new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(org.noShowFeeCents / 100)
+                      : "No fee"}
+                  </span>
+                </li>
+              </ul>
+              <p className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+                There are no other fees. Fees are set by {org.name}, collected
+                only after a late cancel or no-show actually happens, and never
+                charged to your card automatically.
               </p>
+            </Card>
+
+            <Card>
+              <label className="flex items-start gap-3 text-sm text-ink-700 dark:text-ink-200">
+                <input
+                  type="checkbox"
+                  name="consent"
+                  required
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-ink-300"
+                />
+                <span>
+                  I am this student's parent or legal guardian (or I am an
+                  adult student enrolling myself), and I agree to {org.name}'s
+                  policies and directio's{" "}
+                  <Link to="/terms" className="underline hover:text-ink-900 dark:hover:text-ink-50">
+                    Terms of Service
+                  </Link>{" "}
+                  and{" "}
+                  <Link to="/privacy" className="underline hover:text-ink-900 dark:hover:text-ink-50">
+                    Privacy Policy
+                  </Link>
+                  .
+                </span>
+              </label>
+            </Card>
+
+            <div className="flex items-center justify-end">
               <Button type="submit" disabled={submitting}>
                 {submitting ? "Enrolling…" : "Continue to checkout →"}
               </Button>

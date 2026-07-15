@@ -3,6 +3,7 @@ import type { Route } from "./+types/api.lesson.quiz-ai";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { newId } from "~/lib/ids";
+import { rateLimit } from "~/lib/rate-limit.server";
 import { generateQuestions, reviewQuiz } from "~/lib/quiz-ai.server";
 import { LlmNotConfiguredError } from "~/lib/llm.server";
 
@@ -31,6 +32,18 @@ export async function action({ request, context }: Route.ActionArgs) {
     !tenant.organization.isDemo
   ) {
     return data({ error: "Forbidden" }, { status: 403 });
+  }
+  // Cost guard: every call is a real Anthropic spend. Demo orgs are
+  // self-serve, so a per-org ceiling is the circuit breaker.
+  const rl = await rateLimit(env, `quiz-ai:${tenant.organization.id}`, {
+    limit: 30,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "AI budget reached for this hour. Try again later." },
+      { status: 429 },
+    );
   }
 
   const form = await request.formData();

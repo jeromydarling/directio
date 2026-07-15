@@ -9,7 +9,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Every feature in the directio platform — enrollment, classroom, scheduling, the in-car instructor experience, fleet, compensation, migration, owner dashboard, compliance, family experience, audit.",
+        "Every feature in the directio driver-education platform — enrollment, classroom, scheduling, in-car tools, fleet, payments, compliance, family portal, audit.",
     },
   ];
 }

@@ -9,7 +9,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Stop juggling six tools. directio runs your driver-ed school like a product: enrollment, scheduling, instructors, vehicles, payments, compliance, and certificates.",
+        "Stop juggling six tools. directio runs your driver-ed school as one product — enrollment, scheduling, payments, compliance, and certificates in one place.",
     },
   ];
 }

@@ -88,9 +88,9 @@ export async function action({ request, context }: Route.ActionArgs) {
             narrationAudioVoiceId = 'owner-recorded',
             narrationAudioGeneratedAt = ?,
             updatedAt = ?
-      WHERE id = ?`,
+      WHERE id = ? AND organizationId = ?`,
   )
-    .bind(storageKey, now, now, lessonId)
+    .bind(storageKey, now, now, lessonId, tenant.organization.id)
     .run();
 
   await recordAudit(env, {

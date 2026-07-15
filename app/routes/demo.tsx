@@ -284,7 +284,7 @@ export default function Demo({ loaderData, actionData }: Route.ComponentProps) {
                     </h2>
                     <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
                       We sent a sign-in link to <strong>{magicLinkSent}</strong>. It
-                      lasts one hour. Your demo school is already seeded — the
+                      lasts 15 minutes. Your demo school is already seeded — the
                       link takes you straight in.
                     </p>
                     <p className="mt-6 text-xs text-ink-500 dark:text-ink-400">

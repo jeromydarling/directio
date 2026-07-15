@@ -11,7 +11,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Minnesota is the state we go deep on. A handful of others have started work. Everywhere else is a design-partner relationship — co-built with the first school in the state.",
+        "Minnesota deep, several others in progress. Every other state is co-built as a design-partner relationship with the first school in the jurisdiction.",
     },
   ];
 }

@@ -1,8 +1,23 @@
 import { redirect } from "react-router";
 import { getAuth } from "./auth.server";
+import { newId } from "./ids";
 
 export type ActiveTenant = {
-  user: { id: string; email: string; name: string | null; image: string | null };
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    image: string | null;
+    emailVerified: boolean;
+    /**
+     * Use THIS (not .email) in ownership fallbacks like
+     * `... OR s.email = ?`. For unverified users it's a sentinel that
+     * can never equal a real email address, so signing up with
+     * someone else's address (email verification defaults off) can't
+     * claim their student records. Verified via magic-link click.
+     */
+    ownershipEmail: string;
+  };
   organization: {
     id: string;
     slug: string;
@@ -16,6 +31,9 @@ export type ActiveTenant = {
   };
   role: string;
 };
+
+// Contains a space, which no real email address can.
+const UNVERIFIED_SENTINEL = "unverified email sentinel";
 
 /**
  * Require a signed-in user with an active organization membership.
@@ -80,6 +98,33 @@ export async function requireTenant(request: Request, env: Env): Promise<ActiveT
     org = r ?? null;
   }
 
+  const emailVerified = Boolean(session.user.emailVerified);
+
+  // No membership yet — before bouncing to onboarding, try claiming
+  // any student/instructor records a school pre-created with this
+  // email. Only for VERIFIED emails (magic-link click proves
+  // ownership); an unverified signup with someone else's address
+  // must never inherit their school records.
+  if (!org && emailVerified) {
+    const claimed = await claimPendingMemberships(env, {
+      id: session.user.id,
+      email: session.user.email,
+    });
+    if (claimed) {
+      const r = await env.DB.prepare(
+        `SELECT ${orgCols}
+         FROM organization o
+         JOIN member m ON m.organizationId = o.id
+         WHERE m.userId = ?
+         ORDER BY m.createdAt ASC
+         LIMIT 1`,
+      )
+        .bind(session.user.id)
+        .first<OrgRow>();
+      org = r ?? null;
+    }
+  }
+
   if (!org) {
     throw redirect("/onboarding");
   }
@@ -90,6 +135,8 @@ export async function requireTenant(request: Request, env: Env): Promise<ActiveT
       email: session.user.email,
       name: session.user.name ?? null,
       image: session.user.image ?? null,
+      emailVerified,
+      ownershipEmail: emailVerified ? session.user.email : UNVERIFIED_SENTINEL,
     },
     organization: {
       id: org.id,
@@ -113,16 +160,75 @@ function normalizeTier(raw: string | null): "free" | "studio" | "pro" {
 }
 
 /**
+ * Claim school-created student/instructor records matching a VERIFIED
+ * email. Links the rows to the user and creates the corresponding
+ * member rows. Returns true if anything was claimed.
+ *
+ * Callers are responsible for the verification check — this function
+ * trusts that `user.email` is proven to belong to `user.id` (magic-
+ * link click). Claiming on an unverified email is an account-takeover
+ * vector: sign up as victim@x.com before the victim does, wait for a
+ * school to add that student, inherit their record.
+ */
+export async function claimPendingMemberships(
+  env: Env,
+  user: { id: string; email: string },
+): Promise<boolean> {
+  const now = Date.now();
+  const stmts: D1PreparedStatement[] = [];
+
+  const [studentMatches, instructorMatches] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id, organizationId FROM student WHERE email = ? AND userId IS NULL",
+    )
+      .bind(user.email)
+      .all<{ id: string; organizationId: string }>(),
+    env.DB.prepare(
+      "SELECT id, organizationId FROM instructor WHERE email = ? AND userId IS NULL",
+    )
+      .bind(user.email)
+      .all<{ id: string; organizationId: string }>(),
+  ]);
+
+  for (const m of studentMatches.results) {
+    stmts.push(
+      env.DB.prepare("UPDATE student SET userId = ?, updatedAt = ? WHERE id = ?").bind(
+        user.id,
+        now,
+        m.id,
+      ),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'student', ?)",
+      ).bind(newId(), m.organizationId, user.id, now),
+    );
+  }
+
+  for (const m of instructorMatches.results) {
+    stmts.push(
+      env.DB.prepare("UPDATE instructor SET userId = ? WHERE id = ?").bind(user.id, m.id),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'instructor', ?)",
+      ).bind(newId(), m.organizationId, user.id, now),
+    );
+  }
+
+  if (stmts.length === 0) return false;
+  await env.DB.batch(stmts);
+  return true;
+}
+
+/**
  * Find the student row for the current user inside the current org.
  *
  * Tries userId first. If nothing matches but a student exists with the
- * user's email and no userId yet, claim it by setting student.userId.
- * This makes the "admin adds student, student signs up later" flow
- * self-healing without an extra invite step.
+ * user's VERIFIED email and no userId yet, claim it by setting
+ * student.userId. This keeps the "admin adds student, student signs up
+ * later" flow self-healing — but only once the user has proven the
+ * email is theirs via magic-link.
  */
 export async function findStudentForUser(
   env: Env,
-  user: { id: string; email: string },
+  user: { id: string; email: string; emailVerified?: boolean },
   organizationId: string,
 ): Promise<{ id: string; firstName: string; lastName: string } | null> {
   const direct = await env.DB.prepare(
@@ -131,6 +237,8 @@ export async function findStudentForUser(
     .bind(user.id, organizationId)
     .first<{ id: string; firstName: string; lastName: string }>();
   if (direct) return direct;
+
+  if (!user.emailVerified) return null;
 
   const byEmail = await env.DB.prepare(
     "SELECT id, firstName, lastName FROM student WHERE email = ? AND organizationId = ? AND userId IS NULL LIMIT 1",

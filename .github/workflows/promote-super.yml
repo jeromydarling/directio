@@ -1,0 +1,40 @@
+# One-click platform-admin promotion — no terminal needed.
+#
+# Run from the Actions tab (workflow_dispatch) with an email address.
+# Calls POST /api/admin/promote-super on production using the
+# SUPER_BOOTSTRAP_TOKEN repo secret, which must match the Worker
+# secret of the same name.
+#
+# The endpoint deliberately returns the same 200 whether or not the
+# account exists (no email-enumeration oracle) — confirm by loading
+# /super while signed in as the promoted user.
+name: promote-super
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Email of the existing directio account to promote"
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: call promote endpoint
+        run: |
+          if [ -z "${{ secrets.SUPER_BOOTSTRAP_TOKEN }}" ]; then
+            echo "::error::SUPER_BOOTSTRAP_TOKEN repo secret is not set"
+            exit 1
+          fi
+          status=$(curl -s -o /tmp/out.txt -w "%{http_code}" \
+            -X POST https://godirectio.com/api/admin/promote-super \
+            -H "Authorization: Bearer ${{ secrets.SUPER_BOOTSTRAP_TOKEN }}" \
+            --data-urlencode "email=${{ inputs.email }}")
+          cat /tmp/out.txt
+          if [ "$status" != "200" ]; then
+            echo "::error::promote endpoint returned $status (503 = Worker secret not set; 401 = token mismatch)"
+            exit 1
+          fi

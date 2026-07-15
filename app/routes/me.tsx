@@ -18,7 +18,7 @@ export async function loader({ request, context }: Route.LoaderArgs): Promise<Me
   const tenant = await requireTenant(request, context.cloudflare.env);
   const student = await findStudentForUser(
     context.cloudflare.env,
-    { id: tenant.user.id, email: tenant.user.email },
+    tenant.user,
     tenant.organization.id,
   );
 

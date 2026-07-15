@@ -42,6 +42,10 @@ test.describe("public marketing", () => {
       { path: "/for-families", heading: /famil/i },
       { path: "/for-instructors", heading: /instructor/i },
       { path: "/why", heading: /./ },
+      { path: "/terms", heading: /terms/i },
+      { path: "/privacy", heading: /privacy/i },
+      { path: "/refund-policy", heading: /refund/i },
+      { path: "/support", heading: /help|support/i },
     ];
 
     for (const s of surfaces) {
@@ -81,13 +85,31 @@ test.describe("public marketing", () => {
 });
 
 test.describe("API endpoints", () => {
-  test("/robots.txt and /sitemap.xml respond", async ({ request }) => {
+  test("/robots.txt, /sitemap.xml, /llms.txt respond", async ({ request }) => {
     const robots = await request.get("/robots.txt");
     expect(robots.status(), "robots.txt").toBeLessThan(400);
     const sitemap = await request.get("/sitemap.xml");
-    // Sitemap may be 200 or 404 depending on whether it's wired —
-    // we don't fail the smoke on the latter, just record.
-    expect([200, 404]).toContain(sitemap.status());
+    expect(sitemap.status(), "sitemap.xml").toBe(200);
+    expect(await sitemap.text()).toContain("<urlset");
+    const llms = await request.get("/llms.txt");
+    expect(llms.status(), "llms.txt").toBe(200);
+    expect(await llms.text()).toContain("# directio");
+  });
+
+  test("/healthz reports ok with cron heartbeats", async ({ request }) => {
+    const res = await request.get("/healthz");
+    expect(res.status(), "healthz").toBe(200);
+    const body = (await res.json()) as { ok: boolean; checks: { d1: string } };
+    expect(body.ok).toBe(true);
+    expect(body.checks.d1).toBe("ok");
+  });
+
+  test("legal canonical URLs are path-correct", async ({ request }) => {
+    // Regression guard for the root-Layout canonical: each page's
+    // <link rel=canonical> must reflect its own path, not the homepage.
+    const res = await request.get("/privacy");
+    const html = await res.text();
+    expect(html).toMatch(/rel="canonical" href="https:\/\/[^"]+\/privacy"/);
   });
 
   test("/api/stripe/webhook rejects unsigned POST", async ({ request }) => {

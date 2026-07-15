@@ -3,6 +3,7 @@ import { marked } from "marked";
 import type { Route } from "./+types/me.help";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
+import { rateLimit } from "~/lib/rate-limit.server";
 import {
   ClaudeNotConfiguredError,
   answerHelpQuestion,
@@ -126,6 +127,18 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (intent === "ask") {
     const question = String(formData.get("question") ?? "").trim();
     if (!question) return data({ error: "Type a question first." }, { status: 400 });
+
+    // Cost guard: each answer is an Anthropic call on directio's key.
+    const rl = await rateLimit(env, `help-ask:${tenant.user.id}`, {
+      limit: 20,
+      windowSeconds: 3600,
+    });
+    if (!rl.allowed) {
+      return data(
+        { error: "You've asked a lot this hour — give it a little time and try again." },
+        { status: 429 },
+      );
+    }
 
     const orgJur = await env.DB.prepare("SELECT jurisdiction FROM organization WHERE id = ?")
       .bind(tenant.organization.id)

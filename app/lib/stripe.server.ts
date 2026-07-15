@@ -47,13 +47,24 @@ export function isStripeConfigured(env: Env): boolean {
 async function stripeRequest(
   env: Env,
   path: string,
-  init: { method: "GET" | "POST"; body?: Record<string, string | number> } = { method: "GET" },
+  init: {
+    method: "GET" | "POST" | "DELETE";
+    body?: Record<string, string | number>;
+    // Stripe replays the original response for retries carrying the
+    // same key, so retried writes can't double-charge/double-refund.
+    // Callers pass a key derived from the logical operation (e.g.
+    // `refund-<paymentId>`), NOT a random value.
+    idempotencyKey?: string;
+  } = { method: "GET" },
 ): Promise<unknown> {
   const key = requireKey(env);
   const url = `https://api.stripe.com/v1/${path.replace(/^\//, "")}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${key}`,
   };
+  if (init.idempotencyKey && init.method === "POST") {
+    headers["Idempotency-Key"] = init.idempotencyKey;
+  }
   let body: string | undefined;
   if (init.body) {
     headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -68,6 +79,18 @@ async function stripeRequest(
     throw new Error(`Stripe ${res.status}: ${err.error?.message ?? JSON.stringify(json)}`);
   }
   return json;
+}
+
+/**
+ * The directio platform fee, in basis points, applied to every
+ * school enrollment payment. Platform-controlled — schools cannot
+ * change this. (An earlier build exposed it on the package form,
+ * which let any owner zero out directio's revenue.)
+ */
+export const PLATFORM_FEE_BPS = 250;
+
+export function platformFeeCentsFor(amountCents: number): number {
+  return Math.round((amountCents * PLATFORM_FEE_BPS) / 10000);
 }
 
 /**
@@ -89,6 +112,9 @@ export async function createConnectAccount(
       email: args.email,
       "metadata[directio_organization_id]": args.organizationId,
     },
+    // One Connect account per org — a double-submitted onboarding form
+    // must not create two.
+    idempotencyKey: `connect-account-${args.organizationId}`,
   })) as { id: string };
   return { accountId: res.id };
 }
@@ -167,6 +193,7 @@ export async function createCheckoutSession(
     installmentMonths?: number;
     bnplMethods?: ("affirm" | "klarna")[];
     metadata?: Record<string, string>;
+    idempotencyKey?: string;
   },
 ): Promise<{ sessionId: string; url: string }> {
   const body: Record<string, string | number> = {
@@ -203,20 +230,32 @@ export async function createCheckoutSession(
     body["payment_intent_data[transfer_data][destination]"] = args.accountId;
     body["payment_intent_data[on_behalf_of]"] = args.accountId;
   } else {
+    const months = Math.max(2, args.installmentMonths ?? 3);
+    // Each monthly invoice charges amountCents ÷ months (rounded up
+    // so the school is never shorted by rounding). Subscription mode
+    // charges unit_amount EVERY interval — passing the full package
+    // price here (as an earlier build did) bills the family the
+    // total price each month.
+    const monthlyCents = Math.ceil(args.amountCents / months);
     body.mode = "subscription";
+    body["line_items[0][price_data][unit_amount]"] = monthlyCents;
     body["line_items[0][price_data][recurring][interval]"] = "month";
     body["line_items[0][price_data][recurring][interval_count]"] = 1;
     body["line_items[0][quantity]"] = 1;
-    // Subscriptions of fixed length aren't first-class in Stripe; we
-    // store installmentMonths in metadata and cancel via webhook
-    // after N successful invoices.
-    body["subscription_data[application_fee_percent]"] =
-      Math.round((args.platformFeeCents / args.amountCents) * 10000) / 100;
+    // Fixed-length subscriptions aren't first-class in Stripe; we
+    // store installmentMonths in subscription metadata and the
+    // invoice.paid webhook cancels after N successful invoices.
+    const feePercent = Math.min(
+      100,
+      Math.max(0, Math.round((args.platformFeeCents / args.amountCents) * 10000) / 100),
+    );
+    body["subscription_data[application_fee_percent]"] = feePercent;
     body["subscription_data[transfer_data][destination]"] = args.accountId;
+    // on_behalf_of moves dispute/chargeback liability to the connected
+    // account (the school), matching the marketing copy that says
+    // schools handle disputes/refunds. Federation-wide policy.
     body["subscription_data[on_behalf_of]"] = args.accountId;
-    if (args.installmentMonths) {
-      body[`subscription_data[metadata][installmentMonths]`] = args.installmentMonths;
-    }
+    body["subscription_data[metadata][installmentMonths]"] = months;
   }
 
   for (const [k, v] of Object.entries(args.metadata ?? {})) {
@@ -226,67 +265,111 @@ export async function createCheckoutSession(
   const res = (await stripeRequest(env, "checkout/sessions", {
     method: "POST",
     body,
+    idempotencyKey: args.idempotencyKey,
   })) as { id: string; url: string };
   return { sessionId: res.id, url: res.url };
 }
 
 /**
- * Refund a destination-charge PaymentIntent (or Charge).
+ * Refund a charge or PaymentIntent from an enrollment payment.
  *
- * For destination charges (what createCheckoutSession creates) the charge
- * itself lives on the PLATFORM account, not the connected account. The
- * matching transfer lives on the connected account. Refunding correctly
- * requires three things:
- *   1. Call /refunds on the PLATFORM (no Stripe-Account header).
- *   2. reverse_transfer=true so the connected account's transfer is
- *      clawed back; otherwise the school keeps the money the platform
- *      just gave back to the customer.
- *   3. refund_application_fee=true so the platform also gives back its
- *      slice of the original fee, proportional to the refund amount.
- *
- * Caller passes the amount in cents; pass 0 / undefined for a full refund.
- * accountId is kept in the args for API symmetry and audit logging; it
- * is no longer sent as a Stripe-Account header.
+ * These are DESTINATION charges: the charge lives on the PLATFORM
+ * account, with funds transferred onward to the school's connected
+ * account. The refund therefore must be issued on the platform (no
+ * Stripe-Account header) with:
+ *   - reverse_transfer: pulls the transferred funds back from the
+ *     school's balance so the platform isn't left funding the refund
+ *     while the school keeps the money.
+ *   - refund_application_fee: returns directio's fee proportionally
+ *     so the school isn't charged a fee on money they returned.
  */
 export async function refundPayment(
   env: Env,
   args: {
-    accountId: string;
     paymentIntentId?: string | null;
     chargeId?: string | null;
     amountCents?: number;          // omit for full refund
     reason?: "duplicate" | "fraudulent" | "requested_by_customer";
+    // Logical key so a retried submit can't double-refund. Use the
+    // directio payment id (plus amount for partials).
+    idempotencyKey: string;
   },
 ): Promise<{ refundId: string; status: string }> {
   if (!args.paymentIntentId && !args.chargeId) {
     throw new Error("refundPayment needs a paymentIntentId or chargeId.");
   }
   const body: Record<string, string | number> = {
-    reverse_transfer: "true",
     refund_application_fee: "true",
+    reverse_transfer: "true",
   };
   if (args.paymentIntentId) body.payment_intent = args.paymentIntentId;
   if (args.chargeId) body.charge = args.chargeId;
   if (args.amountCents) body.amount = args.amountCents;
   if (args.reason) body.reason = args.reason;
-  const key = requireKey(env);
-  const res = await fetch("https://api.stripe.com/v1/refunds", {
+
+  const json = (await stripeRequest(env, "refunds", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      // No Stripe-Account header: destination-charge refunds run on the
-      // platform account; reverse_transfer handles the connected side.
-    },
-    body: new URLSearchParams(
-      Object.entries(body).map(([k, v]) => [k, String(v)]),
-    ).toString(),
-  });
-  const json = (await res.json()) as { id?: string; status?: string; error?: { message?: string } };
-  if (!res.ok) {
-    throw new Error(`Stripe refund ${res.status}: ${json.error?.message ?? JSON.stringify(json)}`);
-  }
+    body,
+    idempotencyKey: args.idempotencyKey,
+  })) as { id?: string; status?: string };
   return { refundId: json.id ?? "", status: json.status ?? "unknown" };
+}
+
+/**
+ * Cancel a subscription immediately. Used by the invoice.paid webhook
+ * to end installment plans after the final payment, and available for
+ * operator-driven cancellations.
+ */
+export async function cancelSubscription(
+  env: Env,
+  subscriptionId: string,
+): Promise<{ status: string }> {
+  const json = (await stripeRequest(env, `subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+  })) as { status?: string };
+  return { status: json.status ?? "canceled" };
+}
+
+/**
+ * Count paid invoices + read installment metadata for a subscription.
+ * Stateless installment-completion check: on each invoice.paid the
+ * webhook asks Stripe (the source of truth) how many invoices have
+ * been paid, rather than keeping a race-prone local counter.
+ */
+export async function getInstallmentProgress(
+  env: Env,
+  subscriptionId: string,
+): Promise<{ installmentMonths: number | null; paidInvoices: number }> {
+  const sub = (await stripeRequest(env, `subscriptions/${subscriptionId}`)) as {
+    metadata?: Record<string, string>;
+  };
+  const months = Number(sub.metadata?.installmentMonths ?? "");
+  if (!Number.isFinite(months) || months < 2) {
+    return { installmentMonths: null, paidInvoices: 0 };
+  }
+  const invoices = (await stripeRequest(
+    env,
+    `invoices?subscription=${encodeURIComponent(subscriptionId)}&status=paid&limit=100`,
+  )) as { data?: unknown[] };
+  return { installmentMonths: months, paidInvoices: invoices.data?.length ?? 0 };
+}
+
+/**
+ * Stripe Billing customer portal — lets a Studio subscriber update
+ * their card, see invoices, and cancel without emailing support.
+ */
+export async function createBillingPortalSession(
+  env: Env,
+  args: { customerId: string; returnUrl: string },
+): Promise<{ url: string }> {
+  const res = (await stripeRequest(env, "billing_portal/sessions", {
+    method: "POST",
+    body: {
+      customer: args.customerId,
+      return_url: args.returnUrl,
+    },
+  })) as { url: string };
+  return { url: res.url };
 }
 
 /**
@@ -359,6 +442,7 @@ export async function ensurePlatformPrice(
         Object.entries(spec.metadata).map(([k, v]) => [`metadata[${k}]`, v]),
       ),
     },
+    idempotencyKey: `platform-product-${spec.lookupKey}`,
   })) as { id: string };
 
   const price = (await stripeRequest(env, "prices", {
@@ -373,6 +457,7 @@ export async function ensurePlatformPrice(
         Object.entries(spec.metadata).map(([k, v]) => [`metadata[${k}]`, v]),
       ),
     },
+    idempotencyKey: `platform-price-${spec.lookupKey}`,
   })) as { id: string };
 
   return { priceId: price.id, productId: product.id };

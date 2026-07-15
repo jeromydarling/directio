@@ -1,5 +1,11 @@
 import type { Route } from "./+types/api.stripe.webhook";
 import { recordAudit } from "~/lib/audit.server";
+import { newId } from "~/lib/ids";
+import {
+  PLATFORM_FEE_BPS,
+  cancelSubscription,
+  getInstallmentProgress,
+} from "~/lib/stripe.server";
 import { appendLedgerEntry } from "~/lib/translation.server";
 
 /**
@@ -42,49 +48,94 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
   if (!verified) return new Response("Invalid signature", { status: 400 });
 
-  let event: { id: string; type: string; data: { object: Record<string, unknown> } };
+  let event: {
+    id: string;
+    type: string;
+    account?: string; // present on Connect (connected-account) events
+    data: { object: Record<string, unknown> };
+  };
   try {
     event = JSON.parse(raw);
   } catch {
     return new Response("Bad JSON", { status: 400 });
   }
 
-  switch (event.type) {
-    case "checkout.session.completed":
-      await handleCheckoutSessionCompleted(env, event.data.object);
-      break;
-    case "checkout.session.async_payment_failed":
-      await handleCheckoutSessionFailed(env, event.data.object);
-      break;
-    case "payment_intent.succeeded":
-      await handlePaymentIntentSucceeded(env, event.data.object);
-      break;
-    case "account.updated":
-      await handleAccountUpdated(env, event.data.object);
-      break;
-    case "customer.subscription.created":
-    case "customer.subscription.updated":
-    case "customer.subscription.deleted":
-      await handlePlatformSubscriptionUpdated(env, event.data.object);
-      break;
-    case "invoice.paid":
-    case "invoice.payment_failed":
-      await handlePlatformInvoiceEvent(env, event.type, event.data.object);
-      break;
-    case "charge.refunded":
-      await handleChargeRefunded(env, event.data.object);
-      break;
-    case "charge.dispute.created":
-    case "charge.dispute.updated":
-    case "charge.dispute.closed":
-      await handleChargeDispute(env, event.type, event.data.object);
-      break;
-    case "payout.failed":
-      await handlePayoutFailed(env, event.data.object);
-      break;
-    default:
-      // No-op for events we don't care about yet.
-      break;
+  // Idempotency: Stripe redelivers events on timeout/5xx. Record the
+  // event id first; a redelivery finds the row and skips all side
+  // effects. Fail-open if the table is missing (migration not applied
+  // yet) — better to double-process than to 500 forever.
+  if (event.id) {
+    try {
+      const inserted = await env.DB.prepare(
+        "INSERT OR IGNORE INTO stripe_event (id, type, receivedAt) VALUES (?, ?, ?)",
+      )
+        .bind(event.id, event.type, Date.now())
+        .run();
+      if (!inserted.meta?.changes) {
+        return new Response("ok (duplicate)", { status: 200 });
+      }
+    } catch (err) {
+      console.error("[stripe-webhook] event dedupe unavailable:", err);
+    }
+  }
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed":
+        await handleCheckoutSessionCompleted(env, event.data.object);
+        break;
+      case "checkout.session.async_payment_failed":
+        await handleCheckoutSessionFailed(env, event.data.object);
+        break;
+      case "payment_intent.succeeded":
+        await handlePaymentIntentSucceeded(env, event.data.object);
+        break;
+      case "account.updated":
+        await handleAccountUpdated(env, event.data.object);
+        break;
+      case "customer.subscription.created":
+      case "customer.subscription.updated":
+      case "customer.subscription.deleted":
+        await handlePlatformSubscriptionUpdated(env, event.data.object);
+        break;
+      case "invoice.paid":
+      case "invoice.payment_failed":
+        await handlePlatformInvoiceEvent(env, event.type, event.data.object);
+        break;
+      case "charge.dispute.created":
+      case "charge.dispute.closed":
+        await handleDispute(env, event.type, event.data.object);
+        break;
+      case "charge.refunded":
+        await handleChargeRefunded(env, event.data.object);
+        break;
+      case "payout.failed":
+        await handlePayoutFailed(env, event.account ?? null, event.data.object);
+        break;
+      case "radar.early_fraud_warning.created":
+        await handleFraudWarning(env, event.data.object);
+        break;
+      default:
+        // No-op for events we don't care about yet.
+        break;
+    }
+  } catch (err) {
+    // A handler failed mid-flight. Release the dedupe row so Stripe's
+    // redelivery actually re-runs the side effects — otherwise the
+    // retry matches the row above, gets acked as a duplicate, and the
+    // event's effects are lost forever (at-least-once silently became
+    // at-most-once).
+    console.error(`[stripe-webhook] handler failed for ${event.type} ${event.id}:`, err);
+    if (event.id) {
+      try {
+        await env.DB.prepare("DELETE FROM stripe_event WHERE id = ?")
+          .bind(event.id)
+          .run();
+      } catch (cleanupErr) {
+        console.error("[stripe-webhook] dedupe cleanup failed:", cleanupErr);
+      }
+    }
+    return new Response("handler error — please retry", { status: 500 });
   }
 
   return new Response("ok", { status: 200 });
@@ -144,16 +195,31 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
   // Branch 2: platform-self subscription (Studio etc.). Direct charge to
   // directio; flips the org's subscriptionTier and records subscription IDs.
   if (metadata.directio_platform_tier) {
-    const organizationId = metadata.directio_organization_id;
-    const tier = metadata.directio_platform_tier;
+    // Trust boundary: the org id must come from OUR pre-recorded
+    // checkout intent (written by /api/checkout/studio when it created
+    // the session), never from session metadata alone — metadata rides
+    // in from Stripe and a forged/stale value would flip a tier on an
+    // arbitrary org.
+    const intent = await env.DB.prepare(
+      `SELECT organizationId, tier FROM stripe_checkout_intent
+        WHERE sessionId = ? AND kind = 'platform_subscription'`,
+    )
+      .bind(sessionId)
+      .first<{ organizationId: string; tier: string | null }>();
+    if (!intent) {
+      // Throw rather than swallow: the outer catch releases the dedupe
+      // row and 500s, so Stripe keeps redelivering (with backoff, up
+      // to ~3 days) and the failure is loud in the Stripe dashboard.
+      // A paying customer whose intent row is missing gets a visible
+      // reconciliation window instead of a silently burned event.
+      throw new Error(
+        `platform-tier session ${sessionId} has no recorded checkout intent`,
+      );
+    }
+    const organizationId = intent.organizationId;
+    const tier = intent.tier ?? metadata.directio_platform_tier;
     const stripeCustomerId = obj.customer ? String(obj.customer) : null;
     const stripeSubscriptionId = obj.subscription ? String(obj.subscription) : null;
-    if (!organizationId) {
-      // Signed-out checkout: cannot attribute yet. Stripe has the Customer +
-      // Subscription; we'll reconcile during the post-signup flow. No-op
-      // here so the webhook still returns 200 and Stripe stops retrying.
-      return;
-    }
 
     await env.DB.prepare(
       `UPDATE organization
@@ -193,9 +259,14 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
   const directioPaymentId = metadata.directio_payment_id;
   if (!directioPaymentId) return;
 
+  // Installment plans: the session completing means the subscription
+  // was created and month 1 was charged — NOT that the full package
+  // price landed. The plan row goes to 'active'; real collected money
+  // is recorded per invoice by handlePlatformInvoiceEvent, and the
+  // plan flips to 'plan_completed' after the final installment.
   await env.DB.prepare(
     `UPDATE payment
-        SET status = 'succeeded',
+        SET status = CASE WHEN kind = 'installment_subscription' THEN 'active' ELSE 'succeeded' END,
             stripePaymentIntentId = COALESCE(?, stripePaymentIntentId),
             stripeSubscriptionId = COALESCE(?, stripeSubscriptionId),
             updatedAt = ?
@@ -248,6 +319,15 @@ async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
   const payoutsEnabled = Boolean(obj.payouts_enabled);
   const detailsSubmitted = Boolean(obj.details_submitted);
   const newStatus = chargesEnabled && payoutsEnabled ? "active" : detailsSubmitted ? "restricted" : "pending";
+
+  // Only audit real transitions — account.updated fires for lots of
+  // non-status reasons and we don't want audit noise.
+  const before = await env.DB.prepare(
+    "SELECT id, stripeAccountStatus FROM organization WHERE stripeAccountId = ? LIMIT 1",
+  )
+    .bind(accountId)
+    .first<{ id: string; stripeAccountStatus: string | null }>();
+
   await env.DB.prepare(
     `UPDATE organization
         SET stripeAccountStatus = ?,
@@ -266,6 +346,23 @@ async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
       accountId,
     )
     .run();
+
+  if (before && before.stripeAccountStatus !== newStatus) {
+    await recordAudit(env, {
+      organizationId: before.id,
+      actorUserId: null,
+      action: "stripe.account_status_changed",
+      entityType: "organization",
+      entityId: before.id,
+      payload: {
+        from: before.stripeAccountStatus,
+        to: newStatus,
+        chargesEnabled,
+        payoutsEnabled,
+        detailsSubmitted,
+      },
+    });
+  }
 }
 
 /**
@@ -364,7 +461,7 @@ async function handlePlatformInvoiceEvent(
   if (!subscriptionId) return;
 
   const newStatus = eventType === "invoice.paid" ? "active" : "past_due";
-  await env.DB.prepare(
+  const updated = await env.DB.prepare(
     `UPDATE organization
         SET stripePlatformSubscriptionStatus = ?,
             subscriptionUpdatedAt = ?
@@ -372,166 +469,275 @@ async function handlePlatformInvoiceEvent(
   )
     .bind(newStatus, Date.now(), subscriptionId)
     .run();
+
+  // Not a platform subscription → this is a family installment plan
+  // (enrollment tuition paid monthly). Fixed-length plans aren't
+  // first-class in Stripe, so on each paid invoice we:
+  //   1. record the money that ACTUALLY landed as its own payment row
+  //      (the plan row never counts as revenue — an earlier build
+  //      marked the full package price 'succeeded' on month 1);
+  //   2. ask Stripe how many invoices are paid, and cancel the
+  //      subscription + complete the plan after the agreed months.
+  // Errors here throw on purpose: the action's outer catch releases
+  // the dedupe row and 500s so Stripe redelivers. That also self-heals
+  // the race where this invoice.paid arrives before
+  // checkout.session.completed stamped stripeSubscriptionId on the
+  // plan row.
+  if (!updated.meta?.changes && eventType === "invoice.paid") {
+    const progress = await getInstallmentProgress(env, subscriptionId);
+    if (progress.installmentMonths === null) return;
+
+    const plan = await env.DB.prepare(
+      `SELECT id, organizationId, enrollmentId, studentId, programPackageId,
+              currency, descriptionSnapshot, status
+         FROM payment WHERE stripeSubscriptionId = ? AND kind = 'installment_subscription'
+        LIMIT 1`,
+    )
+      .bind(subscriptionId)
+      .first<{
+        id: string;
+        organizationId: string;
+        enrollmentId: string | null;
+        studentId: string | null;
+        programPackageId: string | null;
+        currency: string;
+        descriptionSnapshot: string | null;
+        status: string;
+      }>();
+    if (!plan) {
+      throw new Error(
+        `installment invoice.paid for ${subscriptionId} arrived before the plan row was stamped — retry`,
+      );
+    }
+
+    const now = Date.now();
+    const invoiceId = obj.id ? String(obj.id) : null;
+    const amountPaid = typeof obj.amount_paid === "number" ? obj.amount_paid : 0;
+    const invoicePi = obj.payment_intent ? String(obj.payment_intent) : null;
+
+    if (invoiceId && amountPaid > 0) {
+      // One child row per invoice; keyed on the invoice id via
+      // stripeChargeId-like reuse of stripeCheckoutSessionId is wrong —
+      // dedupe rides on the stripe_event ledger instead.
+      const feeCents = Math.round((amountPaid * PLATFORM_FEE_BPS) / 10000);
+      await env.DB.prepare(
+        `INSERT INTO payment (id, organizationId, enrollmentId, studentId, programPackageId,
+                              kind, status, amountCents, currency, platformFeeCents, schoolNetCents,
+                              stripePaymentIntentId, stripeSubscriptionId,
+                              descriptionSnapshot, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'installment_payment', 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          newId(),
+          plan.organizationId,
+          plan.enrollmentId,
+          plan.studentId,
+          plan.programPackageId,
+          amountPaid,
+          plan.currency ?? "USD",
+          feeCents,
+          amountPaid - feeCents,
+          invoicePi,
+          subscriptionId,
+          `${plan.descriptionSnapshot ?? "Tuition"} — installment (${progress.paidInvoices}/${progress.installmentMonths})`,
+          now,
+          now,
+        )
+        .run();
+      await recordAudit(env, {
+        organizationId: plan.organizationId,
+        actorUserId: null,
+        action: "payment.installment_collected",
+        entityType: "payment",
+        entityId: plan.id,
+        payload: {
+          stripeSubscriptionId: subscriptionId,
+          stripeInvoiceId: invoiceId,
+          amountCents: amountPaid,
+          installment: `${progress.paidInvoices}/${progress.installmentMonths}`,
+        },
+      });
+    }
+
+    if (progress.paidInvoices >= progress.installmentMonths) {
+      await cancelSubscription(env, subscriptionId);
+      await env.DB.prepare(
+        `UPDATE payment SET status = 'plan_completed', updatedAt = ?
+          WHERE id = ? AND organizationId = ?`,
+      )
+        .bind(now, plan.id, plan.organizationId)
+        .run();
+      await recordAudit(env, {
+        organizationId: plan.organizationId,
+        actorUserId: null,
+        action: "payment.installment_plan_completed",
+        entityType: "payment",
+        entityId: plan.id,
+        payload: {
+          stripeSubscriptionId: subscriptionId,
+          months: progress.installmentMonths,
+        },
+      });
+    }
+  }
 }
 
 /**
- * charge.refunded
+ * charge.dispute.created / charge.dispute.closed
  *
- * Stripe fires this for both partial and full refunds. We update the
- * matching payment row to 'refunded' (full) or 'partially_refunded'
- * (partial). The connected account is debited via reverse_transfer; we
- * don't need to mirror that ledger movement here.
+ * A family disputed a charge with their bank. Funds are pulled from
+ * the school's balance while the dispute is open; the school needs to
+ * see this on their payments dashboard, not find out from a Stripe
+ * email they never read.
+ */
+async function handleDispute(env: Env, eventType: string, obj: Record<string, unknown>) {
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  if (!paymentIntentId) return;
+
+  const payment = await env.DB.prepare(
+    "SELECT id, organizationId, status FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+  )
+    .bind(paymentIntentId)
+    .first<{ id: string; organizationId: string; status: string }>();
+  if (!payment) return;
+
+  const disputeStatus = String(obj.status ?? "");
+  if (eventType === "charge.dispute.created") {
+    await env.DB.prepare(
+      "UPDATE payment SET status = 'disputed', updatedAt = ? WHERE id = ? AND organizationId = ?",
+    )
+      .bind(Date.now(), payment.id, payment.organizationId)
+      .run();
+  } else {
+    // Closing statuses: 'won' and 'warning_closed' (inquiry closed, no
+    // funds taken) restore the payment; only 'lost' means the money is
+    // gone. Transition only rows still marked 'disputed' — a dispute
+    // that resolved via refund must not clobber the 'refunded' state.
+    const closedStatus =
+      disputeStatus === "lost" ? "dispute_lost" : "succeeded";
+    await env.DB.prepare(
+      `UPDATE payment SET status = ?, updatedAt = ?
+        WHERE id = ? AND organizationId = ? AND status = 'disputed'`,
+    )
+      .bind(closedStatus, Date.now(), payment.id, payment.organizationId)
+      .run();
+  }
+
+  await recordAudit(env, {
+    organizationId: payment.organizationId,
+    actorUserId: null,
+    action:
+      eventType === "charge.dispute.created"
+        ? "payment.dispute_opened"
+        : `payment.dispute_${disputeStatus || "closed"}`,
+    entityType: "payment",
+    entityId: payment.id,
+    payload: {
+      disputeId: obj.id ? String(obj.id) : null,
+      reason: obj.reason ? String(obj.reason) : null,
+      amountCents: typeof obj.amount === "number" ? obj.amount : null,
+      status: disputeStatus,
+    },
+  });
+}
+
+/**
+ * charge.refunded — refunds issued from the Stripe dashboard (or by
+ * a dispute) rather than through our /admin/payments flow. Mirrors
+ * the state so the school's dashboard agrees with Stripe.
  */
 async function handleChargeRefunded(env: Env, obj: Record<string, unknown>) {
   const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
-  const chargeId = String(obj.id ?? "");
-  const amountRefunded = Number(obj.amount_refunded ?? 0);
-  const amount = Number(obj.amount ?? 0);
-  const fullyRefunded = amount > 0 && amountRefunded >= amount;
-  const newStatus = fullyRefunded ? "refunded" : "partially_refunded";
-
   if (!paymentIntentId) return;
+  const fullyRefunded = Boolean(obj.refunded);
 
-  await env.DB.prepare(
-    `UPDATE payment
-        SET status = ?,
-            updatedAt = ?
-      WHERE stripePaymentIntentId = ?`,
-  )
-    .bind(newStatus, Date.now(), paymentIntentId)
-    .run();
-
-  const row = await env.DB.prepare(
+  const payment = await env.DB.prepare(
     "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
   )
     .bind(paymentIntentId)
     .first<{ id: string; organizationId: string }>();
-  if (row) {
-    await recordAudit(env, {
-      organizationId: row.organizationId,
-      actorUserId: null,
-      action: fullyRefunded ? "payment.refunded" : "payment.partially_refunded",
-      entityType: "payment",
-      entityId: row.id,
-      payload: {
-        source: "stripe.webhook",
-        event: "charge.refunded",
-        stripeChargeId: chargeId,
-        amountRefundedCents: amountRefunded,
-        amountCents: amount,
-      },
-    });
-  }
-}
+  if (!payment) return;
 
-/**
- * charge.dispute.{created,updated,closed}
- *
- * With on_behalf_of set on the charge, dispute liability lives with the
- * connected account (the school). But directio still wants visibility so
- * support can help schools respond before the response_due_by deadline.
- * We mark the payment as 'disputed' (or 'dispute_lost'/'dispute_won') and
- * write an audit row carrying the dispute id + reason + amount.
- */
-async function handleChargeDispute(env: Env, eventType: string, obj: Record<string, unknown>) {
-  const disputeId = String(obj.id ?? "");
-  const chargeId = obj.charge ? String(obj.charge) : null;
-  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
-  const reason = String(obj.reason ?? "");
-  const status = String(obj.status ?? "");
-  const amount = Number(obj.amount ?? 0);
-
-  let paymentStatus: string | null = null;
-  if (eventType === "charge.dispute.created") paymentStatus = "disputed";
-  else if (eventType === "charge.dispute.closed") {
-    paymentStatus = status === "won" ? "dispute_won" : status === "lost" ? "dispute_lost" : "disputed";
-  }
-
-  if (paymentStatus && paymentIntentId) {
+  if (fullyRefunded) {
     await env.DB.prepare(
-      `UPDATE payment
-          SET status = ?,
-              updatedAt = ?
-        WHERE stripePaymentIntentId = ?`,
+      `UPDATE payment SET status = 'refunded', updatedAt = ?
+        WHERE id = ? AND organizationId = ? AND status != 'refunded'`,
     )
-      .bind(paymentStatus, Date.now(), paymentIntentId)
+      .bind(Date.now(), payment.id, payment.organizationId)
       .run();
   }
 
-  // Audit log keyed off the payment row if we can find it; otherwise
-  // best-effort with the charge id.
-  let organizationId: string | null = null;
-  let paymentRowId: string | null = null;
-  if (paymentIntentId) {
-    const row = await env.DB.prepare(
-      "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
-    )
-      .bind(paymentIntentId)
-      .first<{ id: string; organizationId: string }>();
-    if (row) {
-      organizationId = row.organizationId;
-      paymentRowId = row.id;
-    }
-  }
-
-  if (organizationId) {
+  {
     await recordAudit(env, {
-      organizationId,
+      organizationId: payment.organizationId,
       actorUserId: null,
-      action: `payment.${eventType.replace("charge.dispute.", "dispute_")}`,
+      action: fullyRefunded ? "payment.refunded" : "payment.partially_refunded",
       entityType: "payment",
-      entityId: paymentRowId ?? chargeId ?? disputeId,
+      entityId: payment.id,
       payload: {
         source: "stripe.webhook",
-        event: eventType,
-        stripeDisputeId: disputeId,
-        stripeChargeId: chargeId,
-        stripePaymentIntentId: paymentIntentId,
-        reason,
-        status,
-        amountCents: amount,
+        amountRefundedCents:
+          typeof obj.amount_refunded === "number" ? obj.amount_refunded : null,
       },
     });
   }
 }
 
 /**
- * payout.failed
- *
- * For Express connected accounts on directio, payouts that fail are
- * usually closed bank accounts, ACH returns, or KYC re-verification.
- * The school's dashboard shows the failure; directio support needs to
- * know too so we can reach out.
+ * payout.failed — a school's bank rejected their Stripe payout
+ * (closed account, bad routing number). Connect event: the account id
+ * arrives at the event's top level, not in the object.
  */
-async function handlePayoutFailed(env: Env, obj: Record<string, unknown>) {
-  const payoutId = String(obj.id ?? "");
-  // The Stripe event for a connected-account payout has the account id
-  // on the wrapping event (event.account), not the payout object. The
-  // Cloudflare worker pattern: the connected webhook signing secret
-  // disambiguates it. Best-effort: pull obj.destination (bank account)
-  // and amount; mark the org by traversing stripePayoutMostRecentFailedAt.
-  const amount = Number(obj.amount ?? 0);
-  const currency = String(obj.currency ?? "");
-  const failureCode = String(obj.failure_code ?? "");
-  const failureMessage = String(obj.failure_message ?? "");
-
-  // The account id is on event.account at the wrapping level; the
-  // dispatcher above doesn't forward it here. For now we write an audit
-  // row keyed off payout id; a follow-up can wire event.account through.
+async function handlePayoutFailed(
+  env: Env,
+  accountId: string | null,
+  obj: Record<string, unknown>,
+) {
+  if (!accountId) return;
+  const org = await env.DB.prepare(
+    "SELECT id FROM organization WHERE stripeAccountId = ? LIMIT 1",
+  )
+    .bind(accountId)
+    .first<{ id: string }>();
+  if (!org) return;
   await recordAudit(env, {
-    organizationId: "",
+    organizationId: org.id,
     actorUserId: null,
-    action: "payout.failed",
-    entityType: "stripe_payout",
-    entityId: payoutId,
+    action: "stripe.payout_failed",
+    entityType: "organization",
+    entityId: org.id,
     payload: {
-      source: "stripe.webhook",
-      event: "payout.failed",
-      stripePayoutId: payoutId,
-      amountCents: amount,
-      currency,
-      failureCode,
-      failureMessage,
+      payoutId: obj.id ? String(obj.id) : null,
+      amountCents: typeof obj.amount === "number" ? obj.amount : null,
+      failureMessage: obj.failure_message ? String(obj.failure_message) : null,
+    },
+  });
+}
+
+/**
+ * radar.early_fraud_warning.created — Stripe's issuer-network signal
+ * that a charge is likely fraudulent. Best handled by refunding
+ * proactively before it becomes a dispute; we surface it in the audit
+ * log so it's at least visible.
+ */
+async function handleFraudWarning(env: Env, obj: Record<string, unknown>) {
+  const paymentIntentId = obj.payment_intent ? String(obj.payment_intent) : null;
+  if (!paymentIntentId) return;
+  const payment = await env.DB.prepare(
+    "SELECT id, organizationId FROM payment WHERE stripePaymentIntentId = ? LIMIT 1",
+  )
+    .bind(paymentIntentId)
+    .first<{ id: string; organizationId: string }>();
+  if (!payment) return;
+  await recordAudit(env, {
+    organizationId: payment.organizationId,
+    actorUserId: null,
+    action: "payment.fraud_warning",
+    entityType: "payment",
+    entityId: payment.id,
+    payload: {
+      chargeId: obj.charge ? String(obj.charge) : null,
+      fraudType: obj.fraud_type ? String(obj.fraud_type) : null,
     },
   });
 }

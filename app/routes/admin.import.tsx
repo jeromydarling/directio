@@ -3,6 +3,7 @@ import type { Route } from "./+types/admin.import";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
+import { rateLimit } from "~/lib/rate-limit.server";
 import { ClaudeNotConfiguredError, isClaudeConfigured, normalizeStudentImport } from "~/lib/claude.server";
 import { guessMapping, mapStudentRows, parseCsv } from "~/lib/csv";
 import { PageHeader, Card, Button, LinkButton, EmptyState } from "~/components/ui";
@@ -117,6 +118,16 @@ export async function action({ request, context }: Route.ActionArgs) {
       // Use Claude to normalize the freeform paste. If the key isn't
       // configured, surface a friendly error and let the user paste
       // CSV instead.
+      const rl = await rateLimit(env, `import-ai:${tenant.organization.id}`, {
+        limit: 15,
+        windowSeconds: 3600,
+      });
+      if (!rl.allowed) {
+        return data(
+          { error: "AI import budget reached for this hour — paste CSV instead, or try again later." },
+          { status: 429 },
+        );
+      }
       try {
         const normalized = await normalizeStudentImport(env, rawText);
         rows = normalized.rows;

@@ -113,7 +113,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
          WHERE s.email = ?
          ORDER BY o.name, s.lastName, s.firstName`,
     )
-    .bind(now, tenant.user.email)
+    .bind(now, tenant.user.ownershipEmail)
     .all<KidRow>();
   for (const k of fallback.results) {
     if (!seen.has(k.studentId)) {
@@ -216,7 +216,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       WHERE s.id = ? AND (g.userId = ? OR s.email = ?)
       LIMIT 1`,
   )
-    .bind(suggestion.studentId, tenant.user.id, tenant.user.email)
+    .bind(suggestion.studentId, tenant.user.id, tenant.user.ownershipEmail)
     .first<{ "1": number }>();
   if (!ownership) {
     return data({ error: "That suggestion isn't yours to book." }, { status: 403 });

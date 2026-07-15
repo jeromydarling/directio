@@ -161,9 +161,16 @@ export async function sweepExpiredDemos(env: Env): Promise<{ swept: number }> {
 
   if (!rows.results.length) return { swept: 0 };
 
-  const stmts = rows.results.map((r) =>
-    env.DB.prepare("DELETE FROM organization WHERE id = ?").bind(r.id),
-  );
-  await env.DB.batch(stmts);
-  return { swept: rows.results.length };
+  // Per-org deletes, not one batch — a single FK failure must not
+  // block every other expired demo from being swept forever.
+  let swept = 0;
+  for (const r of rows.results) {
+    try {
+      await env.DB.prepare("DELETE FROM organization WHERE id = ?").bind(r.id).run();
+      swept++;
+    } catch (err) {
+      console.error(`[demo-sweep] failed to delete org ${r.id}:`, err);
+    }
+  }
+  return { swept };
 }

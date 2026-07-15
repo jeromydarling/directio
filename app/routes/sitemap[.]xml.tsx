@@ -3,18 +3,28 @@ import type { Route } from "./+types/sitemap[.]xml";
 export async function loader({ request, context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
   const url = new URL(request.url);
-  const host = request.headers.get("Host") ?? url.host;
+  const rawHost = request.headers.get("Host") ?? url.host;
+  // Canonical apex — never emit www.godirectio.com in the sitemap
+  // or Google will treat it as duplicate content.
+  const host = rawHost.replace(/^www\./, "");
   const proto = (request.headers.get("X-Forwarded-Proto") ?? url.protocol.replace(":", "")) || "https";
   const origin = `${proto}://${host}`;
 
   // If a custom domain is hitting us, only emit pages for that school.
-  const customDomainRow = await env.DB.prepare(
-    `SELECT o.publicSlug FROM school_website sw
-       JOIN organization o ON o.id = sw.organizationId
-       WHERE sw.customDomain = ? AND sw.customDomainVerifiedAt IS NOT NULL`,
-  )
-    .bind(host)
-    .first<{ publicSlug: string }>();
+  // Guard the DB call — a schema-drifted or unavailable D1 must not
+  // 500 the sitemap; we still want the marketing URLs served.
+  let customDomainRow: { publicSlug: string } | null = null;
+  try {
+    customDomainRow = await env.DB.prepare(
+      `SELECT o.publicSlug FROM school_website sw
+         JOIN organization o ON o.id = sw.organizationId
+         WHERE sw.customDomain = ? AND sw.customDomainVerifiedAt IS NOT NULL`,
+    )
+      .bind(rawHost)
+      .first<{ publicSlug: string }>();
+  } catch (err) {
+    console.error("[sitemap] custom-domain lookup failed:", err);
+  }
 
   const lastmod = new Date().toISOString().slice(0, 10);
   const urls: { loc: string; priority: number; changefreq: string }[] = [];
@@ -26,17 +36,34 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     );
   } else {
     // Platform-wide sitemap: marketing surfaces + every published school
-    for (const p of ["/", "/start-a-school", "/for-schools", "/for-families", "/features", "/states", "/pricing", "/why"]) {
+    const marketingPaths = [
+      "/",
+      "/start-a-school",
+      "/for-schools",
+      "/for-families",
+      "/for-instructors",
+      "/features",
+      "/states",
+      "/pricing",
+      "/compare",
+      "/why",
+      "/demo",
+    ];
+    for (const p of marketingPaths) {
       urls.push({ loc: `${origin}${p}`, priority: p === "/" ? 1.0 : 0.7, changefreq: "weekly" });
     }
-    const schools = await env.DB.prepare(
-      `SELECT publicSlug FROM organization
-        WHERE publicSlug IS NOT NULL AND publicPublishedAt IS NOT NULL
-        ORDER BY publicPublishedAt DESC LIMIT 5000`,
-    ).all<{ publicSlug: string }>();
-    for (const s of schools.results) {
-      urls.push({ loc: `${origin}/schools/${s.publicSlug}`, priority: 0.8, changefreq: "weekly" });
-      urls.push({ loc: `${origin}/schools/${s.publicSlug}/enroll`, priority: 0.6, changefreq: "monthly" });
+    try {
+      const schools = await env.DB.prepare(
+        `SELECT publicSlug FROM organization
+          WHERE publicSlug IS NOT NULL AND publicPublishedAt IS NOT NULL
+          ORDER BY publicPublishedAt DESC LIMIT 5000`,
+      ).all<{ publicSlug: string }>();
+      for (const s of schools.results) {
+        urls.push({ loc: `${origin}/schools/${s.publicSlug}`, priority: 0.8, changefreq: "weekly" });
+        urls.push({ loc: `${origin}/schools/${s.publicSlug}/enroll`, priority: 0.6, changefreq: "monthly" });
+      }
+    } catch (err) {
+      console.error("[sitemap] school listing failed:", err);
     }
   }
 

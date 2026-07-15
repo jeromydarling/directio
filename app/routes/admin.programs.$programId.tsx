@@ -58,10 +58,18 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const intent = String(formData.get("intent") ?? "");
 
   if (intent === "add-package") {
+    // Verify the program actually belongs to this tenant before
+    // inserting a package that references it.
+    const owned = await context.cloudflare.env.DB.prepare(
+      "SELECT id FROM program WHERE id = ? AND organizationId = ?",
+    )
+      .bind(params.programId, tenant.organization.id)
+      .first<{ id: string }>();
+    if (!owned) return data({ error: "Program not found." }, { status: 404 });
+
     const name = String(formData.get("name") ?? "").trim();
     const priceDollars = parseFloat(String(formData.get("price") ?? "0"));
     const btwLessons = parseInt(String(formData.get("btwLessons") ?? "0"), 10);
-    const platformFeeBps = parseInt(String(formData.get("platformFeeBps") ?? "250"), 10);
     const installmentsAllowed = formData.get("installmentsAllowed") === "on";
     const installmentMonths = parseInt(String(formData.get("installmentMonths") ?? "3"), 10);
     const bnplOn = formData.get("bnpl") === "on";
@@ -74,8 +82,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         status: 400,
       });
 
+    // The platform fee is directio-controlled (PLATFORM_FEE_BPS in
+    // stripe.server.ts) and is intentionally NOT stored per package —
+    // an earlier build let schools set it, including to zero.
     const paymentOptions = {
-      platformFeeBps: Math.max(0, Math.min(2000, platformFeeBps)),
       installmentsAllowed,
       installmentMonths: Math.max(2, Math.min(12, installmentMonths)),
       bnpl: bnplOn ? ["affirm", "klarna"] : [],
@@ -179,16 +189,6 @@ export default function ProgramDetail({ loaderData, actionData }: Route.Componen
               step="1"
               required
               defaultValue="6"
-            />
-          </Field>
-          <Field label="Platform fee (basis points)" hint="100 bps = 1%. Default 2.5%.">
-            <TextInput
-              name="platformFeeBps"
-              type="number"
-              min="0"
-              max="2000"
-              step="10"
-              defaultValue="250"
             />
           </Field>
           <Field label="Installment months" hint="If installments enabled.">

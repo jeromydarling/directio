@@ -64,7 +64,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
           AND (g.userId = ? OR s.email = ?)
         ORDER BY s.lastName, s.firstName`,
     )
-    .bind(orgId, tenant.user.id, tenant.user.email)
+    .bind(orgId, tenant.user.id, tenant.user.ownershipEmail)
     .all<KidRow>();
 
   const kidIds = kids.results.map((k) => k.studentId);
@@ -115,7 +115,7 @@ export async function action({ request, context }: Route.ActionArgs) {
           AND (g.userId = ? OR s.email = ?)
         LIMIT 1`,
     )
-      .bind(studentId, orgId, tenant.user.id, tenant.user.email)
+      .bind(studentId, orgId, tenant.user.id, tenant.user.ownershipEmail)
       .first<{ id: string }>();
     if (!allowed) {
       return data({ error: "That student isn't linked to your account." }, { status: 403 });

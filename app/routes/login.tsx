@@ -2,6 +2,7 @@ import { Form, Link, data, redirect, useNavigation, useSearchParams } from "reac
 import type { Route } from "./+types/login";
 import { getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
+import { clientIp, rateLimit } from "~/lib/rate-limit.server";
 import { AuthShell } from "~/components/auth-shell";
 
 export function meta(_: Route.MetaArgs) {
@@ -26,6 +27,21 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   const env = context.cloudflare.env;
+
+  // Throttle both password guessing and magic-link email flooding:
+  // per-IP for distributed guessing, per-email so one victim's inbox
+  // can't be spammed from many IPs.
+  const [byIp, byEmail] = await Promise.all([
+    rateLimit(env, `login:ip:${clientIp(request)}`, { limit: 20, windowSeconds: 3600 }),
+    rateLimit(env, `login:email:${email.toLowerCase()}`, { limit: 6, windowSeconds: 900 }),
+  ]);
+  if (!byIp.allowed || !byEmail.allowed) {
+    return data(
+      { error: "Too many sign-in attempts. Wait a few minutes and try again." },
+      { status: 429 },
+    );
+  }
+
   const auth = getAuth(env);
 
   // Magic-link sign-in is the canonical flow per spec #6. The parent
@@ -143,7 +159,7 @@ export default function Login({ actionData }: Route.ComponentProps) {
           </p>
           <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
             We sent a sign-in link to <strong>{magicLinkSent}</strong>. The link
-            works for one hour. You can close this tab — the email opens you
+            works for 15 minutes. You can close this tab — the email opens you
             straight into your portal.
           </p>
         </div>

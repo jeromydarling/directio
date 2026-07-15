@@ -44,7 +44,10 @@ test.describe("api guards", () => {
   test("/api/admin/purge-user with bogus token returns 401", async ({
     request,
   }) => {
-    const res = await request.post("/api/admin/purge-user?token=nope", {
+    // Token via header only — query-string tokens are rejected by
+    // design (they leak into access logs).
+    const res = await request.post("/api/admin/purge-user", {
+      headers: { Authorization: "Bearer nope" },
       form: { email: "nobody@nowhere.example" },
     });
     // 503 here would mean the endpoint isn't configured on this

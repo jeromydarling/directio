@@ -2,6 +2,7 @@ import { data } from "react-router";
 import type { Route } from "./+types/api.lesson.narrate";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
+import { rateLimit } from "~/lib/rate-limit.server";
 import { DEFAULT_VOICE, narrateAndCache } from "~/lib/narrate.server";
 
 /**
@@ -25,6 +26,17 @@ export async function action({ request, context }: Route.ActionArgs) {
     !tenant.organization.isDemo
   ) {
     return data({ error: "Forbidden" }, { status: 403 });
+  }
+  // Cost guard: uncached renders bill directio's Workers AI account.
+  const rl = await rateLimit(env, `narrate:${tenant.organization.id}`, {
+    limit: 20,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "Narration budget reached for this hour. Try again later." },
+      { status: 429 },
+    );
   }
 
   const form = await request.formData();

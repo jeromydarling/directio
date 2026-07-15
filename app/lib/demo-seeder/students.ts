@@ -7,6 +7,7 @@
  */
 
 import { newId } from "../ids";
+import { platformFeeCentsFor } from "../stripe.server";
 import type { SeedContext } from "./context";
 import type { InstructorRecord } from "./instructors";
 import { FIRST_NAMES, LAST_NAMES } from "./data";
@@ -110,7 +111,10 @@ export function buildStudentStatements(
 
     // Payment for each enrollment
     const paymentStatus = pick(rng, PAYMENT_STATUSES);
-    const platformFee = Math.round(packagePrice * 0.02);
+    // Same fee the real checkout charges — demo data showing a
+    // different platform fee than production undermines the
+    // fee-transparency pitch.
+    const platformFee = platformFeeCentsFor(packagePrice);
     stmts.push(
       env.DB.prepare(
         `INSERT INTO payment

@@ -7,6 +7,7 @@ import {
   StripeNotConfiguredError,
   createCheckoutSession,
   isStripeConfigured,
+  platformFeeCentsFor,
   type PaymentOption,
 } from "~/lib/stripe.server";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
@@ -29,8 +30,10 @@ type EnrollmentRow = {
   stripeChargesEnabled: number;
 };
 
+// platformFeeBps deliberately absent: old package rows still carry it
+// in their JSON, but the fee is platform-controlled (PLATFORM_FEE_BPS)
+// and typed nowhere so nobody wires it back in.
 type PaymentOptionsCfg = {
-  platformFeeBps?: number;
   installmentsAllowed?: boolean;
   installmentMonths?: number;
   bnpl?: string[];
@@ -137,8 +140,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     /* ignore */
   }
 
-  const platformFeeBps = opts.platformFeeBps ?? 250;
-  const platformFeeCents = Math.round((enrollment.priceCents * platformFeeBps) / 10000);
+  // Platform-controlled fee — deliberately ignores any platformFeeBps
+  // stored in older packages' paymentOptions JSON.
+  const platformFeeCents = platformFeeCentsFor(enrollment.priceCents);
   const schoolNetCents = enrollment.priceCents - platformFeeCents;
   const installmentMonths = opts.installmentMonths ?? 3;
 
@@ -151,6 +155,16 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const paymentId = newId();
   const description = `${enrollment.programName} — ${enrollment.packageName ?? "package"}`;
   const now = Date.now();
+
+  // Sweep earlier abandoned attempts for this enrollment so the
+  // family's payment history doesn't accumulate a 'pending' row for
+  // every checkout they opened and closed.
+  await env.DB.prepare(
+    `UPDATE payment SET status = 'abandoned', updatedAt = ?
+      WHERE enrollmentId = ? AND organizationId = ? AND status = 'pending'`,
+  )
+    .bind(now, enrollment.id, tenant.organization.id)
+    .run();
 
   // Record the payment attempt up front; the webhook will flip status
   // to succeeded/failed when Stripe tells us what happened.
@@ -196,6 +210,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         directio_enrollment_id: enrollment.id,
         directio_organization_id: tenant.organization.id,
       },
+      idempotencyKey: `checkout-${paymentId}`,
     });
 
     await env.DB.prepare(
@@ -238,12 +253,25 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const amount = enrollment.priceCents ?? 0;
+  // Matches the server-side Math.ceil so the displayed monthly price
+  // is exactly what Stripe will charge.
   const monthly =
     options.installmentMonths && enrollment.priceCents
-      ? Math.round(enrollment.priceCents / options.installmentMonths)
+      ? Math.ceil(enrollment.priceCents / options.installmentMonths)
       : 0;
 
-  const succeeded = payments.find((p) => p.status === "succeeded");
+  // "Paid in full" = a one-time/bnpl success or a completed plan.
+  // Individual installment child rows (kind='installment_payment')
+  // are collected money but NOT full payment; an 'active' plan means
+  // installments are running and no new checkout should start.
+  const succeeded = payments.find(
+    (p) =>
+      (p.status === "succeeded" && p.kind !== "installment_payment") ||
+      p.status === "plan_completed",
+  );
+  const activePlan = payments.find(
+    (p) => p.status === "active" && p.kind === "installment_subscription",
+  );
   const stripeReady =
     stripeConfigured && enrollment.stripeAccountId && enrollment.stripeChargesEnabled === 1;
 
@@ -292,6 +320,17 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
           </p>
           <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
             Your school has your payment on file. No further action needed.
+          </p>
+        </Card>
+      ) : activePlan ? (
+        <Card className="border-brand-300 bg-brand-50/40 dark:border-brand-700 dark:bg-brand-950/20">
+          <p className="font-display text-xl font-semibold text-ink-900 dark:text-ink-50">
+            Payment plan active
+          </p>
+          <p className="mt-1 text-sm text-ink-700 dark:text-ink-200">
+            Your monthly installments are running — each payment appears in the
+            history below as it lands. The plan closes automatically after the
+            final installment.
           </p>
         </Card>
       ) : (

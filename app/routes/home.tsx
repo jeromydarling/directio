@@ -9,7 +9,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "One login, one timeline, one payment history. directio replaces the fragmented mess of portals, paper, and surprise fees families navigate to get a driver's license.",
+        "One login, one timeline, one payment history. directio replaces the portals, paper, and surprise fees families juggle to get a driver's license.",
     },
   ];
 }
@@ -472,8 +472,9 @@ function FeaturesGrid() {
               Eight categories. One product.
             </h2>
             <p className="mt-4 max-w-2xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Everything you see here works today. No "coming soon" pages, no premium tier
-              hiding the good stuff. If we wrote it down, it's in the product.
+              Everything listed here ships in the product today. State-compliance depth
+              varies by state — Minnesota is deepest, and <a href="/states" className="underline hover:text-ink-900 dark:hover:text-ink-50">the states page</a> shows
+              exactly where yours stands.
             </p>
           </div>
         </Reveal>
@@ -621,7 +622,7 @@ function RolesSection() {
 }
 
 const NUMBERS = [
-  { value: 51, suffix: "", label: "States + DC with seeded rule packs" },
+  { value: 51, suffix: "", label: "State rule packs seeded — Minnesota deep, others co-built with your school" },
   { value: 6, suffix: "h", label: "BTW hours required in Minnesota" },
   { value: 50, suffix: "h", label: "Supervised practice MN students log" },
   { value: 1, suffix: "", label: "Login per family" },

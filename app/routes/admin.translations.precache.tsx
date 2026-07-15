@@ -3,6 +3,7 @@ import { data, useFetcher } from "react-router";
 import type { Route } from "./+types/admin.translations.precache";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
+import { rateLimit } from "~/lib/rate-limit.server";
 import {
   TranslationVendorError,
   translateLesson,
@@ -79,6 +80,19 @@ export async function action({ request, context }: Route.ActionArgs) {
     !tenant.organization.isDemo
   ) {
     return data({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Cost guard: each precache batch is real Workers AI spend; the
+  // auto-loop checkbox on the UI makes unlimited calls trivial.
+  const rl = await rateLimit(env, `precache:${tenant.organization.id}`, {
+    limit: 120,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "Precache budget reached for this hour. Try again later." },
+      { status: 429 },
+    );
   }
 
   const todo = await listUncachedPairs(env, tenant.organization.id);

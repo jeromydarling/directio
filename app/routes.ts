@@ -10,6 +10,10 @@ export default [
   route("states", "routes/states.tsx"),
   route("states/requests", "routes/states.requests.tsx"),
   route("why", "routes/why.tsx"),
+  route("terms", "routes/terms.tsx"),
+  route("privacy", "routes/privacy.tsx"),
+  route("refund-policy", "routes/refund-policy.tsx"),
+  route("support", "routes/support.tsx"),
   route("pricing", "routes/pricing.tsx"),
   route("compare", "routes/compare.tsx"),
   route("demo", "routes/demo.tsx"),
@@ -21,8 +25,10 @@ export default [
   route("api/auth/*", "routes/api.auth.tsx"),
   route("api/stripe/webhook", "routes/api.stripe.webhook.tsx"),
   route("api/admin/purge-user", "routes/api.admin.purge-user.tsx"),
+  route("api/admin/promote-super", "routes/api.admin.promote-super.tsx"),
   route("api/internal/test-inbox", "routes/api.internal.test-inbox.tsx"),
   route("api/checkout/studio", "routes/api.checkout.studio.tsx"),
+  route("api/billing/portal", "routes/api.billing.portal.tsx"),
   route("api/internal/state-kb-seed/*", "routes/api.internal.state-kb-seed.tsx"),
   route("assets/*", "routes/assets.$.tsx"),
   route("audio/narration/*", "routes/audio.narration.$.tsx"),
@@ -35,6 +41,8 @@ export default [
   route("api/translation/topup", "routes/api.translation.topup.tsx"),
   route("sitemap.xml", "routes/sitemap[.]xml.tsx"),
   route("robots.txt", "routes/robots[.]txt.tsx"),
+  route("llms.txt", "routes/llms[.]txt.tsx"),
+  route("healthz", "routes/healthz.tsx"),
   route("schools/:slug", "routes/schools.$slug.tsx"),
   route("schools/:slug/enroll", "routes/schools.$slug.enroll.tsx"),
 
@@ -121,6 +129,15 @@ export default [
     route("documents", "routes/family.documents.tsx"),
     route("practice-log", "routes/family.practice-log.tsx"),
     route("certificate/:enrollmentId", "routes/family.certificate.$enrollmentId.tsx"),
+  ]),
+
+  route("super", "routes/super.tsx", [
+    index("routes/super._index.tsx"),
+    route("orgs", "routes/super.orgs.tsx"),
+    route("orgs/:orgId", "routes/super.orgs.$orgId.tsx"),
+    route("map", "routes/super.map.tsx"),
+    route("comms", "routes/super.comms.tsx"),
+    route("system", "routes/super.system.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [
