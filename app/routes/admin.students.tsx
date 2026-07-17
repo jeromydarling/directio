@@ -48,6 +48,7 @@ export default function AdminStudents({ loaderData }: Route.ComponentProps) {
       <PageHeader
         eyebrow="Students"
         title={students.length === 0 ? "No students yet" : `${students.length} students`}
+        tour="admin-students"
         actions={<LinkButton to="/admin/students/new">Add student</LinkButton>}
       />
 

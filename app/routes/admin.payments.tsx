@@ -200,6 +200,7 @@ export default function AdminPayments({ loaderData, actionData }: Route.Componen
         eyebrow="Payments"
         title="Transactions"
         description="Every payment families have made through directio. Stripe still owns refunds, payouts, and disputes — this view mirrors the data and gives you in-line refund control."
+        tour="admin-payments"
         actions={
           <LinkButton to="/admin/settings/payments" variant="secondary">
             Stripe settings →

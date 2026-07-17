@@ -1,15 +1,19 @@
 import type { ReactNode } from "react";
+import { SectionTour } from "~/components/tour";
 
 export function PageHeader({
   eyebrow,
   title,
   description,
   actions,
+  tour,
 }: {
   eyebrow?: string;
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
+  /** Tour id from app/lib/tours.ts — renders the ✦ Tour launcher. */
+  tour?: string;
 }) {
   return (
     <header className="flex flex-col-reverse gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
@@ -28,7 +32,12 @@ export function PageHeader({
           </p>
         )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {(actions || tour) && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {actions}
+          {tour && <SectionTour tourId={tour} />}
+        </div>
+      )}
     </header>
   );
 }

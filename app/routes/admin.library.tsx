@@ -192,6 +192,7 @@ export default function AdminLibrary({ loaderData, actionData }: Route.Component
         eyebrow="Curriculum library"
         title="Content packs"
         description="Install platform curriculum and edit your copy, or build your own pack from scratch for things only your school teaches."
+        tour="admin-library"
         actions={
           <div className="flex items-center gap-2">
             <LinkButton to="/admin/library/import" variant="secondary">
