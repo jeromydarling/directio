@@ -338,6 +338,7 @@ export default function FamilyIndex({ loaderData, actionData }: Route.ComponentP
         eyebrow="Welcome"
         title={`Hi ${firstName(me.user.name) ?? me.user.email}`}
         description={`Everything ${me.organization.name} has on file for your family, in one place.`}
+        tour="family-home"
       />
 
       {!hasFormalLink && kids.length === 0 && (

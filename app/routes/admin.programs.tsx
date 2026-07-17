@@ -32,6 +32,7 @@ export default function AdminPrograms({ loaderData }: Route.ComponentProps) {
         eyebrow="Programs"
         title={programs.length === 0 ? "No programs yet" : `${programs.length} programs`}
         description="Programs are the things you sell — Teen, Adult Refresher, Road Test Prep. Each program can have one or more pricing packages."
+        tour="admin-programs"
         actions={<LinkButton to="/admin/programs/new">Add program</LinkButton>}
       />
 

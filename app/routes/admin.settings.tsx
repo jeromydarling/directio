@@ -270,6 +270,7 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
       <PageHeader
         eyebrow="Settings"
         title={tenant.organization.name}
+        tour="admin-settings"
         actions={
           <div className="flex items-center gap-2">
             <LinkButton to="/admin/settings/payments" variant="secondary">

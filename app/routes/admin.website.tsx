@@ -518,6 +518,7 @@ export default function AdminWebsite({ loaderData, actionData }: Route.Component
         eyebrow="Studio · your marketing website"
         title="Your AI-built website"
         description="Answer the intake below and we generate a full marketing site for your school. Edit, regenerate, or point your own domain at it."
+        tour="admin-website"
         actions={
           org.publicSlug ? (
             <LinkButton to={`/schools/${org.publicSlug}`} variant="secondary" external>

@@ -152,6 +152,7 @@ export default function AdminSchedule({ loaderData }: Route.ComponentProps) {
         eyebrow="Schedule"
         title="Next 7 days"
         description="All upcoming lessons across your school."
+        tour="admin-schedule"
         actions={
           <div className="flex gap-2">
             <LinkButton to="/admin/schedule/board" variant="ghost">

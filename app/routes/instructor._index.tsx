@@ -1059,6 +1059,7 @@ export default function InstructorToday({ loaderData, actionData }: Route.Compon
         eyebrow="Today"
         title={`Hi ${firstName(me.user.name) ?? me.user.email}`}
         description={`${todays.length} lesson${todays.length === 1 ? "" : "s"} on your schedule.`}
+        tour="instructor-today"
       />
 
       {earnings.lessons > 0 && <EarningsStrip earnings={earnings} />}

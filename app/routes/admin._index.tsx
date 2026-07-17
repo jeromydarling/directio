@@ -486,6 +486,7 @@ export default function AdminDashboard({ loaderData }: Route.ComponentProps) {
         eyebrow="Today"
         title={`Welcome back, ${firstName(tenant.user.name) ?? tenant.user.email}.`}
         description="Your school at a glance — the answer to “is the business healthy?” before you scroll."
+        tour="admin-dashboard"
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
