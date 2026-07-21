@@ -14,6 +14,7 @@ export default [
   route("privacy", "routes/privacy.tsx"),
   route("refund-policy", "routes/refund-policy.tsx"),
   route("support", "routes/support.tsx"),
+  route("unsubscribe", "routes/unsubscribe.tsx"),
   route("pricing", "routes/pricing.tsx"),
   route("compare", "routes/compare.tsx"),
   route("demo", "routes/demo.tsx"),

@@ -22,6 +22,7 @@ export const CRON_SPECS: CronSpec[] = [
   { name: "daily-digest", cadence: "hourly (sends 1×/day)", staleAfterMs: 3 * HOUR },
   { name: "weekly-digest", cadence: "hourly (sends Mondays)", staleAfterMs: 3 * HOUR },
   { name: "demo-sweep", cadence: "hourly", staleAfterMs: 3 * HOUR },
+  { name: "connect-nudge", cadence: "hourly (max 1×/3d per org)", staleAfterMs: 3 * HOUR },
 ];
 
 export const CRON_NAMES = CRON_SPECS.map((s) => s.name);

@@ -4,6 +4,7 @@ import type { Route } from "./+types/instructor._index";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { assessNoShowFee, getFeePolicy } from "~/lib/fees.server";
+import { sendNoShowFeeNotice } from "~/lib/notifications.server";
 import { suggestSlots } from "~/lib/scheduler";
 import { notifyBoard } from "~/lib/scheduling-board.server";
 import {
@@ -611,6 +612,9 @@ export async function action({ request, context }: Route.ActionArgs) {
         now,
       });
       feeCents = result.feeCents;
+      if (feeCents > 0) {
+        await sendNoShowFeeNotice(env, { appointmentId: apptId, feeCents });
+      }
     }
 
     // Compute and persist the instructor's payout for this lesson —

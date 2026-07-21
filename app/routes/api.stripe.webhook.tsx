@@ -7,6 +7,12 @@ import {
   getInstallmentProgress,
 } from "~/lib/stripe.server";
 import { appendLedgerEntry } from "~/lib/translation.server";
+import {
+  sendDisputeAlert,
+  sendFamilyPaymentFailed,
+  sendPaymentReceipt,
+  sendSubscriptionPastDue,
+} from "~/lib/notifications.server";
 
 /**
  * Stripe webhook handler.
@@ -276,10 +282,10 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
     .run();
 
   const row = await env.DB.prepare(
-    "SELECT organizationId FROM payment WHERE id = ?",
+    "SELECT organizationId, kind FROM payment WHERE id = ?",
   )
     .bind(directioPaymentId)
-    .first<{ organizationId: string }>();
+    .first<{ organizationId: string; kind: string }>();
   if (row) {
     await recordAudit(env, {
       organizationId: row.organizationId,
@@ -289,6 +295,13 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
       entityId: directioPaymentId,
       payload: { source: "stripe.webhook", event: "checkout.session.completed" },
     });
+    // Receipt for one-time / BNPL payments. Installment plans get a
+    // receipt per collected invoice in handlePlatformInvoiceEvent — the
+    // plan row here holds the FULL price but only month 1 was charged,
+    // so a receipt on it would overstate what the family paid.
+    if (row.kind !== "installment_subscription") {
+      await sendPaymentReceipt(env, { paymentId: directioPaymentId });
+    }
   }
 }
 
@@ -302,6 +315,7 @@ async function handleCheckoutSessionFailed(env: Env, obj: Record<string, unknown
   )
     .bind(Date.now(), directioPaymentId, sessionId)
     .run();
+  await sendFamilyPaymentFailed(env, { paymentId: directioPaymentId });
 }
 
 async function handlePaymentIntentSucceeded(env: Env, obj: Record<string, unknown>) {
@@ -470,6 +484,17 @@ async function handlePlatformInvoiceEvent(
     .bind(newStatus, Date.now(), subscriptionId)
     .run();
 
+  // A platform-subscription invoice failed → nudge the owner to fix
+  // their card before Stripe's retries run out.
+  if (updated.meta?.changes && eventType === "invoice.payment_failed") {
+    const org = await env.DB.prepare(
+      "SELECT id FROM organization WHERE stripePlatformSubscriptionId = ? LIMIT 1",
+    )
+      .bind(subscriptionId)
+      .first<{ id: string }>();
+    if (org) await sendSubscriptionPastDue(env, { organizationId: org.id });
+  }
+
   // Not a platform subscription → this is a family installment plan
   // (enrollment tuition paid monthly). Fixed-length plans aren't
   // first-class in Stripe, so on each paid invoice we:
@@ -520,6 +545,7 @@ async function handlePlatformInvoiceEvent(
       // stripeChargeId-like reuse of stripeCheckoutSessionId is wrong —
       // dedupe rides on the stripe_event ledger instead.
       const feeCents = Math.round((amountPaid * PLATFORM_FEE_BPS) / 10000);
+      const installmentPaymentId = newId();
       await env.DB.prepare(
         `INSERT INTO payment (id, organizationId, enrollmentId, studentId, programPackageId,
                               kind, status, amountCents, currency, platformFeeCents, schoolNetCents,
@@ -528,7 +554,7 @@ async function handlePlatformInvoiceEvent(
          VALUES (?, ?, ?, ?, ?, 'installment_payment', 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
         .bind(
-          newId(),
+          installmentPaymentId,
           plan.organizationId,
           plan.enrollmentId,
           plan.studentId,
@@ -557,6 +583,8 @@ async function handlePlatformInvoiceEvent(
           installment: `${progress.paidInvoices}/${progress.installmentMonths}`,
         },
       });
+      // Receipt for the money that actually landed this month.
+      await sendPaymentReceipt(env, { paymentId: installmentPaymentId });
     }
 
     if (progress.paidInvoices >= progress.installmentMonths) {
@@ -639,6 +667,17 @@ async function handleDispute(env: Env, eventType: string, obj: Record<string, un
       status: disputeStatus,
     },
   });
+
+  // Email the school the moment a dispute OPENS — it's time-sensitive
+  // and they need to gather evidence in Stripe within days.
+  if (eventType === "charge.dispute.created") {
+    await sendDisputeAlert(env, {
+      organizationId: payment.organizationId,
+      amountCents: typeof obj.amount === "number" ? obj.amount : null,
+      reason: obj.reason ? String(obj.reason) : null,
+      disputeId: obj.id ? String(obj.id) : null,
+    });
+  }
 }
 
 /**

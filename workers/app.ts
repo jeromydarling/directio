@@ -5,6 +5,7 @@ import { cronBeatKey } from "../app/lib/cron-specs";
 import { sendDailyDigests } from "../app/lib/daily-digest.server";
 import { sweepExpiredDemos } from "../app/lib/demo-seeder.server";
 import { sendWeeklyDigests } from "../app/lib/weekly-digest.server";
+import { sweepConnectNudges } from "../app/lib/notifications.server";
 import {
   redirectWwwToApex,
   resolveSchoolForHost,
@@ -142,6 +143,15 @@ const handler = {
           const result = await sweepExpiredDemos(env);
           if (result.swept > 0) {
             console.log(`[cron] swept ${result.swept} expired demo org(s)`);
+          }
+          return result;
+        });
+        await beat("connect-nudge", async () => {
+          // Nudge owners who started Stripe Connect but never finished,
+          // so families can actually pay them. Per-org 3-day cap in lib.
+          const result = await sweepConnectNudges(env, Date.now());
+          if (result.nudged > 0) {
+            console.log(`[cron] connect-nudge sent ${result.nudged}`);
           }
           return result;
         });
