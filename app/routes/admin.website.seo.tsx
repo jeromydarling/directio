@@ -1,10 +1,18 @@
 import { useState } from "react";
-import { Link } from "react-router";
+import { Form, Link, data, useNavigation } from "react-router";
 import type { Route } from "./+types/admin.website.seo";
 import { requireTenant } from "~/lib/tenant.server";
 import { defaultSections, type WebsiteSections } from "~/lib/website-generator.server";
 import { auditSchoolSeo, seoSummary, type SeoCheck } from "~/lib/seo-audit.server";
-import { PageHeader, Card, LinkButton } from "~/components/ui";
+import {
+  generateSeoTopics,
+  getSeoTopics,
+  isSeoTopicsAvailable,
+  SeoTopicsUnavailableError,
+  type SeoTopic,
+} from "~/lib/seo-topics.server";
+import { rateLimit } from "~/lib/rate-limit.server";
+import { PageHeader, Card, LinkButton, Button } from "~/components/ui";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Search & discoverability · directio" }];
@@ -103,18 +111,61 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     jurisdiction: org.jurisdiction,
   });
 
+  const cachedTopics = await getSeoTopics(env, orgId);
+
   return {
     checks,
     summary: seoSummary(checks),
     publicSlug: org.publicSlug,
     published: Boolean(org.publicPublishedAt),
+    topics: cachedTopics?.topics ?? [],
+    topicsGeneratedAt: cachedTopics?.generatedAt ?? null,
+    topicsAvailable: isSeoTopicsAvailable(env),
   };
 }
 
-export default function WebsiteSeo({ loaderData }: Route.ComponentProps) {
-  const { checks, summary, publicSlug, published } = loaderData;
+export async function action({ request, context }: Route.ActionArgs) {
+  const tenant = await requireTenant(request, context.cloudflare.env);
+  if (tenant.role !== "owner" && tenant.role !== "admin")
+    return data({ error: "Forbidden" }, { status: 403 });
+  const env = context.cloudflare.env;
+  const form = await request.formData();
+  if (String(form.get("intent")) !== "generate-topics") {
+    return data({ error: "Unknown action." }, { status: 400 });
+  }
+
+  // Cost guard: content-idea generation is a real LLM call.
+  const rl = await rateLimit(env, `seo-topics:${tenant.organization.id}`, {
+    limit: 10,
+    windowSeconds: 3600,
+  });
+  if (!rl.allowed) {
+    return data(
+      { error: "You've refreshed ideas a lot this hour — try again later." },
+      { status: 429 },
+    );
+  }
+
+  try {
+    await generateSeoTopics(env, tenant.organization.id);
+    return data({ ok: true });
+  } catch (err) {
+    if (err instanceof SeoTopicsUnavailableError) {
+      return data({ error: err.message }, { status: 400 });
+    }
+    return data(
+      { error: err instanceof Error ? err.message : "Couldn't generate ideas." },
+      { status: 500 },
+    );
+  }
+}
+
+export default function WebsiteSeo({ loaderData, actionData }: Route.ComponentProps) {
+  const { checks, summary, publicSlug, published, topics, topicsGeneratedAt, topicsAvailable } =
+    loaderData;
   const order: Record<string, number> = { warn: 0, tip: 1, pass: 2 };
   const sorted = [...checks].sort((a, b) => order[a.status] - order[b.status]);
+  const topicsError = actionData && "error" in actionData ? actionData.error : null;
 
   return (
     <div className="flex flex-col gap-8">
@@ -144,11 +195,125 @@ export default function WebsiteSeo({ loaderData }: Route.ComponentProps) {
         ))}
       </div>
 
+      <ContentIdeas
+        topics={topics}
+        generatedAt={topicsGeneratedAt}
+        available={topicsAvailable}
+        error={topicsError}
+      />
+
       <p className="text-xs text-ink-500 dark:text-ink-400">
         This review updates automatically as you edit your site, programs, and
         settings. The ✓ items are handled for you on every published page.
       </p>
     </div>
+  );
+}
+
+function ContentIdeas({
+  topics,
+  generatedAt,
+  available,
+  error,
+}: {
+  topics: SeoTopic[];
+  generatedAt: number | null;
+  available: boolean;
+  error: string | null | undefined;
+}) {
+  const nav = useNavigation();
+  const generating =
+    nav.state !== "idle" && nav.formData?.get("intent") === "generate-topics";
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+            Content ideas
+          </h2>
+          <p className="mt-1 max-w-xl text-sm text-ink-600 dark:text-ink-300">
+            Guides your school could publish to rank for what local families
+            actually search — generated from your state, city, and programs.
+          </p>
+        </div>
+        {available && (topics.length > 0 || generating) && (
+          <Form method="post">
+            <input type="hidden" name="intent" value="generate-topics" />
+            <Button type="submit" variant="secondary" disabled={generating}>
+              {generating ? "Thinking…" : "Refresh ideas"}
+            </Button>
+          </Form>
+        )}
+      </div>
+
+      {error && (
+        <p className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+
+      {!available ? (
+        <Card>
+          <p className="text-sm text-ink-600 dark:text-ink-300">
+            AI content ideas aren't enabled on this deployment.
+          </p>
+        </Card>
+      ) : topics.length === 0 ? (
+        <Card>
+          <div className="flex flex-col items-start gap-3">
+            <p className="text-sm text-ink-600 dark:text-ink-300">
+              Get five ready-to-write topics tailored to your school and area.
+            </p>
+            <Form method="post">
+              <input type="hidden" name="intent" value="generate-topics" />
+              <Button type="submit" disabled={generating}>
+                {generating ? "Generating…" : "Generate ideas"}
+              </Button>
+            </Form>
+          </div>
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {topics.map((t, i) => (
+            <div
+              key={i}
+              className="rounded-2xl border border-ink-200 bg-white p-4 dark:border-ink-800 dark:bg-ink-900"
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600 dark:bg-brand-900/40 dark:text-brand-300"
+                  aria-hidden
+                >
+                  ✎
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-ink-900 dark:text-ink-50">
+                    {t.title}
+                  </p>
+                  {t.rationale && (
+                    <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+                      {t.rationale}
+                    </p>
+                  )}
+                  {t.keyword && (
+                    <span className="mt-2 inline-block rounded-full bg-ink-100 px-2.5 py-0.5 text-xs text-ink-600 dark:bg-ink-800 dark:text-ink-300">
+                      {t.keyword}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          <p className="mt-1 text-xs text-ink-400">
+            Powered by directio AI
+            {generatedAt
+              ? ` · updated ${new Date(generatedAt).toISOString().slice(0, 10)}`
+              : ""}
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
