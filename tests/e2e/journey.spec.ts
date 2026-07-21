@@ -449,3 +449,18 @@ test("14. sign out clears session", async () => {
   // Without a session we should land at /login or marketing.
   expect(page.url()).not.toMatch(/\/admin($|\?|\/[^_])/);
 });
+
+test("15. SEO review page renders the discoverability checklist", async () => {
+  await page.goto("/admin/website/seo");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.locator("body")).toContainText(/discoverability score/i);
+  // The score bar shows an X/100 and at least one grouped tally.
+  await expect(page.locator("body")).toContainText(/done well/i);
+  // Clicking a check row expands its detail.
+  const firstCheck = page.getByRole("button", { expanded: false }).first();
+  if (await firstCheck.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await firstCheck.click();
+  }
+});

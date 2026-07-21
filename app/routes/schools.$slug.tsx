@@ -121,6 +121,24 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     .bind(org.id)
     .all<ProgramRow>();
 
+  // Primary location for local-SEO structured data (PostalAddress in
+  // the JSON-LD below → helps "driving school near me" and map results).
+  const location = await env.DB.prepare(
+    `SELECT addressLine1, addressLine2, city, region, postalCode
+       FROM location
+      WHERE organizationId = ? AND city IS NOT NULL AND city != ''
+      ORDER BY createdAt ASC LIMIT 1`,
+  )
+    .bind(org.id)
+    .first<{
+      addressLine1: string | null;
+      addressLine2: string | null;
+      city: string | null;
+      region: string | null;
+      postalCode: string | null;
+    }>()
+    .catch(() => null);
+
   const url = new URL(request.url);
   const canonical =
     website?.customDomainVerifiedAt && website.customDomain
@@ -134,11 +152,12 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     programs: programs.results,
     signedIn: Boolean(session?.user),
     canonical,
+    location,
   };
 }
 
 export default function PublicSchool({ loaderData }: Route.ComponentProps) {
-  const { org, sections, theme, programs, signedIn, canonical } = loaderData;
+  const { org, sections, theme, programs, signedIn, canonical, location } = loaderData;
   const brand = org.brandColor ?? undefined;
 
   const grouped = new Map<string, ProgramGroup>();
@@ -154,14 +173,33 @@ export default function PublicSchool({ loaderData }: Route.ComponentProps) {
   }
 
   const groupList = [...grouped.values()];
+  const postalAddress = location
+    ? {
+        "@type": "PostalAddress",
+        ...(location.addressLine1
+          ? {
+              streetAddress: [location.addressLine1, location.addressLine2]
+                .filter(Boolean)
+                .join(", "),
+            }
+          : {}),
+        ...(location.city ? { addressLocality: location.city } : {}),
+        ...(location.region ? { addressRegion: location.region } : {}),
+        ...(location.postalCode ? { postalCode: location.postalCode } : {}),
+        addressCountry: "US",
+      }
+    : null;
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "EducationalOrganization",
+    // Driving schools are a recognized LocalBusiness subtype — using it
+    // (alongside EducationalOrganization) unlocks local/map results.
+    "@type": ["EducationalOrganization", "DrivingSchool"],
     name: org.name,
     description: sections.meta?.description ?? sections.hero?.subtitle ?? null,
     url: canonical,
     logo: org.logo,
     image: org.logo,
+    ...(postalAddress ? { address: postalAddress } : {}),
     offers: groupList.flatMap((g) =>
       g.packages.map((pk) => ({
         "@type": "Offer",

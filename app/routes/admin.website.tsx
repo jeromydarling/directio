@@ -520,11 +520,16 @@ export default function AdminWebsite({ loaderData, actionData }: Route.Component
         description="Answer the intake below and we generate a full marketing site for your school. Edit, regenerate, or point your own domain at it."
         tour="admin-website"
         actions={
-          org.publicSlug ? (
-            <LinkButton to={`/schools/${org.publicSlug}`} variant="secondary" external>
-              View live site →
+          <div className="flex items-center gap-2">
+            <LinkButton to="/admin/website/seo" variant="secondary">
+              Search &amp; discoverability
             </LinkButton>
-          ) : undefined
+            {org.publicSlug ? (
+              <LinkButton to={`/schools/${org.publicSlug}`} variant="ghost" external>
+                View live site →
+              </LinkButton>
+            ) : null}
+          </div>
         }
       />
 
