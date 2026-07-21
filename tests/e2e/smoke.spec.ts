@@ -96,6 +96,12 @@ test.describe("API endpoints", () => {
     expect(await llms.text()).toContain("# directio");
   });
 
+  test("/unsubscribe rejects a bad token", async ({ page }) => {
+    // A tampered/absent token must not suppress anyone.
+    await page.goto("/unsubscribe?e=nobody@example.com&c=digest&t=bogus");
+    await expect(page.locator("body")).toContainText(/isn't valid|not valid/i);
+  });
+
   test("/healthz reports ok with cron heartbeats", async ({ request }) => {
     const res = await request.get("/healthz");
     expect(res.status(), "healthz").toBe(200);

@@ -3,6 +3,7 @@ import type { Route } from "./+types/family.certificate.$enrollmentId";
 import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
+import { sendCertificateIssued } from "~/lib/notifications.server";
 
 type CertData = {
   enrollmentId: string;
@@ -146,6 +147,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
       entityId: enrollmentId,
       payload: { serial },
     });
+    await sendCertificateIssued(env, { enrollmentId });
     return redirect(`/family/certificate/${enrollmentId}`);
   }
 

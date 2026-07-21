@@ -5,6 +5,7 @@ import { getSession } from "~/lib/session.server";
 import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
 import { clientIp, rateLimit } from "~/lib/rate-limit.server";
+import { sendEnrollmentConfirmation } from "~/lib/notifications.server";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
@@ -288,6 +289,18 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   });
 
   const checkoutPath = `/me/checkout/${enrollmentId}`;
+
+  // Enrollment confirmation — "you're enrolled, here's what's next."
+  await sendEnrollmentConfirmation(env, {
+    organizationId: org.id,
+    enrollmentId,
+    parentEmail,
+    studentName: `${studentFirst} ${studentLast}`.trim(),
+    programName: pkg.programName,
+    packageName: pkg.packageName,
+    priceCents: pkg.priceCents,
+    checkoutPath,
+  });
 
   // Always email a magic-link sign-in option. For the signed-in and
   // fresh-account paths it's a permanent backup login; for the merged-

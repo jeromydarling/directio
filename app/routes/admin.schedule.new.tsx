@@ -5,6 +5,7 @@ import { requireTenant } from "~/lib/tenant.server";
 import { newId } from "~/lib/ids";
 import { checkSlot, suggestSlots, type SlotProposal } from "~/lib/scheduler";
 import { notifyBoard } from "~/lib/scheduling-board.server";
+import { sendInstructorAssigned } from "~/lib/notifications.server";
 import { PageHeader, Button, LinkButton, Card } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
 
@@ -208,6 +209,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     vehicleId,
     status: "scheduled",
   });
+
+  await sendInstructorAssigned(env, { appointmentId: apptId });
 
   return redirect("/admin/schedule");
 }

@@ -2,6 +2,7 @@ import { Form, data, redirect, useNavigation } from "react-router";
 import type { Route } from "./+types/instructor.practice-log";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
+import { sendPracticeLogSignoff } from "~/lib/notifications.server";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { FormError } from "~/components/form";
 
@@ -118,6 +119,10 @@ export async function action({ request, context }: Route.ActionArgs) {
       entityId: entryId,
       payload: { signedByInstructorId: instructor?.id ?? null },
     });
+    // Only tell the parent on the first sign-off, not on a re-sign.
+    if (!entry.signedAt) {
+      await sendPracticeLogSignoff(env, { entryId });
+    }
     return redirect("/instructor/practice-log");
   }
 

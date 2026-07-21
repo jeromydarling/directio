@@ -7,6 +7,7 @@
 
 import { isEmailConfigured, sendEmail } from "./email.server";
 import { escapeHtml as escape, isoDate, moneyUsd as money } from "./format";
+import { isSuppressed, unsubscribeUrl } from "./email-templates.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -40,12 +41,17 @@ export async function sendDailyDigests(
       continue;
     }
     try {
+      if (await isSuppressed(env, org.dailyDigestRecipientEmail, "digest")) {
+        skipped++;
+        continue;
+      }
       const digest = await computeDigest(env, org.id, now);
+      const unsub = await unsubscribeUrl(env, org.dailyDigestRecipientEmail, "digest");
       await sendEmail(env, {
         to: org.dailyDigestRecipientEmail,
         subject: `${org.name} · daily digest — ${today}`,
-        html: digestHtml(org.name, digest, today),
-        text: digestText(org.name, digest, today),
+        html: digestHtml(org.name, digest, today, unsub),
+        text: digestText(org.name, digest, today, unsub),
       });
       await env.DB.prepare(
         "UPDATE organization SET dailyDigestLastSentOnDate = ? WHERE id = ?",
@@ -143,7 +149,7 @@ async function computeDigest(env: Env, orgId: string, now: number): Promise<Dige
   };
 }
 
-function digestText(name: string, d: Digest, today: string): string {
+function digestText(name: string, d: Digest, today: string, unsubUrl: string): string {
   const lines: string[] = [];
   lines.push(`${name} — daily digest, ${today}`);
   lines.push("");
@@ -158,10 +164,12 @@ function digestText(name: string, d: Digest, today: string): string {
   }
   lines.push("");
   lines.push("Open the full dashboard for more.");
+  lines.push("");
+  lines.push(`Unsubscribe from digests: ${unsubUrl}`);
   return lines.join("\n");
 }
 
-function digestHtml(name: string, d: Digest, today: string): string {
+function digestHtml(name: string, d: Digest, today: string, unsubUrl: string): string {
   const row = (label: string, value: string, tone?: "warn") =>
     `<tr><td style="padding:4px 12px 4px 0;color:#555">${escape(label)}</td><td style="padding:4px 0;font-weight:600;${
       tone === "warn" ? "color:#b1561a" : ""
@@ -183,6 +191,7 @@ function digestHtml(name: string, d: Digest, today: string): string {
     }
   </table>
   <p style="font-size:13px;margin-top:24px;color:#555">Open the full dashboard for more.</p>
+  <p style="font-size:12px;margin-top:16px;color:#9ca3af">You get this because digests are on for ${escape(name)}. <a href="${escape(unsubUrl)}" style="color:#9ca3af">Unsubscribe</a> or manage under Settings → Notifications.</p>
 </body></html>`;
 }
 

@@ -18,6 +18,7 @@
 
 import { isEmailConfigured, sendEmail } from "./email.server";
 import { escapeHtml as escape, isoDate, moneyUsd as money } from "./format";
+import { isSuppressed, unsubscribeUrl } from "./email-templates.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -76,6 +77,11 @@ export async function sendWeeklyDigests(
       continue;
     }
     try {
+      if (await isSuppressed(env, org.dailyDigestRecipientEmail, "digest")) {
+        await stampSent(env, org.id, monday);
+        skipped++;
+        continue;
+      }
       const digest = await computeWeekly(env, org.id, weekStart, weekEnd, now);
       if (!hasSignal(digest)) {
         // Zero-activity week — skip so a quiet org doesn't get a
@@ -86,11 +92,12 @@ export async function sendWeeklyDigests(
         continue;
       }
       const insight = buildInsight(digest);
+      const unsub = await unsubscribeUrl(env, org.dailyDigestRecipientEmail, "digest");
       await sendEmail(env, {
         to: org.dailyDigestRecipientEmail,
         subject: `${org.name} — your week on directio`,
-        html: weeklyHtml(org.name, digest, insight, monday),
-        text: weeklyText(org.name, digest, insight, monday),
+        html: weeklyHtml(org.name, digest, insight, monday, unsub),
+        text: weeklyText(org.name, digest, insight, monday, unsub),
       });
       await stampSent(env, org.id, monday);
       sent++;
@@ -296,6 +303,7 @@ function weeklyText(
   d: Weekly,
   insight: string,
   monday: string,
+  unsubUrl: string,
 ): string {
   const lines: string[] = [];
   lines.push(`${name} — your week on directio (${monday})`);
@@ -316,6 +324,7 @@ function weeklyText(
   lines.push(`This week's move: ${insight}`);
   lines.push("");
   lines.push("Manage this email under Settings → Notifications.");
+  lines.push(`Unsubscribe from digests: ${unsubUrl}`);
   return lines.join("\n");
 }
 
@@ -324,6 +333,7 @@ function weeklyHtml(
   d: Weekly,
   insight: string,
   monday: string,
+  unsubUrl: string,
 ): string {
   const row = (label: string, value: string) =>
     `<tr><td style="padding:6px 14px 6px 0;color:#555">${escape(label)}</td><td style="padding:6px 0;font-weight:600">${escape(value)}</td></tr>`;
@@ -359,7 +369,7 @@ function weeklyHtml(
     <p style="font-size:15px;margin:0;color:#3a2a10">${escape(insight)}</p>
   </div>
 
-  <p style="font-size:12px;color:#888;margin-top:28px">Manage this email under Settings → Notifications.</p>
+  <p style="font-size:12px;color:#888;margin-top:28px">Manage this email under Settings → Notifications, or <a href="${escape(unsubUrl)}" style="color:#888">unsubscribe from digests</a>.</p>
 </body></html>`;
 }
 

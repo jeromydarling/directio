@@ -3,6 +3,7 @@ import type { Route } from "./+types/onboarding";
 import { getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
 import { claimPendingMemberships } from "~/lib/tenant.server";
+import { sendOwnerWelcome } from "~/lib/notifications.server";
 import { AuthShell } from "~/components/auth-shell";
 
 export function meta(_: Route.MetaArgs) {
@@ -81,6 +82,25 @@ export async function action({ request, context }: Route.ActionArgs) {
     response.headers.forEach((value, key) => {
       if (key.toLowerCase() === "set-cookie") headers.append("Set-Cookie", value);
     });
+
+    // Welcome the owner. Look up the org we just created (Better Auth
+    // doesn't return its id in a stable shape) and fire the email.
+    const created = await env.DB.prepare(
+      `SELECT o.id FROM organization o
+         JOIN member m ON m.organizationId = o.id
+        WHERE m.userId = ? AND m.role = 'owner'
+        ORDER BY o.createdAt DESC LIMIT 1`,
+    )
+      .bind(session.user.id)
+      .first<{ id: string }>();
+    if (created && session.user.email) {
+      await sendOwnerWelcome(env, {
+        organizationId: created.id,
+        ownerEmail: session.user.email,
+        orgName: name,
+      });
+    }
+
     return redirect("/admin/onboarding", { headers });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not create school.";

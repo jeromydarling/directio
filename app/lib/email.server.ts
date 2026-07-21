@@ -38,6 +38,7 @@ export async function sendEmail(
     html: string;
     text?: string;
     from?: string;
+    replyTo?: string;
   },
 ): Promise<{ id: string }> {
   if (!isEmailConfigured(env)) throw new EmailNotConfiguredError();
@@ -46,6 +47,12 @@ export async function sendEmail(
   const res = await env.EMAIL.send({
     to: args.to,
     from,
+    // Per-school mail sets replyTo to the school's own contact so a
+    // family replying to a reminder reaches their school, not our
+    // no-reply mailbox. The From domain must stay on godirectio.com
+    // (that's where DKIM/SPF/DMARC are published), so the school's
+    // identity rides in the From display name + this Reply-To.
+    ...(args.replyTo ? { replyTo: args.replyTo } : {}),
     subject: args.subject,
     html: args.html,
     text: args.text ?? stripHtml(args.html),

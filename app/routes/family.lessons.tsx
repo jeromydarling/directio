@@ -4,6 +4,7 @@ import { requireTenant } from "~/lib/tenant.server";
 import { assessLateCancelFee, getFeePolicy } from "~/lib/fees.server";
 import { formatCents, isInsideCancelDeadline } from "~/lib/fees";
 import { recordAudit } from "~/lib/audit.server";
+import { sendLessonCanceled } from "~/lib/notifications.server";
 import { PageHeader, Card, EmptyState, Button } from "~/components/ui";
 import { FormError } from "~/components/form";
 
@@ -141,6 +142,10 @@ export async function action({ request, context }: Route.ActionArgs) {
       entityType: "appointment",
       entityId: appointmentId,
       payload: { feeCents: result.feeCents, isLate: result.isLate },
+    });
+    await sendLessonCanceled(env, {
+      appointmentId,
+      feeCents: result.feeCents,
     });
     return redirect("/family/lessons");
   }
