@@ -112,6 +112,7 @@ export default [
     route("road-tests", "routes/admin.road-tests.tsx"),
     route("state-coverage", "routes/admin.state-coverage.tsx"),
     route("website", "routes/admin.website.tsx"),
+    route("website/seo", "routes/admin.website.seo.tsx"),
     route("settings/cancellation", "routes/admin.settings.cancellation.tsx"),
   ]),
 
