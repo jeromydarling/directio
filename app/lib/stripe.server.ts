@@ -261,6 +261,7 @@ export async function createCheckoutSession(
   for (const [k, v] of Object.entries(args.metadata ?? {})) {
     body[`metadata[${k}]`] = v;
   }
+  body["metadata[satellite_app]"] = "directio";
 
   const res = (await stripeRequest(env, "checkout/sessions", {
     method: "POST",
@@ -486,6 +487,7 @@ export async function createPlatformCheckoutSession(
     success_url: args.successUrl,
     cancel_url: args.cancelUrl,
     "metadata[directio_platform_tier]": args.tier,
+    "metadata[satellite_app]": "directio",
   };
   if (args.customerEmail) body.customer_email = args.customerEmail;
   if (args.organizationId) body["metadata[directio_organization_id]"] = args.organizationId;
