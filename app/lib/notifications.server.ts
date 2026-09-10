@@ -11,6 +11,7 @@
  * send completes.
  */
 
+import { humanizeConnectRequirements, parseRequirementsJson } from "./connect-requirements";
 import { isEmailConfigured, sendEmail } from "./email.server";
 import {
   claimSend,
@@ -634,7 +635,7 @@ export async function sweepConnectNudges(
   // Orgs that started Connect but never finished, created >1 day ago
   // (give them a beat before nudging), not nudged in the last 3 days.
   const rows = await env.DB.prepare(
-    `SELECT id, name, createdAt, connectNudgeLastSentAt
+    `SELECT id, name, createdAt, connectNudgeLastSentAt, stripeRequirementsJson
        FROM organization
       WHERE stripeAccountId IS NOT NULL
         AND stripeChargesEnabled = 0
@@ -644,21 +645,35 @@ export async function sweepConnectNudges(
       LIMIT 200`,
   )
     .bind(now - DAY, now - 3 * DAY)
-    .all<{ id: string; name: string; createdAt: number; connectNudgeLastSentAt: number | null }>();
+    .all<{
+      id: string;
+      name: string;
+      createdAt: number;
+      connectNudgeLastSentAt: number | null;
+      stripeRequirementsJson: string | null;
+    }>();
 
   let nudged = 0;
   for (const org of rows.results) {
     try {
       const owner = await resolveOrgOwner(env, org.id);
       if (!owner) continue;
+      // Tell them exactly what's left, not just "finish setup".
+      const outstanding = humanizeConnectRequirements(parseRequirementsJson(org.stripeRequirementsJson));
       const { html, text } = renderBrandedEmail({
         org: null,
         preheader: `Finish payment setup so ${org.name} can get paid`,
-        heading: "One step left: connect your bank",
+        heading:
+          outstanding.length > 0
+            ? `${outstanding.length === 1 ? "One thing" : `${outstanding.length} things`} left before families can pay you`
+            : "One step left: connect your bank",
         intro: [
           `${org.name} is set up on directio, but payment onboarding isn't finished — until it is, families can't pay you online.`,
-          "It takes about five minutes: Stripe verifies your business and bank so payouts land in your account.",
+          outstanding.length > 0
+            ? "Stripe still needs the items below. It's a couple of minutes, and you pick up right where you left off."
+            : "It takes about five minutes: Stripe verifies your business and bank so payouts land in your account.",
         ],
+        rows: outstanding.map((label) => ({ label: "☐", value: label })),
         cta: { url: `${appUrl(env)}/admin/settings/payments`, label: "Finish payment setup" },
         footerNote: "Already done it? It can take a few minutes for Stripe to confirm — you can ignore this.",
       });

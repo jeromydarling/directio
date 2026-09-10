@@ -5,7 +5,9 @@ import {
   PLATFORM_FEE_BPS,
   cancelSubscription,
   getInstallmentProgress,
+  shapeAccountStatus,
 } from "~/lib/stripe.server";
+import { applyConnectStatus } from "~/lib/connect.server";
 import { appendLedgerEntry } from "~/lib/translation.server";
 import {
   sendDisputeAlert,
@@ -329,54 +331,17 @@ async function handlePaymentIntentSucceeded(env: Env, obj: Record<string, unknow
 
 async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
   const accountId = String(obj.id ?? "");
-  const chargesEnabled = Boolean(obj.charges_enabled);
-  const payoutsEnabled = Boolean(obj.payouts_enabled);
-  const detailsSubmitted = Boolean(obj.details_submitted);
-  const newStatus = chargesEnabled && payoutsEnabled ? "active" : detailsSubmitted ? "restricted" : "pending";
-
-  // Only audit real transitions — account.updated fires for lots of
-  // non-status reasons and we don't want audit noise.
-  const before = await env.DB.prepare(
-    "SELECT id, stripeAccountStatus FROM organization WHERE stripeAccountId = ? LIMIT 1",
-  )
-    .bind(accountId)
-    .first<{ id: string; stripeAccountStatus: string | null }>();
-
-  await env.DB.prepare(
-    `UPDATE organization
-        SET stripeAccountStatus = ?,
-            stripeChargesEnabled = ?,
-            stripePayoutsEnabled = ?,
-            stripeDetailsSubmitted = ?,
-            stripeUpdatedAt = ?
-      WHERE stripeAccountId = ?`,
-  )
-    .bind(
-      newStatus,
-      chargesEnabled ? 1 : 0,
-      payoutsEnabled ? 1 : 0,
-      detailsSubmitted ? 1 : 0,
-      Date.now(),
-      accountId,
-    )
-    .run();
-
-  if (before && before.stripeAccountStatus !== newStatus) {
-    await recordAudit(env, {
-      organizationId: before.id,
-      actorUserId: null,
-      action: "stripe.account_status_changed",
-      entityType: "organization",
-      entityId: before.id,
-      payload: {
-        from: before.stripeAccountStatus,
-        to: newStatus,
-        chargesEnabled,
-        payoutsEnabled,
-        detailsSubmitted,
-      },
-    });
-  }
+  if (!accountId) return;
+  // Shared writer with the payments page — status, currently_due,
+  // deadline, and disabled_reason all land in one UPDATE; audits only
+  // real status transitions (account.updated fires for lots of
+  // non-status reasons and we don't want audit noise).
+  await applyConnectStatus(env, {
+    accountId,
+    account: shapeAccountStatus(obj),
+    actorUserId: null,
+    source: "webhook",
+  });
 }
 
 /**
