@@ -33,10 +33,36 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       : role.role === "parent" ? "/family" : "/me";
   }
 
+  // Live view of each state's rule pack: a published research pass can
+  // raise a state's level above the static table, and its verification
+  // date is the one that's actually true. Tolerates the table not
+  // having the new columns yet (pre-migration deploy window).
+  const dbMaturity: Record<string, { level: 1 | 2 | 3; lastVerifiedAt: string | null; researched: boolean }> = {};
+  try {
+    const packs = await env.DB.prepare(
+      `SELECT rp.jurisdiction, rp.maturity, rp.lastVerifiedAt,
+              (SELECT v.draftedBy FROM rule_pack_version v
+                WHERE v.rulePackId = rp.id AND v.reviewStatus = 'published'
+                ORDER BY v.publishedAt DESC LIMIT 1) AS draftedBy
+         FROM rule_pack rp`,
+    ).all<{ jurisdiction: string; maturity: string; lastVerifiedAt: number | null; draftedBy: string | null }>();
+    for (const p of packs.results) {
+      const code = p.jurisdiction.replace(/^US-/, "");
+      dbMaturity[code] = {
+        level: levelFromMaturityString(p.maturity),
+        lastVerifiedAt: p.lastVerifiedAt ? new Date(p.lastVerifiedAt).toISOString().slice(0, 10) : null,
+        researched: p.draftedBy === "ai" || p.draftedBy === "human",
+      };
+    }
+  } catch {
+    // Static table only.
+  }
+
   return {
     appEnv: env.APP_ENV ?? "unknown",
     signedIn: Boolean(session?.user),
     destination,
+    dbMaturity,
   };
 }
 
@@ -81,7 +107,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   return data({ submitted: contactEmail });
 }
 
-import { STATE_LABEL, STATE_MATURITY } from "~/lib/state-coverage";
+import { STATE_LABEL, STATE_MATURITY, levelFromMaturityString } from "~/lib/state-coverage";
 
 // Maturity levels per state — read from the shared lib so the public
 // coverage page and the per-school settings card never drift.
@@ -89,22 +115,27 @@ const MATURITY = STATE_MATURITY;
 
 export default function States({ loaderData, actionData }: Route.ComponentProps) {
   const dest = loaderData.destination ?? "/signup";
+  const dbMaturity = loaderData.dbMaturity ?? {};
 
   // Only states with an explicit STATE_MATURITY entry count as "active"
   // coverage. Everything else falls into the design-partner bucket so
   // the page doesn't oversell what's modeled. Sort by maturity desc
-  // then name so MN leads, then Level 2s, then Level 1s.
+  // then name so MN leads, then Level 2s, then Level 1s. The database
+  // (published research passes) can raise a level, never lower it.
   const enriched = Object.entries(MATURITY)
     .filter(([code]) => STATE_LABEL[code])
-    .map(([code, m]) => ({
-      code,
-      name: STATE_LABEL[code]!,
-      level: m.level,
-      credentialLabel: m.credentialLabel,
-      note: m.note,
-      lastVerifiedAt: m.lastVerifiedAt,
-      legalBlocker: m.legalBlocker,
-    }))
+    .map(([code, m]) => {
+      const db = dbMaturity[code];
+      return {
+        code,
+        name: STATE_LABEL[code]!,
+        level: (db && db.level > m.level ? db.level : m.level) as 1 | 2 | 3,
+        credentialLabel: m.credentialLabel,
+        note: m.note,
+        lastVerifiedAt: db?.lastVerifiedAt ?? m.lastVerifiedAt,
+        legalBlocker: m.legalBlocker,
+      };
+    })
     .sort((a, b) =>
       b.level - a.level !== 0 ? b.level - a.level : a.name.localeCompare(b.name),
     );

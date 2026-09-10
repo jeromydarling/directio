@@ -12,6 +12,7 @@ import {
   shouldPassThrough,
 } from "../app/lib/host-resolution.server";
 import { runBtwReminderSweep } from "../app/lib/reminders.server";
+import { sweepRulePackDrafts } from "../app/lib/rule-pack-draft.server";
 import { runStateChangeMonitor } from "../app/lib/state-monitor.server";
 import { captureTestInbox } from "../app/lib/test-inbox.server";
 
@@ -152,6 +153,18 @@ const handler = {
           const result = await sweepConnectNudges(env, Date.now());
           if (result.nudged > 0) {
             console.log(`[cron] connect-nudge sent ${result.nudged}`);
+          }
+          return result;
+        });
+        await beat("rule-pack-draft", async () => {
+          // AI research pass over state rule packs, a few states per
+          // hour, most-schools-first. Drafts land in /super/states for
+          // review; nothing a school sees changes until published.
+          const result = await sweepRulePackDrafts(env, Date.now(), { batchSize: 3 });
+          if (result.drafted.length > 0 || result.failed.length > 0) {
+            console.log(
+              `[cron] rule-pack-draft drafted=${result.drafted.join(",") || "-"} failed=${result.failed.join(",") || "-"}`,
+            );
           }
           return result;
         });

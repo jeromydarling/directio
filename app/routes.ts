@@ -140,6 +140,9 @@ export default [
     route("map", "routes/super.map.tsx"),
     route("comms", "routes/super.comms.tsx"),
     route("system", "routes/super.system.tsx"),
+    route("states", "routes/super.states.tsx"),
+    route("states/:code", "routes/super.states.$code.tsx"),
+    route("state-audits", "routes/super.state-audits.tsx"),
   ]),
 
   route("me", "routes/me.tsx", [

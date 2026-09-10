@@ -3,12 +3,10 @@ import type { Route } from "./+types/admin._onboarding";
 import { requireTenant } from "~/lib/tenant.server";
 import { recordAudit } from "~/lib/audit.server";
 import { PageHeader, Card, LinkButton, Button } from "~/components/ui";
-import {
-  MATURITY_LABEL,
-  maturityForJurisdiction,
-  whatWeHandle,
-  whatYouStillDo,
-} from "~/lib/state-coverage";
+import { Field, FormError, Select } from "~/components/form";
+import { MATURITY_LABEL, STATE_LABEL, whatWeHandle, whatYouStillDo } from "~/lib/state-coverage";
+import { STATE_CODES, codeToJurisdiction } from "~/lib/rule-pack";
+import { resolveMaturity } from "~/lib/rules.server";
 
 type OrgRow = {
   id: string;
@@ -26,6 +24,7 @@ type OnboardingState = {
   branding?: boolean;
   jurisdictionPack?: boolean;
   stripe?: boolean;
+  rules?: boolean;
   import?: boolean;
   team?: boolean;
   btwFlow?: boolean;
@@ -83,7 +82,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .first<{ n: number }>();
   state.btwFlow ||= (btwStepsCount?.n ?? 0) > 0;
 
-  const adapter = maturityForJurisdiction(org.jurisdiction);
+  const profile = await db
+    .prepare("SELECT completedAt FROM school_rule_profile WHERE organizationId = ?")
+    .bind(tenant.organization.id)
+    .first<{ completedAt: number | null }>()
+    .catch(() => null);
+  state.rules ||= Boolean(profile?.completedAt);
+
+  const adapter = await resolveMaturity(context.cloudflare.env, org.jurisdiction);
   return { org, state, adapter };
 }
 
@@ -94,6 +100,22 @@ export async function action({ request, context }: Route.ActionArgs) {
   const env = context.cloudflare.env;
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
+  if (intent === "set-jurisdiction") {
+    const code = String(formData.get("stateCode") ?? "").toUpperCase().trim();
+    if (!STATE_CODES.includes(code)) return data({ error: "Pick your state." }, { status: 400 });
+    await env.DB.prepare("UPDATE organization SET jurisdiction = ? WHERE id = ?")
+      .bind(codeToJurisdiction(code), tenant.organization.id)
+      .run();
+    await recordAudit(env, {
+      organizationId: tenant.organization.id,
+      actorUserId: tenant.user.id,
+      action: "organization.jurisdiction_set",
+      entityType: "organization",
+      entityId: tenant.organization.id,
+      payload: { jurisdiction: codeToJurisdiction(code) },
+    });
+    return redirect("/admin/onboarding");
+  }
   if (intent === "mark-done") {
     await env.DB.prepare(
       "UPDATE organization SET onboardingCompletedAt = ? WHERE id = ?",
@@ -129,11 +151,13 @@ const STEPS: Array<{
     cta: "Connect Stripe · 5 min",
   },
   {
-    key: "branding",
-    title: "Make it yours",
-    body: "Add your school's name, colors, and (optional) logo so families recognize you in the portal.",
-    to: "/admin/settings",
-    cta: "Open settings",
+    // Second on purpose: the state's numbers drive the curriculum
+    // overlay, the credential label, and every "what happens next".
+    key: "rules",
+    title: "Confirm your state's rules",
+    body: "We pre-filled the hours, credential, and agency our research says your state requires. Confirm or correct them and set what your school requires on top. About three minutes.",
+    to: "/admin/state-coverage",
+    cta: "Review rules",
   },
   {
     key: "jurisdictionPack",
@@ -141,6 +165,13 @@ const STEPS: Array<{
     body: "Pick your state's overlay so lessons use the right hours, agency names, and credential terminology.",
     to: "/admin/library",
     cta: "Browse packs",
+  },
+  {
+    key: "branding",
+    title: "Make it yours",
+    body: "Add your school's name, colors, and (optional) logo so families recognize you in the portal.",
+    to: "/admin/settings",
+    cta: "Open settings",
   },
   {
     key: "team",
@@ -165,10 +196,11 @@ const STEPS: Array<{
   },
 ];
 
-export default function OnboardingChecklist({ loaderData }: Route.ComponentProps) {
+export default function OnboardingChecklist({ loaderData, actionData }: Route.ComponentProps) {
   const { org, state, adapter } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
+  const error = actionData && "error" in actionData ? actionData.error : null;
   const completed = STEPS.filter((s) => state[s.key]).length;
   const total = STEPS.length;
   const pct = Math.round((completed / total) * 100);
@@ -195,6 +227,38 @@ export default function OnboardingChecklist({ loaderData }: Route.ComponentProps
           )
         }
       />
+
+      <FormError message={error} />
+
+      {!org.jurisdiction && (
+        <Card className="border-brand-300 bg-brand-50/40 dark:border-brand-700 dark:bg-brand-950/20">
+          <p className="text-sm font-semibold text-ink-900 dark:text-ink-50">
+            Which state is your school in?
+          </p>
+          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+            This sets your hours, credential, and agency rules — and which curriculum overlay we
+            offer you.
+          </p>
+          <Form method="post" className="mt-3 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="intent" value="set-jurisdiction" />
+            <Field label="State">
+              <Select name="stateCode" required defaultValue="">
+                <option value="" disabled>
+                  Choose a state
+                </option>
+                {STATE_CODES.map((c) => (
+                  <option key={c} value={c}>
+                    {STATE_LABEL[c]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button type="submit" disabled={submitting}>
+              Save state
+            </Button>
+          </Form>
+        </Card>
+      )}
 
       {adapter && (
         <Card>
