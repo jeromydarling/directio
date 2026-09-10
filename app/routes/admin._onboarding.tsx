@@ -120,6 +120,15 @@ const STEPS: Array<{
   cta: string;
 }> = [
   {
+    // First on purpose: getting paid is the activation event. A school
+    // that can take a payment on day one is a school that stays.
+    key: "stripe",
+    title: "Get paid online",
+    body: "Connect Stripe so families can pay in full, monthly, or with Affirm/Klarna. About 5 minutes — have your EIN (or SSN last 4) and a bank account handy. You can start charging before the rest of this list is done.",
+    to: "/admin/settings/payments",
+    cta: "Connect Stripe · 5 min",
+  },
+  {
     key: "branding",
     title: "Make it yours",
     body: "Add your school's name, colors, and (optional) logo so families recognize you in the portal.",
@@ -153,13 +162,6 @@ const STEPS: Array<{
     body: "Paste or upload your existing roster. AI will normalize the columns; you review before anything's saved.",
     to: "/admin/import",
     cta: "Import students",
-  },
-  {
-    key: "stripe",
-    title: "Connect Stripe (optional)",
-    body: "Enable online payments. Families can pay in full, monthly, or with Affirm/Klarna. You can do this later.",
-    to: "/admin/settings/payments",
-    cta: "Connect Stripe",
   },
 ];
 

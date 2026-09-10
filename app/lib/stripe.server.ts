@@ -94,24 +94,55 @@ export function platformFeeCentsFor(amountCents: number): number {
 }
 
 /**
+ * Merchant Category Code for driving schools. 8299 = "Schools and
+ * Educational Services (Not Elsewhere Classified)" — the code Stripe's
+ * own risk team expects for driver ed. Prefilling it removes the
+ * "what does your business do?" picker from Express onboarding.
+ */
+export const CONNECT_MCC_DRIVING_SCHOOL = "8299";
+
+/**
  * Create a Connect Express account for a school.
  * Returns the new account id; persist it on organization.stripeAccountId.
+ *
+ * Everything we already know about the school is prefilled so the
+ * owner isn't retyping it into Stripe's form: name, what they sell,
+ * MCC, public URL, support email, country. Stripe still collects the
+ * things only they can provide (legal entity, DOB/SSN or EIN, bank).
  */
 export async function createConnectAccount(
   env: Env,
-  args: { organizationId: string; orgName: string; email: string },
+  args: {
+    organizationId: string;
+    orgName: string;
+    email: string;
+    /** Public school page, e.g. https://godirectio.com/schools/<slug>. */
+    publicUrl?: string | null;
+    /** Where families should reach the school. Defaults to `email`. */
+    supportEmail?: string | null;
+  },
 ): Promise<{ accountId: string }> {
+  const body: Record<string, string> = {
+    type: "express",
+    country: "US",
+    "capabilities[transfers][requested]": "true",
+    "capabilities[card_payments][requested]": "true",
+    "business_profile[name]": args.orgName,
+    "business_profile[product_description]":
+      "Driver education: classroom courses, behind-the-wheel lessons, and road-test prep for teen and adult students.",
+    "business_profile[mcc]": CONNECT_MCC_DRIVING_SCHOOL,
+    "business_profile[support_email]": args.supportEmail || args.email,
+    email: args.email,
+    "metadata[directio_organization_id]": args.organizationId,
+    "metadata[satellite_app]": "directio",
+  };
+  if (args.publicUrl) {
+    body["business_profile[url]"] = args.publicUrl;
+    body["business_profile[support_url]"] = args.publicUrl;
+  }
   const res = (await stripeRequest(env, "accounts", {
     method: "POST",
-    body: {
-      type: "express",
-      "capabilities[transfers][requested]": "true",
-      "capabilities[card_payments][requested]": "true",
-      "business_profile[name]": args.orgName,
-      "business_profile[product_description]": "Driver education enrollments and lessons",
-      email: args.email,
-      "metadata[directio_organization_id]": args.organizationId,
-    },
+    body,
     // One Connect account per org — a double-submitted onboarding form
     // must not create two.
     idempotencyKey: `connect-account-${args.organizationId}`,
@@ -123,6 +154,13 @@ export async function createConnectAccount(
  * Create an Account Link the school visits to fill out KYC + bank
  * info. Stripe redirects them back to `returnUrl` when done (or
  * back to `refreshUrl` if the link expires).
+ *
+ * `collection_options` asks Stripe for ONLY what's needed to start
+ * charging today (`currently_due`), deferring the volume-threshold
+ * and future-dated items Stripe would otherwise front-load. That's
+ * the single biggest cut to the onboarding form — schools can take
+ * their first payment in ~5 minutes and Stripe asks for the rest
+ * later, in an email, when it actually matters.
  */
 export async function createAccountLink(
   env: Env,
@@ -135,9 +173,54 @@ export async function createAccountLink(
       type: "account_onboarding",
       return_url: args.returnUrl,
       refresh_url: args.refreshUrl,
+      "collection_options[fields]": "currently_due",
+      "collection_options[future_requirements]": "omit",
     },
   })) as { url: string };
   return { url: res.url };
+}
+
+export type ConnectAccountStatus = {
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  requirementsCurrentlyDue: string[];
+  /** Epoch ms, or null when Stripe hasn't set a deadline. */
+  requirementsDeadline: number | null;
+  /** e.g. 'requirements.past_due', 'rejected.fraud'; null when enabled. */
+  disabledReason: string | null;
+};
+
+/**
+ * Shape a raw Stripe Account object (from GET /v1/accounts/:id or an
+ * account.updated webhook) into the fields we persist. Shared so the
+ * payments page and the webhook can't drift on what "status" means.
+ */
+export function shapeAccountStatus(obj: Record<string, unknown>): ConnectAccountStatus {
+  const req = (obj.requirements ?? {}) as {
+    currently_due?: unknown;
+    current_deadline?: unknown;
+    disabled_reason?: unknown;
+  };
+  const currentlyDue = Array.isArray(req.currently_due)
+    ? req.currently_due.filter((x): x is string => typeof x === "string")
+    : [];
+  return {
+    chargesEnabled: Boolean(obj.charges_enabled),
+    payoutsEnabled: Boolean(obj.payouts_enabled),
+    detailsSubmitted: Boolean(obj.details_submitted),
+    requirementsCurrentlyDue: currentlyDue,
+    requirementsDeadline:
+      typeof req.current_deadline === "number" ? req.current_deadline * 1000 : null,
+    disabledReason: typeof req.disabled_reason === "string" ? req.disabled_reason : null,
+  };
+}
+
+/** Our four-state summary of a Connect account, as stored on organization. */
+export function deriveAccountStatus(
+  s: Pick<ConnectAccountStatus, "chargesEnabled" | "payoutsEnabled" | "detailsSubmitted">,
+): "active" | "restricted" | "pending" {
+  return s.chargesEnabled && s.payoutsEnabled ? "active" : s.detailsSubmitted ? "restricted" : "pending";
 }
 
 /**
@@ -147,24 +230,9 @@ export async function createAccountLink(
 export async function fetchAccountStatus(
   env: Env,
   accountId: string,
-): Promise<{
-  chargesEnabled: boolean;
-  payoutsEnabled: boolean;
-  detailsSubmitted: boolean;
-  requirementsCurrentlyDue: string[];
-}> {
-  const res = (await stripeRequest(env, `accounts/${accountId}`)) as {
-    charges_enabled: boolean;
-    payouts_enabled: boolean;
-    details_submitted: boolean;
-    requirements?: { currently_due?: string[] };
-  };
-  return {
-    chargesEnabled: Boolean(res.charges_enabled),
-    payoutsEnabled: Boolean(res.payouts_enabled),
-    detailsSubmitted: Boolean(res.details_submitted),
-    requirementsCurrentlyDue: res.requirements?.currently_due ?? [],
-  };
+): Promise<ConnectAccountStatus> {
+  const res = (await stripeRequest(env, `accounts/${accountId}`)) as Record<string, unknown>;
+  return shapeAccountStatus(res);
 }
 
 export type PaymentOption = "one_time" | "installment_subscription" | "bnpl";
