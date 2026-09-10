@@ -86,3 +86,25 @@ curl -X POST https://godirectio.com/api/admin/purge-user \
 ```
 Only `e2e+` / `demo+` prefixed accounts can be purged — real customer
 accounts are refused regardless of token.
+
+## State rules co-build (rule packs)
+
+Two halves, one system. **(a)** The hourly `rule-pack-draft` cron runs
+an AI research pass over up to 3 states per run (most-schools-first,
+re-drafting after 90 days) using the state knowledge base (AI Search),
+tracked agency pages, the seeded overlay lessons, and schools' field
+reports. Drafts land as `rule_pack_version` rows with
+`reviewStatus='pending'` — nothing a school sees changes until a
+platform admin publishes from `/super/states/:code` (which also sets
+`rule_pack.maturity` + `lastVerifiedAt`). **(b)** Schools confirm or
+correct their state's numbers at `/admin/state-coverage`; their
+targets become `organization_rule_override` rows (school-scoped), their
+corrections become `rule_pack_field_report` rows the reviewer sees next
+to the draft.
+
+- Overview + "draft next 2 states now": `/super/states`.
+- Drafting is off when `ANTHROPIC_API_KEY` is unset; a failed state
+  backs off 6h via KV `rpdraft:fail:<CODE>`.
+- A school with no `organization.jurisdiction` gets a state picker on
+  `/admin/onboarding` and `/admin/state-coverage`; signup now requires it.
+- Workflow audits (structured diffs) moved to `/super/state-audits`.

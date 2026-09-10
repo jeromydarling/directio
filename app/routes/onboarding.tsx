@@ -4,6 +4,8 @@ import { getAuth } from "~/lib/auth.server";
 import { getSession } from "~/lib/session.server";
 import { claimPendingMemberships } from "~/lib/tenant.server";
 import { sendOwnerWelcome } from "~/lib/notifications.server";
+import { STATE_CODES, codeToJurisdiction } from "~/lib/rule-pack";
+import { STATE_LABEL } from "~/lib/state-coverage";
 import { AuthShell } from "~/components/auth-shell";
 
 export function meta(_: Route.MetaArgs) {
@@ -55,9 +57,13 @@ export async function action({ request, context }: Route.ActionArgs) {
   const formData = await request.formData();
   const name = String(formData.get("name") ?? "").trim();
   const slug = slugify(String(formData.get("slug") ?? name));
+  const stateCode = String(formData.get("stateCode") ?? "").trim().toUpperCase();
 
   if (!name || !slug) {
     return data({ error: "School name is required." }, { status: 400 });
+  }
+  if (!STATE_CODES.includes(stateCode)) {
+    return data({ error: "Pick the state your school operates in." }, { status: 400 });
   }
 
   const auth = getAuth(env);
@@ -93,6 +99,14 @@ export async function action({ request, context }: Route.ActionArgs) {
     )
       .bind(session.user.id)
       .first<{ id: string }>();
+    // The state drives everything downstream — rule pack, curriculum
+    // overlay, credential label, onboarding disclosures. Set it now so
+    // the school never lands on a page that can't resolve its adapter.
+    if (created) {
+      await env.DB.prepare("UPDATE organization SET jurisdiction = ? WHERE id = ?")
+        .bind(codeToJurisdiction(stateCode), created.id)
+        .run();
+    }
     if (created && session.user.email) {
       await sendOwnerWelcome(env, {
         organizationId: created.id,
@@ -129,6 +143,27 @@ export default function Onboarding({ actionData }: Route.ComponentProps) {
             placeholder="Arrowhead Driver Training"
             className="rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-base text-ink-900 shadow-sm transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/60 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-50 dark:focus:border-brand-500 dark:focus:ring-brand-900/50"
           />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-ink-800 dark:text-ink-200">State</span>
+          <select
+            name="stateCode"
+            required
+            defaultValue=""
+            className="rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-base text-ink-900 shadow-sm transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/60 dark:border-ink-800 dark:bg-ink-900/40 dark:text-ink-50 dark:focus:border-brand-500 dark:focus:ring-brand-900/50"
+          >
+            <option value="" disabled>
+              Where your school operates
+            </option>
+            {STATE_CODES.map((c) => (
+              <option key={c} value={c}>
+                {STATE_LABEL[c]}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-ink-500 dark:text-ink-400">
+            Sets your hours, credential, and agency rules. You'll confirm them next.
+          </span>
         </label>
         {actionData && "error" in actionData && actionData.error && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">

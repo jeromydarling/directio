@@ -6,12 +6,8 @@ import { newId } from "~/lib/ids";
 import { recordAudit } from "~/lib/audit.server";
 import { PageHeader, Card, EmptyState, Button, LinkButton } from "~/components/ui";
 import { Field, FormError, Select, TextInput } from "~/components/form";
-import {
-  MATURITY_LABEL,
-  maturityForJurisdiction,
-  whatWeHandle,
-  whatYouStillDo,
-} from "~/lib/state-coverage";
+import { MATURITY_LABEL, whatWeHandle, whatYouStillDo } from "~/lib/state-coverage";
+import { resolveMaturity } from "~/lib/rules.server";
 
 type RulePackOption = {
   versionId: string;
@@ -110,7 +106,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       requireAudioCompletionBeforeQuiz: number;
     }>();
   const installedJurisdiction = installed.results[0]?.jurisdiction ?? null;
-  const adapter = maturityForJurisdiction(
+  const adapter = await resolveMaturity(
+    context.cloudflare.env,
     orgRow?.jurisdiction ?? installedJurisdiction,
   );
 
@@ -471,9 +468,12 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
                   </p>
                 )}
               </div>
-              <LinkButton to="/states" variant="ghost">
-                All states →
-              </LinkButton>
+              <div className="flex flex-wrap items-center gap-2">
+                <LinkButton to="/admin/state-coverage">Confirm your rules →</LinkButton>
+                <LinkButton to="/states" variant="ghost">
+                  All states
+                </LinkButton>
+              </div>
             </div>
 
             {adapter.maturity.legalBlocker && (

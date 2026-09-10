@@ -84,6 +84,21 @@ test.describe("public marketing", () => {
   });
 });
 
+test.describe("state rules co-build", () => {
+  test("demo owner sees their state's pre-filled rules questionnaire", async ({ page }) => {
+    await page.goto("/demo/skip?as=owner&state=OH");
+    await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({
+      timeout: 20_000,
+    });
+    const res = await page.goto("/admin/state-coverage");
+    expect(res?.status(), "state-coverage HTTP").toBeLessThan(400);
+    await expect(page.getByRole("heading", { level: 1 }).first()).toContainText(/Ohio/);
+    // The questionnaire is pre-filled from the published OH pack.
+    await expect(page.locator("body")).toContainText(/Classroom hours/i);
+    await expect(page.getByRole("button", { name: /save my school's rules/i })).toBeVisible();
+  });
+});
+
 test.describe("API endpoints", () => {
   test("/robots.txt, /sitemap.xml, /llms.txt respond", async ({ request }) => {
     const robots = await request.get("/robots.txt");

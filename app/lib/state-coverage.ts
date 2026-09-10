@@ -372,6 +372,38 @@ export const MATURITY_LABEL: Record<1 | 2 | 3, string> = {
   3: "Electronic submission",
 };
 
+/** rule_pack.maturity ('level1' | 'level2' | 'level3') → numeric level. */
+export function levelFromMaturityString(s: string | null | undefined): 1 | 2 | 3 {
+  if (s === "level3") return 3;
+  if (s === "level2") return 2;
+  return 1;
+}
+
+/**
+ * Merge the static table above with what the database says about the
+ * state's rule pack. The DB wins on level (a published Level-2 pack
+ * upgrades a static Level-1 entry) and on verification date (a
+ * research pass reviewed last week beats a hand-typed date); the static
+ * entry keeps supplying the legal-blocker disclosure and the note.
+ */
+export function mergeMaturity(
+  base: AdapterMaturity,
+  db: { maturity: string | null; lastVerifiedAt: number | null; credentialLabel?: string | null } | null,
+): AdapterMaturity {
+  if (!db) return base;
+  const dbLevel = levelFromMaturityString(db.maturity);
+  const level = (dbLevel > base.level ? dbLevel : base.level) as 1 | 2 | 3;
+  const lastVerifiedAt = db.lastVerifiedAt
+    ? new Date(db.lastVerifiedAt).toISOString().slice(0, 10)
+    : base.lastVerifiedAt;
+  return {
+    ...base,
+    level,
+    lastVerifiedAt,
+    credentialLabel: db.credentialLabel || base.credentialLabel,
+  };
+}
+
 /**
  * Resolve a jurisdiction string (the organization.jurisdiction column,
  * shaped like 'US-MN' or sometimes a bare two-letter code) to the
