@@ -40,12 +40,27 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     return redirect("/demo");
   }
 
-  const rl = await rateLimit(env, `demo-skip:${clientIp(request)}`, {
-    limit: 5,
-    windowSeconds: 3600,
-  });
-  if (!rl.allowed) {
-    return redirect("/demo?limited=1");
+  // CI bypass: the e2e suite creates a demo org per test (×retries,
+  // ×2 projects) from one runner IP. A request carrying the purge
+  // token — already a shared secret between the Worker and the e2e
+  // workflow — skips the per-IP limit. Never trusted when the secret
+  // is unset or still the placeholder.
+  const purgeToken: string = env.E2E_PURGE_TOKEN ?? "";
+  const e2eHeader = request.headers.get("x-directio-e2e") ?? "";
+  const ciBypass =
+    Boolean(purgeToken) && !purgeToken.startsWith("set-") && e2eHeader === purgeToken;
+
+  if (!ciBypass) {
+    // 30/hour per IP: enough for a human clicking around several
+    // roles/states, still a hard ceiling on demo-org creation. Each
+    // org is swept by the demo-sweep cron when it expires.
+    const rl = await rateLimit(env, `demo-skip:${clientIp(request)}`, {
+      limit: 30,
+      windowSeconds: 3600,
+    });
+    if (!rl.allowed) {
+      return redirect("/demo?limited=1");
+    }
   }
 
   const as = (url.searchParams.get("as") ?? "owner").toLowerCase();

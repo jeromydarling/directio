@@ -14,6 +14,13 @@ export default defineConfig({
 
   use: {
     baseURL: BASE_URL,
+    // /demo/skip is rate-limited per IP; the suite creates a demo org
+    // per test (×retries, ×2 projects). The purge token doubles as a
+    // CI bypass so the runner's IP isn't bounced to /demo?limited=1
+    // mid-suite. Unset locally → no header → normal limits apply.
+    extraHTTPHeaders: process.env.E2E_PURGE_TOKEN
+      ? { "x-directio-e2e": process.env.E2E_PURGE_TOKEN }
+      : {},
     // Reduced-motion collapses framer/CSS animations to instant, kills a
     // class of "element unstable" flake. App CSS honors @media
     // (prefers-reduced-motion: reduce) at app/app.css:252.
