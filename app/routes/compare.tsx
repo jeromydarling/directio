@@ -57,7 +57,7 @@ const ROWS: { section: string; rows: Row[] }[] = [
       {
         feature: "Starting price",
         cells: {
-          directio: "$0/mo + 2%",
+          directio: "$0/mo + 2.5% (max $15/student)",
           DriveScout: "$50/seat/mo, 5-seat min",
           Teachworks: "$16/mo + $0.32/lesson",
           "Drivers Ed Solutions": "$150/mo × 4–8 mo term",
@@ -419,7 +419,7 @@ const TCO_ROWS: TcoRow[] = [
     vendor: "Spreadsheets + Stripe + Acuity",
     base: "~$960 (Acuity + Mailchimp + Twilio)",
     perStudent: "—",
-    payments: "2.9% + 30¢",
+    payments: "At cost — bank 0.8% (max $5), card 2.9% + 30¢",
     setup: "$0",
     y1: "~$960",
     notes: "Zero compliance, zero credential workflow, you build it.",

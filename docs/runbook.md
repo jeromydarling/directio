@@ -108,3 +108,31 @@ to the draft.
 - A school with no `organization.jurisdiction` gets a state picker on
   `/admin/onboarding` and `/admin/state-coverage`; signup now requires it.
 - Workflow audits (structured diffs) moved to `/super/state-audits`.
+
+## Fees: platform fee + processing pass-through
+
+Model (app/lib/platform-fees.ts — shared with the /pricing calculator): directio
+takes 2.5% of each payment capped at $15 per student; Stripe's
+processing fee passes through to the school at cost. On destination
+charges the PLATFORM pays Stripe's fee, so the application fee =
+platform fee + an up-front estimate for the most expensive method the
+checkout allows (card, or BNPL on BNPL checkouts). After settlement
+`fee-reconcile.server.ts` reads the actual fee off the charge's
+balance transaction and transfers the difference back to the school
+(`source_transaction` = the charge), recording actual/rebate on the
+payment row. Refunds return only directio's share of the application
+fee (`refund_application_fee=false` + a proportional application-fee
+refund); Stripe keeps its processing fee, so the school bears it.
+
+- Bank payments: Checkout offers `us_bank_account` on one-time and
+  installment sessions; if Stripe rejects it (ACH not enabled on the
+  platform in Dashboard → Payment methods, or the school's
+  `us_bank_account_ach_payments` capability isn't active yet) the
+  session is retried card-only and the audit row says `achOffered:false`.
+- Bank payments settle in 3–5 business days: the payment row is
+  `processing` after `checkout.session.completed` (payment_status
+  unpaid) and flips to `succeeded` on `async_payment_succeeded` /
+  `payment_intent.succeeded`, which is also when reconciliation runs.
+- A reconciliation that couldn't run (charge not paid yet, no transfer)
+  is retried by the next relevant webhook; rows with
+  `processingFeeActualCents IS NULL` after a day are worth a look.

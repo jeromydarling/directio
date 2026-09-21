@@ -17,6 +17,10 @@ type PaymentRow = {
   amountCents: number;
   currency: string;
   platformFeeCents: number;
+  processingFeeEstimateCents: number;
+  processingFeeActualCents: number | null;
+  feeRebateCents: number | null;
+  paymentMethodType: string | null;
   schoolNetCents: number;
   stripePaymentIntentId: string | null;
   stripeChargeId: string | null;
@@ -31,14 +35,16 @@ type PaymentRow = {
 type Summary = {
   succeededCount: number;
   pendingCount: number;
+  processingCount: number;
   failedCount: number;
   refundedCount: number;
   totalSucceededCents: number;
   totalPlatformFeeCents: number;
+  totalProcessingCents: number;
   totalSchoolNetCents: number;
 };
 
-const STATUS_FILTERS = ["all", "succeeded", "pending", "failed", "refunded"] as const;
+const STATUS_FILTERS = ["all", "succeeded", "processing", "pending", "failed", "refunded"] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -61,6 +67,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const rows = await context.cloudflare.env.DB.prepare(
     `SELECT p.id, p.kind, p.status, p.amountCents, p.currency, p.platformFeeCents,
+            p.processingFeeEstimateCents, p.processingFeeActualCents, p.feeRebateCents,
+            p.paymentMethodType,
             p.schoolNetCents, p.stripePaymentIntentId, p.stripeChargeId,
             p.descriptionSnapshot, p.createdAt, p.updatedAt,
             s.firstName AS studentFirst, s.lastName AS studentLast, s.email AS studentEmail
@@ -76,19 +84,22 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const summaryRows = await context.cloudflare.env.DB.prepare(
     `SELECT status, COUNT(*) AS n, COALESCE(SUM(amountCents),0) AS amt,
             COALESCE(SUM(platformFeeCents),0) AS fee,
+            COALESCE(SUM(COALESCE(processingFeeActualCents, processingFeeEstimateCents)),0) AS proc,
             COALESCE(SUM(schoolNetCents),0) AS net
        FROM payment WHERE organizationId = ? GROUP BY status`,
   )
     .bind(tenant.organization.id)
-    .all<{ status: string; n: number; amt: number; fee: number; net: number }>();
+    .all<{ status: string; n: number; amt: number; fee: number; proc: number; net: number }>();
 
   const summary: Summary = {
     succeededCount: 0,
     pendingCount: 0,
+    processingCount: 0,
     failedCount: 0,
     refundedCount: 0,
     totalSucceededCents: 0,
     totalPlatformFeeCents: 0,
+    totalProcessingCents: 0,
     totalSchoolNetCents: 0,
   };
   for (const r of summaryRows.results) {
@@ -96,8 +107,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       summary.succeededCount = r.n;
       summary.totalSucceededCents = r.amt;
       summary.totalPlatformFeeCents = r.fee;
+      summary.totalProcessingCents = r.proc;
       summary.totalSchoolNetCents = r.net;
     } else if (r.status === "pending") summary.pendingCount = r.n;
+    else if (r.status === "processing") summary.processingCount = r.n;
     else if (r.status === "failed") summary.failedCount = r.n;
     else if (r.status === "refunded") summary.refundedCount = r.n;
   }
@@ -130,7 +143,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     ) as "duplicate" | "fraudulent" | "requested_by_customer";
 
     const row = await env.DB.prepare(
-      `SELECT p.id, p.amountCents, p.stripePaymentIntentId, p.stripeChargeId, p.status,
+      `SELECT p.id, p.amountCents, p.platformFeeCents, p.stripeApplicationFeeId,
+              p.stripePaymentIntentId, p.stripeChargeId, p.status,
               o.stripeAccountId
          FROM payment p
          JOIN organization o ON o.id = p.organizationId
@@ -140,6 +154,8 @@ export async function action({ request, context }: Route.ActionArgs) {
       .first<{
         id: string;
         amountCents: number;
+        platformFeeCents: number;
+        stripeApplicationFeeId: string | null;
         stripePaymentIntentId: string | null;
         stripeChargeId: string | null;
         status: string;
@@ -158,6 +174,9 @@ export async function action({ request, context }: Route.ActionArgs) {
         paymentIntentId: row.stripePaymentIntentId,
         chargeId: row.stripeChargeId,
         reason,
+        totalAmountCents: row.amountCents,
+        platformFeeCents: row.platformFeeCents,
+        applicationFeeId: row.stripeApplicationFeeId,
         idempotencyKey: `refund-${row.id}`,
       });
       await env.DB.prepare(
@@ -171,7 +190,12 @@ export async function action({ request, context }: Route.ActionArgs) {
         action: "payment.refunded",
         entityType: "payment",
         entityId: paymentId,
-        payload: { reason, stripeRefundId: result.refundId, stripeStatus: result.status },
+        payload: {
+          reason,
+          stripeRefundId: result.refundId,
+          stripeStatus: result.status,
+          platformFeeRefundedCents: result.platformFeeRefundedCents,
+        },
       });
       return redirect("/admin/payments");
     } catch (err) {
@@ -232,17 +256,17 @@ export default function AdminPayments({ loaderData, actionData }: Route.Componen
         <Stat
           label="To school"
           value={fmtUsd(summary.totalSchoolNetCents)}
-          hint="After platform fee"
+          hint="After directio's fee + processing"
         />
         <Stat
-          label="Platform fee"
+          label="directio fee"
           value={fmtUsd(summary.totalPlatformFeeCents)}
-          hint="directio share"
+          hint="2.5%, never more than $15/student"
         />
         <Stat
-          label="Pending + failed"
-          value={`${summary.pendingCount} · ${summary.failedCount}`}
-          hint={`${summary.refundedCount} refunded`}
+          label="Processing (at cost)"
+          value={fmtUsd(summary.totalProcessingCents)}
+          hint={`${summary.processingCount} bank payment${summary.processingCount === 1 ? "" : "s"} clearing · ${summary.pendingCount} pending · ${summary.failedCount} failed · ${summary.refundedCount} refunded`}
         />
       </section>
 
@@ -312,7 +336,18 @@ export default function AdminPayments({ loaderData, actionData }: Route.Componen
                     {fmtUsd(p.amountCents)}
                   </td>
                   <td className="px-4 py-3 text-right text-ink-600 dark:text-ink-300">
-                    {fmtUsd(p.platformFeeCents)}
+                    <span title="directio platform fee">{fmtUsd(p.platformFeeCents)}</span>
+                    {(p.processingFeeActualCents ?? p.processingFeeEstimateCents) > 0 && (
+                      <span className="block text-xs text-ink-500 dark:text-ink-400">
+                        + {fmtUsd(p.processingFeeActualCents ?? p.processingFeeEstimateCents)}{" "}
+                        {p.processingFeeActualCents === null ? "est. " : ""}
+                        {p.paymentMethodType === "us_bank_account"
+                          ? "bank"
+                          : p.paymentMethodType
+                            ? p.paymentMethodType.replace("_", " ")
+                            : "processing"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-ink-900 dark:text-ink-50">
                     {fmtUsd(p.schoolNetCents)}
@@ -330,10 +365,12 @@ export default function AdminPayments({ loaderData, actionData }: Route.Componen
                             ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
                             : p.status === "refunded"
                               ? "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
-                              : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
+                              : p.status === "processing"
+                                ? "bg-brand-100 text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
+                                : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
                       ].join(" ")}
                     >
-                      {p.status.replace("_", " ")}
+                      {p.status === "processing" ? "bank clearing" : p.status.replace("_", " ")}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">

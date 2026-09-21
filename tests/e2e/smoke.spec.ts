@@ -61,6 +61,19 @@ test.describe("public marketing", () => {
     }
   });
 
+  test("/pricing states the capped fee and renders the calculator", async ({ page }) => {
+    const res = await page.goto("/pricing");
+    expect(res?.status(), "pricing HTTP").toBeLessThan(400);
+    await expect(page.locator("body")).toContainText(/never more than \$15/i);
+    await expect(page.locator("body")).toContainText(/What would your school actually keep/i);
+    // The calculator is interactive: changing enrollments changes the headline.
+    const before = await page.getByText(/\/ month/).first().textContent();
+    await page.getByLabel(/Enrollments per month/i).fill("40");
+    await expect
+      .poll(async () => page.getByText(/\/ month/).first().textContent())
+      .not.toBe(before);
+  });
+
   test("404 renders a directio 404, not the platform default", async ({ page }) => {
     const res = await page.goto("/no-such-route-xyz");
     // React Router catches at the boundary; we expect either a 404 status

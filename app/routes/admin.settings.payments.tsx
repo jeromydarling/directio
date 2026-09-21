@@ -6,6 +6,7 @@ import {
   StripeNotConfiguredError,
   createAccountLink,
   createConnectAccount,
+  ensureAchCapability,
   isStripeConfigured,
 } from "~/lib/stripe.server";
 import { syncConnectStatus } from "~/lib/connect.server";
@@ -131,6 +132,17 @@ export async function action({ request, context }: Route.ActionArgs) {
           entityId: org.id,
           payload: { stripeAccountId: accountId },
         });
+      }
+
+      // Accounts created before we requested ACH at creation: ask for
+      // it now, so the link below collects anything Stripe needs for
+      // bank payments in the same sitting. Best-effort.
+      if (org.stripeAccountId) {
+        try {
+          await ensureAchCapability(env, accountId);
+        } catch (err) {
+          console.warn("[payments] ensureAchCapability failed:", err);
+        }
       }
 
       const link = await createAccountLink(env, {
@@ -424,11 +436,15 @@ export default function PaymentsSettings({ loaderData, actionData }: Route.Compo
           </li>
           <li>
             Each program package you sell can be one-time, monthly installments, or
-            buy-now-pay-later (Affirm / Klarna). You pick which options families see.
+            buy-now-pay-later (Affirm / Klarna). Families can always pay by card or bank
+            account; you pick which other options they see.
           </li>
           <li>
-            When a family checks out, Stripe charges them, deposits the money in your Stripe
-            balance, and skims a small platform fee for directio (configurable per package).
+            When a family checks out, Stripe deposits the money in your Stripe balance minus
+            directio's fee (2.5%, never more than $15 per student) and Stripe's processing
+            cost at cost — bank payments 0.8% (max $5), cards 2.9% + 30¢. We collect the
+            card rate up front and transfer the difference back the moment a bank payment
+            settles, so you're never charged more than the method the family actually used.
           </li>
           <li>
             Stripe pays you out on your normal payout schedule. Your school stays in control of
