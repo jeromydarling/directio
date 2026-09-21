@@ -82,16 +82,19 @@ async function stripeRequest(
 }
 
 /**
- * The directio platform fee, in basis points, applied to every
- * school enrollment payment. Platform-controlled — schools cannot
- * change this. (An earlier build exposed it on the package form,
- * which let any owner zero out directio's revenue.)
+ * The fee model lives in platform-fees.ts (pure, shared with the
+ * public pricing calculator). Re-exported here so existing server
+ * imports keep working. Platform-controlled — schools cannot change
+ * it. (An earlier build exposed it on the package form, which let any
+ * owner zero out directio's revenue.)
  */
-export const PLATFORM_FEE_BPS = 250;
-
-export function platformFeeCentsFor(amountCents: number): number {
-  return Math.round((amountCents * PLATFORM_FEE_BPS) / 10000);
-}
+export {
+  PLATFORM_FEE_BPS,
+  PLATFORM_FEE_CAP_CENTS,
+  platformFeeCentsFor,
+  processingFeeCentsFor,
+  estimateProcessingFeeCents,
+} from "./platform-fees";
 
 /**
  * Merchant Category Code for driving schools. 8299 = "Schools and
@@ -127,6 +130,10 @@ export async function createConnectAccount(
     country: "US",
     "capabilities[transfers][requested]": "true",
     "capabilities[card_payments][requested]": "true",
+    // Bank payments (0.8% capped at $5) are the cheapest way a family
+    // can pay a school; request the capability up front so Checkout
+    // can offer them from the first payment.
+    "capabilities[us_bank_account_ach_payments][requested]": "true",
     "business_profile[name]": args.orgName,
     "business_profile[product_description]":
       "Driver education: classroom courses, behind-the-wheel lessons, and road-test prep for teen and adult students.",
@@ -148,6 +155,18 @@ export async function createConnectAccount(
     idempotencyKey: `connect-account-${args.organizationId}`,
   })) as { id: string };
   return { accountId: res.id };
+}
+
+/**
+ * Request the ACH capability on an account created before we asked
+ * for it at creation. Idempotent; Stripe may add items to
+ * requirements.currently_due, which the next account link collects.
+ */
+export async function ensureAchCapability(env: Env, accountId: string): Promise<void> {
+  await stripeRequest(env, `accounts/${accountId}`, {
+    method: "POST",
+    body: { "capabilities[us_bank_account_ach_payments][requested]": "true" },
+  });
 }
 
 /**
@@ -239,11 +258,17 @@ export type PaymentOption = "one_time" | "installment_subscription" | "bnpl";
 
 /**
  * Create a Checkout Session for a family to pay for an enrollment.
- * Routes the money to the school's connected account and skims
- * `platformFeeCents` to the directio platform.
+ * Routes the money to the school's connected account and carves out
+ * an application fee = directio's platform fee + an up-front estimate
+ * of Stripe's processing fee (the platform is the one Stripe debits
+ * on destination charges). fee-reconcile.server.ts trues the estimate
+ * up to the actual fee after settlement.
  *
  * mode='payment' for one-time, 'subscription' for installments.
- * payment_method_types includes 'card', plus 'affirm','klarna' when bnpl is on.
+ * Card + US bank account on one-time and installments; card + Affirm/
+ * Klarna on BNPL. If Stripe rejects `us_bank_account` (ACH not yet
+ * enabled on the platform or the school's account), we retry once
+ * without it rather than failing the family's checkout.
  */
 export async function createCheckoutSession(
   env: Env,
@@ -252,6 +277,8 @@ export async function createCheckoutSession(
     amountCents: number;
     currency: string;
     platformFeeCents: number;
+    /** Worst-case Stripe fee for the allowed methods; reconciled later. */
+    processingFeeEstimateCents: number;
     productName: string;
     productDescription?: string;
     successUrl: string;
@@ -263,80 +290,203 @@ export async function createCheckoutSession(
     metadata?: Record<string, string>;
     idempotencyKey?: string;
   },
-): Promise<{ sessionId: string; url: string }> {
-  const body: Record<string, string | number> = {
-    "line_items[0][price_data][currency]": args.currency,
-    "line_items[0][price_data][product_data][name]": args.productName,
-    "line_items[0][price_data][unit_amount]": args.amountCents,
-    "line_items[0][quantity]": 1,
-    success_url: args.successUrl,
-    cancel_url: args.cancelUrl,
+): Promise<{ sessionId: string; url: string; achOffered: boolean }> {
+  const applicationFeeCents = Math.max(
+    0,
+    Math.min(args.amountCents, args.platformFeeCents + args.processingFeeEstimateCents),
+  );
+
+  const build = (includeAch: boolean): Record<string, string | number> => {
+    const body: Record<string, string | number> = {
+      "line_items[0][price_data][currency]": args.currency,
+      "line_items[0][price_data][product_data][name]": args.productName,
+      "line_items[0][price_data][unit_amount]": args.amountCents,
+      "line_items[0][quantity]": 1,
+      success_url: args.successUrl,
+      cancel_url: args.cancelUrl,
+    };
+    if (args.productDescription) {
+      body["line_items[0][price_data][product_data][description]"] = args.productDescription;
+    }
+    if (args.customerEmail) body.customer_email = args.customerEmail;
+
+    if (args.option === "one_time") {
+      body.mode = "payment";
+      body["payment_method_types[0]"] = "card";
+      if (includeAch) body["payment_method_types[1]"] = "us_bank_account";
+      body["payment_intent_data[application_fee_amount]"] = applicationFeeCents;
+      body["payment_intent_data[transfer_data][destination]"] = args.accountId;
+      // on_behalf_of makes the school the settlement merchant (their
+      // name on the family's statement, their country's fee schedule).
+      body["payment_intent_data[on_behalf_of]"] = args.accountId;
+    } else if (args.option === "bnpl") {
+      body.mode = "payment";
+      const methods = args.bnplMethods ?? ["affirm", "klarna"];
+      body["payment_method_types[0]"] = "card";
+      methods.forEach((m, i) => {
+        body[`payment_method_types[${i + 1}]`] = m;
+      });
+      body["payment_intent_data[application_fee_amount]"] = applicationFeeCents;
+      body["payment_intent_data[transfer_data][destination]"] = args.accountId;
+      body["payment_intent_data[on_behalf_of]"] = args.accountId;
+    } else {
+      const months = Math.max(2, args.installmentMonths ?? 3);
+      // Each monthly invoice charges amountCents ÷ months (rounded up
+      // so the school is never shorted by rounding). Subscription mode
+      // charges unit_amount EVERY interval — passing the full package
+      // price here (as an earlier build did) bills the family the
+      // total price each month.
+      const monthlyCents = Math.ceil(args.amountCents / months);
+      body.mode = "subscription";
+      body["line_items[0][price_data][unit_amount]"] = monthlyCents;
+      body["line_items[0][price_data][recurring][interval]"] = "month";
+      body["line_items[0][price_data][recurring][interval_count]"] = 1;
+      body["line_items[0][quantity]"] = 1;
+      body["payment_method_types[0]"] = "card";
+      if (includeAch) body["payment_method_types[1]"] = "us_bank_account";
+      // Fixed-length subscriptions aren't first-class in Stripe; we
+      // store installmentMonths in subscription metadata and the
+      // invoice.paid webhook cancels after N successful invoices.
+      // Subscriptions only take a percent fee; floor to two decimals
+      // so the cap is never exceeded across the plan.
+      const feePercent = Math.min(
+        100,
+        Math.max(0, Math.floor((applicationFeeCents / args.amountCents) * 10000) / 100),
+      );
+      body["subscription_data[application_fee_percent]"] = feePercent;
+      body["subscription_data[transfer_data][destination]"] = args.accountId;
+      body["subscription_data[on_behalf_of]"] = args.accountId;
+      body["subscription_data[metadata][installmentMonths]"] = months;
+    }
+
+    for (const [k, v] of Object.entries(args.metadata ?? {})) {
+      body[`metadata[${k}]`] = v;
+    }
+    body["metadata[satellite_app]"] = "directio";
+    return body;
   };
-  if (args.productDescription) {
-    body["line_items[0][price_data][product_data][description]"] = args.productDescription;
-  }
-  if (args.customerEmail) body.customer_email = args.customerEmail;
 
-  if (args.option === "one_time") {
-    body.mode = "payment";
-    body["payment_method_types[0]"] = "card";
-    body["payment_intent_data[application_fee_amount]"] = args.platformFeeCents;
-    body["payment_intent_data[transfer_data][destination]"] = args.accountId;
-    // on_behalf_of moves dispute/chargeback liability to the connected
-    // account (the school), matching directio's marketing copy that
-    // says "schools handle disputes/refunds". Without this, destination
-    // charges keep liability on the platform (directio) by default.
-    body["payment_intent_data[on_behalf_of]"] = args.accountId;
-  } else if (args.option === "bnpl") {
-    body.mode = "payment";
-    const methods = args.bnplMethods ?? ["affirm", "klarna"];
-    body["payment_method_types[0]"] = "card";
-    methods.forEach((m, i) => {
-      body[`payment_method_types[${i + 1}]`] = m;
-    });
-    body["payment_intent_data[application_fee_amount]"] = args.platformFeeCents;
-    body["payment_intent_data[transfer_data][destination]"] = args.accountId;
-    body["payment_intent_data[on_behalf_of]"] = args.accountId;
-  } else {
-    const months = Math.max(2, args.installmentMonths ?? 3);
-    // Each monthly invoice charges amountCents ÷ months (rounded up
-    // so the school is never shorted by rounding). Subscription mode
-    // charges unit_amount EVERY interval — passing the full package
-    // price here (as an earlier build did) bills the family the
-    // total price each month.
-    const monthlyCents = Math.ceil(args.amountCents / months);
-    body.mode = "subscription";
-    body["line_items[0][price_data][unit_amount]"] = monthlyCents;
-    body["line_items[0][price_data][recurring][interval]"] = "month";
-    body["line_items[0][price_data][recurring][interval_count]"] = 1;
-    body["line_items[0][quantity]"] = 1;
-    // Fixed-length subscriptions aren't first-class in Stripe; we
-    // store installmentMonths in subscription metadata and the
-    // invoice.paid webhook cancels after N successful invoices.
-    const feePercent = Math.min(
-      100,
-      Math.max(0, Math.round((args.platformFeeCents / args.amountCents) * 10000) / 100),
-    );
-    body["subscription_data[application_fee_percent]"] = feePercent;
-    body["subscription_data[transfer_data][destination]"] = args.accountId;
-    // on_behalf_of moves dispute/chargeback liability to the connected
-    // account (the school), matching the marketing copy that says
-    // schools handle disputes/refunds. Federation-wide policy.
-    body["subscription_data[on_behalf_of]"] = args.accountId;
-    body["subscription_data[metadata][installmentMonths]"] = months;
+  const wantsAch = args.option !== "bnpl";
+  try {
+    const res = (await stripeRequest(env, "checkout/sessions", {
+      method: "POST",
+      body: build(wantsAch),
+      idempotencyKey: args.idempotencyKey,
+    })) as { id: string; url: string };
+    return { sessionId: res.id, url: res.url, achOffered: wantsAch };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!wantsAch || !/us_bank_account|ach/i.test(msg)) throw err;
+    console.warn(`[stripe] ACH not available for ${args.accountId}, retrying card-only: ${msg}`);
+    const res = (await stripeRequest(env, "checkout/sessions", {
+      method: "POST",
+      body: build(false),
+      // A different body under the same idempotency key is rejected by
+      // Stripe, so the fallback attempt gets its own key.
+      idempotencyKey: args.idempotencyKey ? `${args.idempotencyKey}-noach` : undefined,
+    })) as { id: string; url: string };
+    return { sessionId: res.id, url: res.url, achOffered: false };
   }
+}
 
-  for (const [k, v] of Object.entries(args.metadata ?? {})) {
-    body[`metadata[${k}]`] = v;
-  }
+/**
+ * Fees Stripe actually took on a settled charge, read off the balance
+ * transaction. This is the ground truth the up-front estimate is
+ * reconciled against.
+ */
+export async function fetchChargeFees(
+  env: Env,
+  chargeId: string,
+): Promise<{
+  chargeId: string;
+  amountCents: number;
+  feeCents: number;
+  applicationFeeCents: number;
+  applicationFeeId: string | null;
+  paymentMethodType: string | null;
+  transferId: string | null;
+  paymentIntentId: string | null;
+  paid: boolean;
+}> {
+  const c = (await stripeRequest(env, `charges/${chargeId}?expand[]=balance_transaction`)) as {
+    id: string;
+    amount: number;
+    paid?: boolean;
+    balance_transaction?: { fee?: number } | string | null;
+    application_fee_amount?: number | null;
+    application_fee?: string | { id: string } | null;
+    payment_method_details?: { type?: string } | null;
+    transfer?: string | { id: string } | null;
+    payment_intent?: string | { id: string } | null;
+  };
+  const bt = c.balance_transaction;
+  const idOf = (v: string | { id: string } | null | undefined) =>
+    typeof v === "string" ? v : (v?.id ?? null);
+  return {
+    chargeId: c.id,
+    amountCents: c.amount,
+    feeCents: bt && typeof bt === "object" && typeof bt.fee === "number" ? bt.fee : 0,
+    applicationFeeCents: c.application_fee_amount ?? 0,
+    applicationFeeId: idOf(c.application_fee),
+    paymentMethodType: c.payment_method_details?.type ?? null,
+    transferId: idOf(c.transfer),
+    paymentIntentId: idOf(c.payment_intent),
+    paid: Boolean(c.paid),
+  };
+}
+
+export async function latestChargeForPaymentIntent(env: Env, paymentIntentId: string): Promise<string | null> {
+  const pi = (await stripeRequest(env, `payment_intents/${paymentIntentId}`)) as {
+    latest_charge?: string | { id: string } | null;
+  };
+  return typeof pi.latest_charge === "string" ? pi.latest_charge : (pi.latest_charge?.id ?? null);
+}
+
+/**
+ * Move money from the platform to a school. Used for processing-fee
+ * true-ups: `sourceTransaction` lets the transfer draw on the charge's
+ * still-pending funds instead of needing available balance.
+ */
+export async function transferToConnectedAccount(
+  env: Env,
+  args: {
+    accountId: string;
+    amountCents: number;
+    currency: string;
+    sourceTransaction?: string | null;
+    description?: string;
+    metadata?: Record<string, string>;
+    idempotencyKey: string;
+  },
+): Promise<{ transferId: string }> {
+  const body: Record<string, string | number> = {
+    amount: args.amountCents,
+    currency: args.currency.toLowerCase(),
+    destination: args.accountId,
+  };
+  if (args.sourceTransaction) body.source_transaction = args.sourceTransaction;
+  if (args.description) body.description = args.description;
+  for (const [k, v] of Object.entries(args.metadata ?? {})) body[`metadata[${k}]`] = v;
   body["metadata[satellite_app]"] = "directio";
-
-  const res = (await stripeRequest(env, "checkout/sessions", {
+  const res = (await stripeRequest(env, "transfers", {
     method: "POST",
     body,
     idempotencyKey: args.idempotencyKey,
-  })) as { id: string; url: string };
-  return { sessionId: res.id, url: res.url };
+  })) as { id: string };
+  return { transferId: res.id };
+}
+
+/** Return part of an application fee to the connected account. */
+export async function refundApplicationFee(
+  env: Env,
+  args: { applicationFeeId: string; amountCents: number; idempotencyKey: string },
+): Promise<{ feeRefundId: string }> {
+  const res = (await stripeRequest(env, `application_fees/${args.applicationFeeId}/refunds`, {
+    method: "POST",
+    body: { amount: args.amountCents },
+    idempotencyKey: args.idempotencyKey,
+  })) as { id: string };
+  return { feeRefundId: res.id };
 }
 
 /**
@@ -349,8 +499,12 @@ export async function createCheckoutSession(
  *   - reverse_transfer: pulls the transferred funds back from the
  *     school's balance so the platform isn't left funding the refund
  *     while the school keeps the money.
- *   - refund_application_fee: returns directio's fee proportionally
- *     so the school isn't charged a fee on money they returned.
+ *   - The application fee holds BOTH directio's platform fee and the
+ *     pass-through of Stripe's processing fee. Stripe keeps its fee on
+ *     a refund, so we return only directio's share (proportionally)
+ *     via an application-fee refund — the school bears the processing
+ *     cost of a refunded charge, exactly as with any processor, and
+ *     directio no longer eats it.
  */
 export async function refundPayment(
   env: Env,
@@ -359,20 +513,48 @@ export async function refundPayment(
     chargeId?: string | null;
     amountCents?: number;          // omit for full refund
     reason?: "duplicate" | "fraudulent" | "requested_by_customer";
+    /** The payment's total and directio's platform fee, for the proportional fee refund. */
+    totalAmountCents?: number;
+    platformFeeCents?: number;
+    applicationFeeId?: string | null;
     // Logical key so a retried submit can't double-refund. Use the
     // directio payment id (plus amount for partials).
     idempotencyKey: string;
   },
-): Promise<{ refundId: string; status: string }> {
+): Promise<{ refundId: string; status: string; platformFeeRefundedCents: number }> {
   if (!args.paymentIntentId && !args.chargeId) {
     throw new Error("refundPayment needs a paymentIntentId or chargeId.");
   }
+
+  // Find the application fee so we can refund directio's share only.
+  let applicationFeeId = args.applicationFeeId ?? null;
+  let chargeId = args.chargeId ?? null;
+  if (!applicationFeeId || !chargeId) {
+    try {
+      if (!chargeId && args.paymentIntentId) {
+        chargeId = await latestChargeForPaymentIntent(env, args.paymentIntentId);
+      }
+      if (chargeId && !applicationFeeId) {
+        applicationFeeId = (await fetchChargeFees(env, chargeId)).applicationFeeId;
+      }
+    } catch (err) {
+      console.warn("[stripe] could not resolve application fee before refund:", err);
+    }
+  }
+  const canSplitFee =
+    Boolean(applicationFeeId) &&
+    typeof args.totalAmountCents === "number" &&
+    args.totalAmountCents > 0 &&
+    typeof args.platformFeeCents === "number";
+
   const body: Record<string, string | number> = {
-    refund_application_fee: "true",
+    // Legacy rows (no fee split known) keep the old behavior of
+    // returning the whole application fee.
+    refund_application_fee: canSplitFee ? "false" : "true",
     reverse_transfer: "true",
   };
   if (args.paymentIntentId) body.payment_intent = args.paymentIntentId;
-  if (args.chargeId) body.charge = args.chargeId;
+  if (chargeId) body.charge = chargeId;
   if (args.amountCents) body.amount = args.amountCents;
   if (args.reason) body.reason = args.reason;
 
@@ -381,7 +563,23 @@ export async function refundPayment(
     body,
     idempotencyKey: args.idempotencyKey,
   })) as { id?: string; status?: string };
-  return { refundId: json.id ?? "", status: json.status ?? "unknown" };
+
+  let platformFeeRefundedCents = 0;
+  if (canSplitFee && applicationFeeId) {
+    const refunded = args.amountCents ?? args.totalAmountCents!;
+    platformFeeRefundedCents = Math.max(
+      0,
+      Math.round((args.platformFeeCents! * refunded) / args.totalAmountCents!),
+    );
+    if (platformFeeRefundedCents > 0) {
+      await refundApplicationFee(env, {
+        applicationFeeId,
+        amountCents: platformFeeRefundedCents,
+        idempotencyKey: `${args.idempotencyKey}-platform-share`,
+      });
+    }
+  }
+  return { refundId: json.id ?? "", status: json.status ?? "unknown", platformFeeRefundedCents };
 }
 
 /**

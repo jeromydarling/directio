@@ -2,12 +2,12 @@ import type { Route } from "./+types/api.stripe.webhook";
 import { recordAudit } from "~/lib/audit.server";
 import { newId } from "~/lib/ids";
 import {
-  PLATFORM_FEE_BPS,
   cancelSubscription,
   getInstallmentProgress,
   shapeAccountStatus,
 } from "~/lib/stripe.server";
 import { applyConnectStatus } from "~/lib/connect.server";
+import { reconcilePaymentFees } from "~/lib/fee-reconcile.server";
 import { appendLedgerEntry } from "~/lib/translation.server";
 import {
   sendDisputeAlert,
@@ -90,6 +90,10 @@ export async function action({ request, context }: Route.ActionArgs) {
   try {
     switch (event.type) {
       case "checkout.session.completed":
+      // Bank (ACH) payments complete the session with payment_status
+      // 'unpaid' and settle days later via this second event; the
+      // handler keys off payment_status so both paths land correctly.
+      case "checkout.session.async_payment_succeeded":
         await handleCheckoutSessionCompleted(env, event.data.object);
         break;
       case "checkout.session.async_payment_failed":
@@ -272,15 +276,28 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
   // price landed. The plan row goes to 'active'; real collected money
   // is recorded per invoice by handlePlatformInvoiceEvent, and the
   // plan flips to 'plan_completed' after the final installment.
+  //
+  // One-time / BNPL: cards settle immediately (payment_status 'paid').
+  // Bank debits complete the session 'unpaid' and settle 3–5 business
+  // days later, when Stripe sends async_payment_succeeded (same
+  // handler, payment_status 'paid'). Until then the row is
+  // 'processing' — visible to the family, not yet counted as revenue.
+  const paymentStatus = String(obj.payment_status ?? "paid");
+  const settled = paymentStatus === "paid" || paymentStatus === "no_payment_required";
   await env.DB.prepare(
     `UPDATE payment
-        SET status = CASE WHEN kind = 'installment_subscription' THEN 'active' ELSE 'succeeded' END,
+        SET status = CASE
+                       WHEN kind = 'installment_subscription' THEN 'active'
+                       WHEN ? = 1 THEN 'succeeded'
+                       ELSE 'processing'
+                     END,
             stripePaymentIntentId = COALESCE(?, stripePaymentIntentId),
             stripeSubscriptionId = COALESCE(?, stripeSubscriptionId),
             updatedAt = ?
-      WHERE id = ? AND stripeCheckoutSessionId = ?`,
+      WHERE id = ? AND stripeCheckoutSessionId = ?
+        AND status IN ('pending', 'processing', 'active', 'succeeded')`,
   )
-    .bind(paymentIntentId, subscriptionId, Date.now(), directioPaymentId, sessionId)
+    .bind(settled ? 1 : 0, paymentIntentId, subscriptionId, Date.now(), directioPaymentId, sessionId)
     .run();
 
   const row = await env.DB.prepare(
@@ -292,17 +309,20 @@ async function handleCheckoutSessionCompleted(env: Env, obj: Record<string, unkn
     await recordAudit(env, {
       organizationId: row.organizationId,
       actorUserId: null,
-      action: "payment.succeeded",
+      action: settled ? "payment.succeeded" : "payment.processing",
       entityType: "payment",
       entityId: directioPaymentId,
-      payload: { source: "stripe.webhook", event: "checkout.session.completed" },
+      payload: { source: "stripe.webhook", event: "checkout.session.completed", paymentStatus },
     });
-    // Receipt for one-time / BNPL payments. Installment plans get a
-    // receipt per collected invoice in handlePlatformInvoiceEvent — the
-    // plan row here holds the FULL price but only month 1 was charged,
-    // so a receipt on it would overstate what the family paid.
-    if (row.kind !== "installment_subscription") {
+    // Receipt for one-time / BNPL payments once the money has actually
+    // settled. Installment plans get a receipt per collected invoice
+    // in handlePlatformInvoiceEvent — the plan row here holds the FULL
+    // price but only month 1 was charged, so a receipt on it would
+    // overstate what the family paid.
+    if (row.kind !== "installment_subscription" && settled) {
       await sendPaymentReceipt(env, { paymentId: directioPaymentId });
+      // True the processing-fee estimate up to what Stripe charged.
+      await reconcilePaymentFees(env, { paymentId: directioPaymentId });
     }
   }
 }
@@ -323,10 +343,21 @@ async function handleCheckoutSessionFailed(env: Env, obj: Record<string, unknown
 async function handlePaymentIntentSucceeded(env: Env, obj: Record<string, unknown>) {
   const piId = String(obj.id ?? "");
   await env.DB.prepare(
-    "UPDATE payment SET status = 'succeeded', updatedAt = ? WHERE stripePaymentIntentId = ?",
+    `UPDATE payment SET status = 'succeeded', updatedAt = ?
+      WHERE stripePaymentIntentId = ? AND status IN ('pending', 'processing')`,
   )
     .bind(Date.now(), piId)
     .run();
+  // Belt-and-braces reconciliation: for bank debits this event fires
+  // at settlement, which is the first moment the actual fee is known.
+  const rows = await env.DB.prepare(
+    "SELECT id FROM payment WHERE stripePaymentIntentId = ? AND kind != 'installment_subscription'",
+  )
+    .bind(piId)
+    .all<{ id: string }>();
+  for (const r of rows.results) {
+    await reconcilePaymentFees(env, { paymentId: r.id });
+  }
 }
 
 async function handleAccountUpdated(env: Env, obj: Record<string, unknown>) {
@@ -479,7 +510,8 @@ async function handlePlatformInvoiceEvent(
 
     const plan = await env.DB.prepare(
       `SELECT id, organizationId, enrollmentId, studentId, programPackageId,
-              currency, descriptionSnapshot, status
+              currency, descriptionSnapshot, status,
+              amountCents, platformFeeCents, processingFeeEstimateCents
          FROM payment WHERE stripeSubscriptionId = ? AND kind = 'installment_subscription'
         LIMIT 1`,
     )
@@ -493,6 +525,9 @@ async function handlePlatformInvoiceEvent(
         currency: string;
         descriptionSnapshot: string | null;
         status: string;
+        amountCents: number;
+        platformFeeCents: number;
+        processingFeeEstimateCents: number;
       }>();
     if (!plan) {
       throw new Error(
@@ -509,14 +544,23 @@ async function handlePlatformInvoiceEvent(
       // One child row per invoice; keyed on the invoice id via
       // stripeChargeId-like reuse of stripeCheckoutSessionId is wrong —
       // dedupe rides on the stripe_event ledger instead.
-      const feeCents = Math.round((amountPaid * PLATFORM_FEE_BPS) / 10000);
+      //
+      // The plan row carries the whole-package platform fee (capped at
+      // $15) and processing estimate; each invoice takes its
+      // proportional slice, matching the application_fee_percent
+      // Stripe applied. The reconcile step below trues the processing
+      // slice up to the actual fee on this invoice's charge.
+      const share = plan.amountCents > 0 ? amountPaid / plan.amountCents : 0;
+      const feeCents = Math.round(plan.platformFeeCents * share);
+      const processingEstimate = Math.round((plan.processingFeeEstimateCents ?? 0) * share);
       const installmentPaymentId = newId();
       await env.DB.prepare(
         `INSERT INTO payment (id, organizationId, enrollmentId, studentId, programPackageId,
-                              kind, status, amountCents, currency, platformFeeCents, schoolNetCents,
+                              kind, status, amountCents, currency, platformFeeCents,
+                              processingFeeEstimateCents, schoolNetCents,
                               stripePaymentIntentId, stripeSubscriptionId,
                               descriptionSnapshot, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, 'installment_payment', 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'installment_payment', 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
         .bind(
           installmentPaymentId,
@@ -527,7 +571,8 @@ async function handlePlatformInvoiceEvent(
           amountPaid,
           plan.currency ?? "USD",
           feeCents,
-          amountPaid - feeCents,
+          processingEstimate,
+          amountPaid - feeCents - processingEstimate,
           invoicePi,
           subscriptionId,
           `${plan.descriptionSnapshot ?? "Tuition"} — installment (${progress.paidInvoices}/${progress.installmentMonths})`,
@@ -550,6 +595,14 @@ async function handlePlatformInvoiceEvent(
       });
       // Receipt for the money that actually landed this month.
       await sendPaymentReceipt(env, { paymentId: installmentPaymentId });
+      // True this invoice's processing estimate up to Stripe's actual
+      // fee. Older API versions put the charge id on the invoice;
+      // newer ones only the payment intent — the reconciler takes
+      // either.
+      await reconcilePaymentFees(env, {
+        paymentId: installmentPaymentId,
+        chargeId: obj.charge ? String(obj.charge) : null,
+      });
     }
 
     if (progress.paidInvoices >= progress.installmentMonths) {

@@ -125,10 +125,14 @@ export default function FamilyPayments({ loaderData }: Route.ComponentProps) {
                               ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
                               : p.status === "refunded"
                                 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
-                                : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
+                                : p.status === "processing"
+                                  ? "bg-brand-100 text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
+                                  : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
                         ].join(" ")}
                       >
-                        {p.status.replace("_", " ")}
+                        {p.status === "processing"
+                          ? "Processing · bank payment, 3–5 business days"
+                          : p.status.replace("_", " ")}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">

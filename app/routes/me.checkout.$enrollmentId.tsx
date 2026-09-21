@@ -7,9 +7,13 @@ import {
   StripeNotConfiguredError,
   createCheckoutSession,
   isStripeConfigured,
-  platformFeeCentsFor,
   type PaymentOption,
 } from "~/lib/stripe.server";
+import {
+  estimateProcessingFeeCents,
+  platformFeeCentsFor,
+  type ProcessingMethod,
+} from "~/lib/platform-fees";
 import { PageHeader, Card, Button, LinkButton } from "~/components/ui";
 import { FormError } from "~/components/form";
 
@@ -141,10 +145,21 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   }
 
   // Platform-controlled fee — deliberately ignores any platformFeeBps
-  // stored in older packages' paymentOptions JSON.
+  // stored in older packages' paymentOptions JSON. 2.5%, capped at $15.
   const platformFeeCents = platformFeeCentsFor(enrollment.priceCents);
-  const schoolNetCents = enrollment.priceCents - platformFeeCents;
-  const installmentMonths = opts.installmentMonths ?? 3;
+  const installmentMonths = Math.max(2, opts.installmentMonths ?? 3);
+  // Stripe's fee passes through to the school at cost. We don't know
+  // the method until the family picks it, so collect the worst case
+  // for the methods this checkout offers and true it up after
+  // settlement (fee-reconcile.server.ts). Installments are charged
+  // per invoice, so the fixed 30¢ applies each month.
+  const methods: ProcessingMethod[] = option === "bnpl" ? ["card", "bnpl"] : ["card", "us_bank_account"];
+  const processingFeeEstimateCents =
+    option === "installment_subscription"
+      ? estimateProcessingFeeCents(Math.ceil(enrollment.priceCents / installmentMonths), methods) *
+        installmentMonths
+      : estimateProcessingFeeCents(enrollment.priceCents, methods);
+  const schoolNetCents = enrollment.priceCents - platformFeeCents - processingFeeEstimateCents;
 
   // Validate the requested option is actually allowed for this package.
   if (option === "installment_subscription" && !opts.installmentsAllowed)
@@ -170,9 +185,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   // to succeeded/failed when Stripe tells us what happened.
   await env.DB.prepare(
     `INSERT INTO payment (id, organizationId, enrollmentId, studentId, programPackageId,
-                          kind, status, amountCents, currency, platformFeeCents, schoolNetCents,
+                          kind, status, amountCents, currency, platformFeeCents,
+                          processingFeeEstimateCents, schoolNetCents,
                           descriptionSnapshot, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       paymentId,
@@ -184,6 +200,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       enrollment.priceCents,
       enrollment.currency ?? "USD",
       platformFeeCents,
+      processingFeeEstimateCents,
       schoolNetCents,
       description,
       now,
@@ -197,6 +214,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       amountCents: enrollment.priceCents,
       currency: (enrollment.currency ?? "USD").toLowerCase(),
       platformFeeCents,
+      processingFeeEstimateCents,
       productName: description,
       productDescription: `Tuition payment to ${tenant.organization.name}`,
       successUrl: `${env.APP_URL}/me/checkout/${enrollment.id}?status=success`,
@@ -228,6 +246,8 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         option,
         amountCents: enrollment.priceCents,
         platformFeeCents,
+        processingFeeEstimateCents,
+        achOffered: session.achOffered,
         stripeCheckoutSessionId: session.sessionId,
       },
     });
@@ -338,7 +358,7 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
           <PayCard
             label="Pay in full"
             price={fmtUsd(amount)}
-            sub="One charge today, done."
+            sub="Card or bank account. One charge today, done."
             option="one_time"
             disabled={!stripeReady || submitting}
             recommended
@@ -390,10 +410,12 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
                       ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200"
                       : p.status === "failed"
                         ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
-                        : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
+                        : p.status === "processing"
+                          ? "bg-brand-100 text-brand-700 dark:bg-brand-900/60 dark:text-brand-200"
+                          : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
                   ].join(" ")}
                 >
-                  {p.status.replace("_", " ")}
+                  {p.status === "processing" ? "Processing · bank payment, 3–5 business days" : p.status.replace("_", " ")}
                 </span>
               </li>
             ))}
@@ -403,7 +425,9 @@ export default function Checkout({ loaderData, actionData }: Route.ComponentProp
 
       <p className="text-xs text-ink-500 dark:text-ink-400">
         Payments are processed by Stripe and deposited directly into your school's bank account.
-        directio takes a small platform fee from each transaction.
+        The price you see is the price you pay — no surcharge. Your school covers directio's fee
+        (2.5%, never more than $15) and Stripe's processing cost; paying by bank account is the
+        cheapest way for them to receive it. Bank payments take 3–5 business days to clear.
       </p>
     </div>
   );

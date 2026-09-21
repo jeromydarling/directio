@@ -2,6 +2,8 @@ import type { Route } from "./+types/pricing";
 import { getSession } from "~/lib/session.server";
 import { MarketingShell } from "~/components/marketing-shell";
 import { MeshBackground, Reveal } from "~/components/motion";
+import { PricingCalculator } from "~/components/pricing-calculator";
+import { FEE_COPY } from "~/lib/platform-fees";
 
 export function meta(_: Route.MetaArgs) {
   return [
@@ -9,7 +11,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Transparent platform pricing. No per-feature upsell. Schools pay an application fee on each successful payment.",
+        "2.5% per payment, never more than $15 per student. Bank payments included at cost. No monthly fee, no per-seat fees. Run the calculator to see what your school keeps.",
     },
   ];
 }
@@ -39,7 +41,7 @@ const TIERS = [
     headline: "Run your school. Take payments.",
     price: "0",
     priceUnit: "/ month",
-    feeNote: "Plus a 2% fee on payments you process. Standard card-processing fees pass through.",
+    feeNote: `${FEE_COPY.headline} ${FEE_COPY.sub}`,
     cta: { label: "Start free", to: "/signup" },
     features: [
       "Unlimited students and enrollments",
@@ -61,7 +63,7 @@ const TIERS = [
     headline: "Your own custom marketing website. AI-built. Your domain.",
     price: "29",
     priceUnit: "/ month",
-    feeNote: "All Free features included. 2% payment fee applies. Replaces your Wix/Squarespace/whatever for less than a single domain renewal.",
+    feeNote: "All Free features included; the same 2.5% (max $15/student) payment fee applies. Replaces your Wix/Squarespace/whatever for less than a single domain renewal.",
     cta: { label: "Start with Studio", to: "/api/checkout/studio", method: "post" as const },
     features: [
       "Everything in Free",
@@ -81,7 +83,7 @@ const TIERS = [
     headline: "For when you want electronic DMV submission and bulk credentials.",
     price: "Talk to us",
     priceUnit: "",
-    feeNote: "The 2% fee is waived above $50k a month. Includes Studio + state-specific work.",
+    feeNote: "The platform fee is waived above $50k a month in payments. Includes Studio + state-specific work.",
     cta: { label: "Schedule a call", to: "/signup" },
     features: [
       "Everything in Studio",
@@ -119,11 +121,32 @@ export default function Pricing({ loaderData }: Route.ComponentProps) {
           </Reveal>
           <Reveal delay={160}>
             <p className="mx-auto mt-6 max-w-xl text-base text-ink-600 sm:text-lg dark:text-ink-300">
-              Free to start. Standard card-processing fees pass through. We add a 2% fee on each
-              successful payment — that's it. No per-student fees, no premium tier hiding the
-              good stuff.
+              Free to start. We take 2.5% of each payment — never more than $15 per student — and
+              Stripe's processing cost passes through with no markup. Bank payments (0.8%, max $5)
+              are included, so most families cost you under $20 all-in. No per-seat fees, no
+              premium tier hiding the good stuff.
             </p>
           </Reveal>
+        </div>
+      </section>
+
+      <section className="relative border-t border-ink-200/60 dark:border-ink-800/60">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
+          <Reveal>
+            <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-brand-600 dark:text-brand-300">
+              Calculator
+            </p>
+            <h2 className="max-w-2xl font-display text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl dark:text-ink-50">
+              What would your school actually keep?
+            </h2>
+            <p className="mt-3 max-w-2xl text-base text-ink-600 dark:text-ink-300">
+              Put in your numbers. The directio side is the exact fee logic our checkout runs;
+              the "today" side is published list prices you can edit.
+            </p>
+          </Reveal>
+          <div className="mt-8">
+            <PricingCalculator />
+          </div>
         </div>
       </section>
 
@@ -224,12 +247,20 @@ export default function Pricing({ loaderData }: Route.ComponentProps) {
                 a: "Free isn't a trial — it's the actual product. The paid tier only adds deeper state coverage (electronic DMV submission), single sign-on for multi-location chains, and a support agreement.",
               },
               {
-                q: "What does the 2% fee actually cost a family?",
-                a: "Zero. It comes out of your school's revenue, not on top of the family's bill. The checkout shows the price you set — no surcharge tacked on.",
+                q: "What does the 2.5% fee actually cost a family?",
+                a: "Zero. It comes out of your school's revenue, not on top of the family's bill. The checkout shows the price you set — no surcharge tacked on. And it's capped: on anything above $600 you pay a flat $15.",
               },
               {
-                q: "What about card-processing fees?",
-                a: "Standard card fees (around 2.9% + 30¢ per transaction in the US) are paid by your school as a pass-through. We don't mark them up. They show on every charge.",
+                q: "What about processing fees?",
+                a: "Stripe's cost passes through to your school with no markup: bank account (ACH) payments are 0.8% capped at $5, cards are 2.9% + 30¢, Affirm/Klarna about 6% + 30¢. We collect the card rate at checkout and send the difference back the moment a bank payment settles, so a $600 bank payment costs you $15 + $4.80, not $15 + $17.70.",
+              },
+              {
+                q: "Can families pay from their bank account?",
+                a: "Yes, on every one-time and installment checkout, right next to the card option. Bank payments take 3–5 business days to clear; the family's timeline shows 'processing' until then. Nothing for you to set up beyond connecting Stripe.",
+              },
+              {
+                q: "What happens to fees on a refund?",
+                a: "You get directio's fee back in proportion to what you refund. Stripe keeps its processing fee on refunds (every processor does), so that part stays with the original charge.",
               },
               {
                 q: "Are there per-student or per-instructor limits?",
