@@ -59,31 +59,56 @@ export async function runStateChangeMonitor(
 
       if (isChanged) {
         changed++;
-        // Classify via cheap Workers AI
+        // Compare against the last snapshot we stored, not just a hash:
+        // the classifier can't tell "the fee changed" from "the page
+        // has a live clock" without seeing both versions.
+        const oldText = await loadLastSnapshot(env, p.stateCode, p.id);
         const verdict = await classifyChange(env, {
           stateCode: p.stateCode,
           url: p.url,
-          oldHash: p.lastContentHash ?? "",
-          newText: page.text.slice(0, 6000),
+          oldText: oldText?.slice(0, 3500) ?? "",
+          newText: page.text.slice(0, 3500),
         });
         if (verdict.severity !== "minor") {
-          alerts++;
-          await env.DB.prepare(
-            `INSERT INTO state_change_alert
-               (id, stateCode, sourcePageId, detectedAt, severity, summary, diffPreview, modelUsed, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+          // One pending alert per page. Dynamic pages (session ids,
+          // "last updated" clocks) re-hash every fetch; without this
+          // they generate an alert an hour, forever — we hit 1,300+.
+          const existing = await env.DB.prepare(
+            "SELECT id, severity FROM state_change_alert WHERE sourcePageId = ? AND status = 'pending' LIMIT 1",
           )
-            .bind(
-              newId(),
-              p.stateCode,
-              p.id,
-              now,
-              verdict.severity,
-              verdict.summary,
-              page.text.slice(0, 2000),
-              verdict.modelUsed,
+            .bind(p.id)
+            .first<{ id: string; severity: string }>();
+          if (existing) {
+            const severity =
+              existing.severity === "material" || verdict.severity === "material"
+                ? "material"
+                : "maybe_material";
+            await env.DB.prepare(
+              `UPDATE state_change_alert
+                  SET detectedAt = ?, severity = ?, summary = ?, diffPreview = ?, modelUsed = ?
+                WHERE id = ?`,
             )
-            .run();
+              .bind(now, severity, verdict.summary, page.text.slice(0, 2000), verdict.modelUsed, existing.id)
+              .run();
+          } else {
+            alerts++;
+            await env.DB.prepare(
+              `INSERT INTO state_change_alert
+                 (id, stateCode, sourcePageId, detectedAt, severity, summary, diffPreview, modelUsed, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            )
+              .bind(
+                newId(),
+                p.stateCode,
+                p.id,
+                now,
+                verdict.severity,
+                verdict.summary,
+                page.text.slice(0, 2000),
+                verdict.modelUsed,
+              )
+              .run();
+          }
         }
         // Snapshot to R2 for later comparison
         if (env.ASSETS) {
@@ -119,18 +144,43 @@ export async function runStateChangeMonitor(
   return { checked, changed, alerts, errors };
 }
 
+/**
+ * Most recent R2 snapshot text for a page (keys are
+ * state-snapshots/<state>/<pageId>/<epochMs>.txt, so lexical order is
+ * chronological). Null when none exists or R2 isn't bound.
+ */
+async function loadLastSnapshot(env: Env, stateCode: string, pageId: string): Promise<string | null> {
+  if (!env.ASSETS) return null;
+  try {
+    const prefix = `state-snapshots/${stateCode}/${pageId}/`;
+    const listed = await env.ASSETS.list({ prefix, limit: 1000 });
+    const last = listed.objects.map((o) => o.key).sort().at(-1);
+    if (!last) return null;
+    const obj = await env.ASSETS.get(last);
+    return obj ? await obj.text() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function classifyChange(
   env: Env,
-  args: { stateCode: string; url: string; oldHash: string; newText: string },
+  args: { stateCode: string; url: string; oldText: string; newText: string },
 ): Promise<{ severity: "material" | "maybe_material" | "minor"; summary: string; modelUsed: string }> {
   const prompt = `State: ${args.stateCode}
 Page URL: ${args.url}
-Old content hash: ${args.oldHash.slice(0, 16)}…
-New page snippet (first 6KB):
+
+PREVIOUS version of the page (excerpt):
+"""
+${args.oldText || "(no previous snapshot available — judge the new text on its own, and lean MINOR unless it clearly states a requirement change)"}
+"""
+
+NEW version of the page (excerpt):
 """
 ${args.newText}
 """
 
+Compare the two. Dates, "last updated" stamps, session tokens, navigation, banners, and wording tweaks are MINOR. Only a change to hours, ages, fees, forms, restrictions, or who may provide instruction is MATERIAL.
 Decide: MATERIAL, MAYBE_MATERIAL, or MINOR.
 Then on a new line, give a one-sentence summary of what appears to have changed.
 

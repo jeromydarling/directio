@@ -15,7 +15,7 @@
  * all 51 get a research pass without anyone clicking.
  */
 
-import { anthropicComplete, extractJson } from "./llm.server";
+import { anthropicComplete, extractJson, workersAiPrompt } from "./llm.server";
 import { newId } from "./ids";
 import {
   type RulePackDefinition,
@@ -30,9 +30,21 @@ import { STATE_LABEL, STATE_MATURITY } from "./state-coverage";
 const REDRAFT_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 const FAIL_BACKOFF_SECONDS = 6 * 60 * 60;
 
-export function isRulePackDraftingAvailable(env: Env): boolean {
+/**
+ * Which model backs a research pass. Anthropic (Sonnet) when the key
+ * is wired; otherwise Workers AI's 70B llama as a fallback so the
+ * pipeline still produces reviewable drafts — with a trimmed context
+ * and a clear label, because its citations need a harder look.
+ */
+export function draftingBackend(env: Env): "anthropic" | "workers-ai" | null {
   const key: string = env.ANTHROPIC_API_KEY ?? "";
-  return Boolean(key) && key !== "set-in-keys-pass";
+  if (key && key !== "set-in-keys-pass") return "anthropic";
+  if (env.AI) return "workers-ai";
+  return null;
+}
+
+export function isRulePackDraftingAvailable(env: Env): boolean {
+  return draftingBackend(env) !== null;
 }
 
 const SYSTEM_PROMPT = `You are directio's state-regulation researcher for U.S. teen driver education. You upgrade one state's machine-readable "rule pack" — the numbers and names a driving school's software runs on — using ONLY the source material provided plus well-established, verifiable facts about that state's licensing process.
@@ -234,24 +246,56 @@ export async function draftRulePackUpgrade(
     .filter(Boolean)
     .join("\n");
 
+  const backend = draftingBackend(env);
+  if (!backend) throw new Error("No drafting model available (ANTHROPIC_API_KEY unset and no AI binding).");
+
+  // Workers AI's context window is a fraction of Sonnet's — trim the
+  // evidence so the prompt fits, and let the notes say which model ran.
+  const trim = backend === "workers-ai";
   const ctx: DraftContext = {
     stateCode,
     stateName,
-    currentJson: JSON.stringify(current.definition, null, 2),
+    currentJson: JSON.stringify(current.definition, null, trim ? 0 : 2),
     currentVersion: current.version,
     staticNote,
     fieldReports: formatFieldReports(reports),
-    kbSnippets,
-    lessonExcerpts,
-    pageExcerpts,
+    kbSnippets: trim ? kbSnippets.slice(0, 5).map((s) => ({ ...s, text: s.text.slice(0, 1400) })) : kbSnippets,
+    lessonExcerpts: trim
+      ? lessonExcerpts.slice(0, 3).map((l) => ({ ...l, text: l.text.slice(0, 2200) }))
+      : lessonExcerpts,
+    pageExcerpts: trim ? pageExcerpts.slice(0, 1).map((p) => ({ ...p, text: p.text.slice(0, 3500) })) : pageExcerpts,
   };
 
-  const res = await anthropicComplete(env, {
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userPrompt(ctx) }],
-    maxTokens: 8192,
-    temperature: 0.1,
-  });
+  const res =
+    backend === "anthropic"
+      ? await anthropicComplete(env, {
+          system: SYSTEM_PROMPT,
+          messages: [{ role: "user", content: userPrompt(ctx) }],
+          maxTokens: 8192,
+          temperature: 0.1,
+        })
+      : await (async () => {
+          const first = await workersAiPrompt(env, {
+            system: SYSTEM_PROMPT,
+            prompt: userPrompt(ctx),
+            model: "smart",
+            maxTokens: 6000,
+            temperature: 0.1,
+          });
+          if (extractJson(first.text)) return { ...first, inputTokens: first.inputTokens ?? 0, outputTokens: first.outputTokens ?? 0 };
+          // The 70B model sometimes prefixes prose; one retry with a
+          // blunt reminder, same as the audit path.
+          const retry = await workersAiPrompt(env, {
+            system: SYSTEM_PROMPT,
+            prompt:
+              userPrompt(ctx) +
+              "\n\nIMPORTANT: Output the JSON object directly. No preamble, no markdown, no explanation. Start with { and end with }.",
+            model: "smart",
+            maxTokens: 6000,
+            temperature: 0.05,
+          });
+          return { ...retry, inputTokens: retry.inputTokens ?? 0, outputTokens: retry.outputTokens ?? 0 };
+        })();
 
   const parsed = extractJson<Record<string, unknown>>(res.text);
   if (!parsed) throw new Error(`Draft ${stateCode}: model returned non-JSON (${res.text.slice(0, 160)})`);
@@ -287,7 +331,7 @@ export async function draftRulePackUpgrade(
       current.rulePackId,
       version,
       JSON.stringify(definition),
-      `AI research pass (${args.trigger}) on ${new Date(now).toISOString().slice(0, 10)} — ${kbSnippets.length} KB excerpts, ${pageExcerpts.length} live pages, ${reports.length} field-report fields. Pending platform review.`,
+      `AI research pass (${args.trigger}, ${backend === "anthropic" ? "Claude" : "Workers AI fallback — add ANTHROPIC_API_KEY for Claude passes"}) on ${new Date(now).toISOString().slice(0, 10)} — ${ctx.kbSnippets.length} KB excerpts, ${ctx.pageExcerpts.length} live pages, ${reports.length} field-report fields. Pending platform review.`,
       now,
       confidence,
       JSON.stringify(citations),
@@ -319,8 +363,9 @@ export async function sweepRulePackDrafts(
   opts: { batchSize?: number } = {},
 ): Promise<{ drafted: string[]; skipped: string[]; failed: string[]; reason?: string }> {
   const batchSize = opts.batchSize ?? 3;
-  if (!isRulePackDraftingAvailable(env)) {
-    return { drafted: [], skipped: [], failed: [], reason: "ANTHROPIC_API_KEY not configured" };
+  const backend = draftingBackend(env);
+  if (!backend) {
+    return { drafted: [], skipped: [], failed: [], reason: "no drafting model: ANTHROPIC_API_KEY unset and no AI binding" };
   }
   const candidates = await env.DB.prepare(
     `SELECT rp.jurisdiction
@@ -363,5 +408,10 @@ export async function sweepRulePackDrafts(
       }
     }
   }
-  return { drafted, skipped, failed };
+  return {
+    drafted,
+    skipped,
+    failed,
+    reason: backend === "workers-ai" ? "Workers AI fallback (ANTHROPIC_API_KEY unset)" : undefined,
+  };
 }

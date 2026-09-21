@@ -2,7 +2,7 @@ import { Form, Link, data, useNavigation } from "react-router";
 import type { Route } from "./+types/super.states";
 import { requirePlatformAdmin } from "~/lib/super.server";
 import { listStatePackOverview } from "~/lib/rules.server";
-import { isRulePackDraftingAvailable, sweepRulePackDrafts } from "~/lib/rule-pack-draft.server";
+import { draftingBackend, isRulePackDraftingAvailable, sweepRulePackDrafts } from "~/lib/rule-pack-draft.server";
 import { cronBeatKey } from "~/lib/cron-specs";
 import { STATE_MATURITY, levelFromMaturityString } from "~/lib/state-coverage";
 import { PageHeader, Card, Button, StatTile } from "~/components/ui";
@@ -52,6 +52,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     states,
     beat,
     draftingAvailable: isRulePackDraftingAvailable(env),
+    backend: draftingBackend(env),
     missingState: missingState?.n ?? 0,
     stats: {
       researched: states.filter((s) => s.publishedDraftedBy === "ai").length,
@@ -77,7 +78,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function SuperStates({ loaderData, actionData }: Route.ComponentProps) {
-  const { states, beat, draftingAvailable, missingState, stats } = loaderData;
+  const { states, beat, draftingAvailable, backend, missingState, stats } = loaderData;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const batch = actionData && "result" in actionData ? actionData.result : null;
@@ -125,7 +126,12 @@ export default function SuperStates({ loaderData, actionData }: Route.ComponentP
             </p>
             <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">
               Hourly, 3 states per run, most-schools-first, until every state has a draft newer
-              than 90 days. {draftingAvailable ? "" : "ANTHROPIC_API_KEY is not configured — drafting is off."}
+              than 90 days.{" "}
+              {backend === "anthropic"
+                ? "Backend: Claude via AI Gateway."
+                : backend === "workers-ai"
+                  ? "Backend: Workers AI fallback (llama 70B) — trimmed context, check citations harder. Add ANTHROPIC_API_KEY (Cloudflare → Workers & Pages → directio → Settings → Variables & Secrets) for Claude passes."
+                  : "No drafting model available — drafting is off."}
             </p>
             {beat?.error && (
               <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">{beat.error}</p>

@@ -98,12 +98,22 @@ test("3. onboarding sets school name + jurisdiction", async ({}) => {
     .getByLabel(/state|jurisdiction/i)
     .first();
   if (await stateField.isVisible().catch(() => false)) {
-    // <select> — choose MN.
+    // <select> — choose MN. The onboarding form's options are bare
+    // two-letter codes ("MN") labeled with the state name; older
+    // builds used "US-MN". Try each shape so the spec survives both.
     const tag = await stateField.evaluate((el) => el.tagName.toLowerCase());
     if (tag === "select") {
-      await stateField.selectOption({ label: /Minnesota|MN/i }).catch(async () => {
-        await stateField.selectOption("US-MN").catch(() => {});
-      });
+      let picked = false;
+      for (const opt of ["MN", { label: "Minnesota" }, "US-MN"] as const) {
+        try {
+          await stateField.selectOption(opt);
+          picked = true;
+          break;
+        } catch {
+          // try the next shape
+        }
+      }
+      expect(picked, "could not select Minnesota in the state <select>").toBe(true);
     } else {
       await stateField.fill("MN");
     }
