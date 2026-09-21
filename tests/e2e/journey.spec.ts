@@ -448,19 +448,9 @@ test("13. settled session: /admin still works after a hard reload", async () => 
   await expect(page.locator("body")).not.toContainText("Oops!");
 });
 
-test("14. sign out clears session", async () => {
-  // The logout endpoint is POST /logout; the sidebar has a Sign out
-  // button. Use the endpoint directly for stability.
-  const baseURL = process.env.BASE_URL ?? "https://godirectio.com";
-  const ctx = page.context();
-  const res = await ctx.request.post(`${baseURL}/logout`, { form: {} });
-  expect(res.status()).toBeLessThan(500);
-  await page.goto("/admin");
-  // Without a session we should land at /login or marketing.
-  expect(page.url()).not.toMatch(/\/admin($|\?|\/[^_])/);
-});
-
-test("15. SEO review page renders the discoverability checklist", async () => {
+test("14. SEO review page renders the discoverability checklist", async () => {
+  // Must run while still signed in — the sign-out step below is last
+  // on purpose.
   await page.goto("/admin/website/seo");
   await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({
     timeout: 15_000,
@@ -473,4 +463,17 @@ test("15. SEO review page renders the discoverability checklist", async () => {
   if (await firstCheck.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await firstCheck.click();
   }
+});
+
+test("15. sign out clears session", async () => {
+  // The logout endpoint is POST /logout; the sidebar has a Sign out
+  // button. Use the endpoint directly for stability. Keep this LAST:
+  // every step after it would run signed out.
+  const baseURL = process.env.BASE_URL ?? "https://godirectio.com";
+  const ctx = page.context();
+  const res = await ctx.request.post(`${baseURL}/logout`, { form: {} });
+  expect(res.status()).toBeLessThan(500);
+  await page.goto("/admin");
+  // Without a session we should land at /login or marketing.
+  expect(page.url()).not.toMatch(/\/admin($|\?|\/[^_])/);
 });

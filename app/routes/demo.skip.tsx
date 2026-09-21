@@ -51,11 +51,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     Boolean(purgeToken) && !purgeToken.startsWith("set-") && e2eHeader === purgeToken;
 
   if (!ciBypass) {
-    // 30/hour per IP: enough for a human clicking around several
-    // roles/states, still a hard ceiling on demo-org creation. Each
-    // org is swept by the demo-sweep cron when it expires.
+    // 60/hour per IP: enough for a human clicking around several
+    // roles/states — and for both e2e projects (they share a runner
+    // egress IP; ~19 demo orgs each plus retries) until the CI bypass
+    // above has its secret. Still a hard ceiling on demo-org creation;
+    // each org is swept by the demo-sweep cron when it expires.
     const rl = await rateLimit(env, `demo-skip:${clientIp(request)}`, {
-      limit: 30,
+      limit: 60,
       windowSeconds: 3600,
     });
     if (!rl.allowed) {
